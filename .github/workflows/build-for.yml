@@ -1,0 +1,21 @@
+on:
+  push:
+    paths:
+      - '_releases/*'
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    - name: pull upstream changes
+      run: |
+        git pull --rebase https://github.com/mullvad/mullvadvpn-app main
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Set up Visual Studio shell
+      uses: egor-tensin/vs-shell@v2
+      with:
+        arch: x64
