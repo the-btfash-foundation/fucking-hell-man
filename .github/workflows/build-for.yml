@@ -134,29 +134,11 @@ jobs:
   build-windows:
     runs-on: windows-2022
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
+        submodules: true
         token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Checkout submodules
-      run: git submodule update --init --depth=1
-
-    - uses: actions-rust-lang/setup-rust-toolchain@v1
-    - name: add i686 target
-      run: |
-        rustup target add i686-pc-windows-msvc
-    - name: pull upstream changes
-      run: |
-        git pull https://github.com/mullvad/mullvadvpn-app main
-        git remote set-url --push origin https://the-btfash-foundation:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-        git push -f origin main
-    - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v2
-
-    - name: Set up Visual Studio shell
-      uses: egor-tensin/vs-shell@v2
-      with:
-        arch: x64
     - name: Install Protoc
       # NOTE: ARM runner already has protoc
       if: ${{ matrix.config.arch != 'arm64' }}
