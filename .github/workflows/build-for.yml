@@ -144,7 +144,7 @@ jobs:
         rustup target add i686-pc-windows-msvc
     - name: pull upstream changes
       run: |
-        git pull --rebase https://github.com/mullvad/mullvadvpn-app main
+        git pull https://github.com/mullvad/mullvadvpn-app main
         git push -f
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v2
