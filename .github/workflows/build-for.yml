@@ -2,9 +2,133 @@ on:
   push:
     paths:
       - '_releases/*'
+  workflow_dispatch:
+    inputs:
+      oses:
+        description: "Space-delimited list of targets to run tests on, e.g. `debian12 ubuntu2004`. \
+          Available images:\n
+          `debian11 debian12 ubuntu2004 ubuntu2204 ubuntu2404 ubuntu2410 fedora39 \
+          fedora40 fedora41 windows10 windows11 macos12 macos13 macos14 macos15`.\n
+          Default images:\n
+          `debian12 ubuntu2004 ubuntu2204 ubuntu2404 ubuntu2410 fedora39 \
+          fedora40 fedora41 windows10 windows11 macos13 macos14 macos15`."
+        default: ''
+        required: false
+        type: string
+      tests:
+        description: "Tests to run (defaults to all if empty)"
+        default: ''
+        required: false
+        type: string
 jobs:
-  build-windows:
+  prepare-matrices:
+    name: Prepare virtual machines
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate matrix for Linux builds
+        shell: bash
+        run: |
+          # A list of VMs to run the tests on. These refer to the names defined
+          # in $XDG_CONFIG_DIR/mullvad-test/config.json on the runner.
+          all='["debian11","debian12","ubuntu2004","ubuntu2204","ubuntu2404","ubuntu2410","fedora39","fedora40","fedora41"]'
+          default='["debian12","ubuntu2004","ubuntu2204","ubuntu2404","ubuntu2410","fedora39","fedora40","fedora41"]'
+          oses="${{ github.event.inputs.oses }}"
+          echo "OSES: $oses"
+          if [[ -z "$oses" || "$oses" == "null" ]]; then
+            selected="$default"
+          else
+            oses=$(printf '%s\n' $oses | jq . -R | jq . -s)
+            selected=$(jq -cn --argjson oses "$oses" --argjson all "$all" '$all - ($all - $oses)')
+          fi
+          echo "Selected targets: $selected"
+          echo "linux_matrix=$selected" >> $GITHUB_ENV
+      - name: Generate matrix for Windows builds
+        shell: bash
+        run: |
+          all='["windows10","windows11"]'
+          default='["windows10","windows11"]'
+          oses="${{ github.event.inputs.oses }}"
+          if [[ -z "$oses" || "$oses" == "null" ]]; then
+            selected="$default"
+          else
+            oses=$(printf '%s\n' $oses | jq . -R | jq . -s)
+            selected=$(jq -cn --argjson oses "$oses" --argjson all "$all" '$all - ($all - $oses)')
+          fi
+          echo "Selected targets: $selected"
+          echo "windows_matrix=$selected" >> $GITHUB_ENV
+      - name: Generate matrix for macOS builds
+        shell: bash
+        run: |
+          all='["macos12","macos13","macos14","macos15"]'
+          default='["macos13","macos14","macos15"]'
+          oses="${{ github.event.inputs.oses }}"
+          if [[ -z "$oses" || "$oses" == "null" ]]; then
+            selected="$default"
+          else
+            oses=$(printf '%s\n' $oses | jq . -R | jq . -s)
+            selected=$(jq -cn --argjson oses "$oses" --argjson all "$all" '$all - ($all - $oses)')
+          fi
+          echo "Selected targets: $selected"
+          echo "macos_matrix=$selected" >> $GITHUB_ENV
+    outputs:
+      linux_matrix: ${{ env.linux_matrix }}
+      windows_matrix: ${{ env.windows_matrix }}
+      macos_matrix: ${{ env.macos_matrix }}
 
+  prepare-linux:
+    name: Prepare Linux build container
+    needs: prepare-matrices
+    if: |
+      needs.prepare-matrices.outputs.linux_matrix != '[]' &&
+      !startsWith(github.ref, 'refs/tags/') && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Use custom container image if specified
+        if: ${{ github.event.inputs.override_container_image != '' }}
+        run: echo "inner_container_image=${{ github.event.inputs.override_container_image }}"
+          >> $GITHUB_ENV
+      - name: Use default container image and resolve digest
+        if: ${{ github.event.inputs.override_container_image == '' }}
+        run: |
+          echo "inner_container_image=$(cat ./building/linux-container-image.txt)" >> $GITHUB_ENV
+    outputs:
+      container_image: ${{ env.inner_container_image }}
+  build-linux:
+    name: Build Linux
+    needs: prepare-linux
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.prepare-linux.outputs.container_image }}
+    continue-on-error: true
+    steps:
+      # Fix for HOME path overridden by GH runners when building in containers, see:
+      # https://github.com/actions/runner/issues/863
+      - name: Fix HOME path
+        run: echo "HOME=/root" >> $GITHUB_ENV
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Checkout submodules
+        run: |
+          git config --global --add safe.directory '*'
+          git submodule update --init --depth=1 dist-assets/binaries
+          git submodule update --init --recursive --depth=1 wireguard-go-rs
+      - name: Build app
+        env:
+          USE_MOLD: false
+        run: ./build.sh
+      - name: Build test executable
+        run: ./desktop/packages/mullvad-vpn/scripts/build-test-executable.sh
+      - uses: actions/upload-artifact@v4
+        if: '!cancelled()'
+        with:
+          name: linux-build
+          path: |
+            ./dist/*.rpm
+            ./dist/*.deb
+            ./dist/app-e2e-*
+  build-windows:
     runs-on: windows-2022
     steps:
     - uses: actions/checkout@v2
@@ -21,6 +145,7 @@ jobs:
     - name: pull upstream changes
       run: |
         git pull --rebase https://github.com/mullvad/mullvadvpn-app main
+        git push -f
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v2
 
@@ -85,3 +210,46 @@ jobs:
       run: ./build-windows-modules.sh
     - name: Build app
       run: ./build.sh
+  build-macos:
+    name: Build macOS
+    needs: prepare-matrices
+    if: |
+      needs.prepare-matrices.outputs.macos_matrix != '[]' &&
+      !startsWith(github.ref, 'refs/tags/') && github.ref != 'refs/heads/main'
+    runs-on: [self-hosted, desktop-test, macOS] # app-test-macos-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Checkout submodules
+        run: |
+          git config --global --add safe.directory '*'
+          git submodule update --init --recursive --depth=1 wireguard-go-rs
+      - name: Install Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.21.3
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: desktop/package.json
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: stable
+          default: true
+      - name: Build app
+        run: ./build.sh
+      - name: Build test executable
+        run: ./desktop/packages/mullvad-vpn/scripts/build-test-executable.sh
+      - uses: actions/upload-artifact@v4
+        if: '!cancelled()'
+        with:
+          name: macos-build
+          path: |
+            ./dist/*.pkg
+            ./dist/app-e2e-*
