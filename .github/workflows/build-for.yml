@@ -4,11 +4,20 @@ on:
       - '_releases/*'
 jobs:
   build-windows:
+
     runs-on: windows-2022
     steps:
     - uses: actions/checkout@v2
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Checkout submodules
+      run: git submodule update --init --depth=1
+
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+    - name: add i686 target
+      run: |
+        rustup target add i686-pc-windows-msvc
     - name: pull upstream changes
       run: |
         git pull --rebase https://github.com/mullvad/mullvadvpn-app main
@@ -19,3 +28,60 @@ jobs:
       uses: egor-tensin/vs-shell@v2
       with:
         arch: x64
+    - name: Install Protoc
+      # NOTE: ARM runner already has protoc
+      if: ${{ matrix.config.arch != 'arm64' }}
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Calculate Windows libraries cache hash
+      id: windows-modules-hash
+      shell: bash
+      run: |
+          hash="$(git grep --recurse-submodules --cached -l '' -- './windows/' \
+            | grep -v '\.exe$\|\.md$' \
+            | xargs sha1sum \
+            | sha1sum \
+            | cut -d" " -f1)"
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Windows libraries
+      uses: actions/cache@v2
+      id: cache-windows-modules
+      with:
+        path: |
+          ./windows/*/bin/${{ matrix.config.arch }}-*/*.dll
+          ./windows/*/bin/${{ matrix.config.arch }}-*/*.lib
+          !./windows/*/bin/${{ matrix.config.arch }}-*/libcommon.lib
+          !./windows/*/bin/${{ matrix.config.arch }}-*/libshared.lib
+          !./windows/*/bin/${{ matrix.config.arch }}-*/libwfp.lib
+        key: windows-modules-${{ steps.windows-modules-hash.outputs.hash }}
+
+      # The x64 toolchain is needed to build talpid-openvpn-plugin
+      # TODO: Remove once fixed
+    - name: Install Rust x64 target
+      if: ${{ matrix.config.arch == 'arm64' }}
+      uses: actions-rs/toolchain@v1.0.6
+      with:
+        toolchain: stable
+        target: x86_64-pc-windows-msvc
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1.0.6
+      with:
+        toolchain: stable
+        target: i686-pc-windows-msvc
+        default: true
+
+    - name: Install msbuild
+      uses: microsoft/setup-msbuild@v1.0.2
+      with:
+        vs-version: 16
+
+    - name: Build Windows modules
+      if: steps.cache-windows-modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: ./build-windows-modules.sh
+    - name: Build app
+      run: ./build.sh

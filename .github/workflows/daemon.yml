@@ -33,6 +33,7 @@ on:
         description: Override container image
         type: string
         required: false
+  workflow_call:
 
 permissions: {}
 
