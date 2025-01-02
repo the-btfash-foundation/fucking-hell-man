@@ -18,10 +18,11 @@ pub mod proxy;
 pub mod wireguard;
 
 /// When "allow local network" is enabled the app will allow traffic to and from these networks.
-pub static ALLOWED_LAN_NETS: LazyLock<[IpNetwork; 7]> = LazyLock::new(|| {
+pub static ALLOWED_LAN_NETS: LazyLock<[IpNetwork; 8]> = LazyLock::new(|| {
     [
         IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 0), 8).unwrap()),
         IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(100, 64, 0, 0), 10).unwrap()),
+        IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(100, 100, 100, 100), 24).unwrap()),
         IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(172, 16, 0, 0), 12).unwrap()),
         IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(192, 168, 0, 0), 16).unwrap()),
         IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(169, 254, 0, 0), 16).unwrap()),
