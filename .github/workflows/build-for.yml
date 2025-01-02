@@ -204,12 +204,12 @@ jobs:
       if: '!cancelled()'
       with:
         name: windows-build
-        path: .\dist\*.exe
+        path: .\dist\*
 
   build-macos:
     name: Build macOS
     needs: prepare-matrices
-    runs-on: [self-hosted, desktop-test, macOS] # app-test-macos-arm
+    runs-on: [self-hosted, desktop-test, macos-latest] # app-test-macos-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
