@@ -23,7 +23,7 @@ PRODUCT_VERSION=$(cargo run -q --bin mullvad-version)
 log_header "Building Mullvad VPN $PRODUCT_VERSION"
 
 # If compiler optimization and artifact compression should be turned on or not
-OPTIMIZE="false"
+OPTIMIZE="true"
 # If the produced binaries should be signed (Windows + macOS only)
 SIGN="false"
 # If the produced app and pkg should be notarized by apple (macOS only)
