@@ -133,7 +133,6 @@ jobs:
         with:
           allowUpdates: true
           artifacts: "./dist/*.rpm,./dist/*.deb,./dist/*.exe,./dist/*.pkg"
-          bodyFile: "CHANGELOG.md"
           tag: ${{steps.get-version.outputs.cur-version}}
 
   build-windows:
@@ -213,7 +212,7 @@ jobs:
       with:
         name: windows-build
         path: .\dist\*
-      
+
     - id: get-version
       shell: bash
       run: echo "cur-version=$(cargo run -q --bin mullvad-version)" >> "$GITHUB_OUTPUT"
@@ -221,7 +220,6 @@ jobs:
       with:
         allowUpdates: true
         artifacts: "./dist/*.rpm,./dist/*.deb,./dist/*.exe,./dist/*.pkg"
-        bodyFile: "CHANGELOG.md"
         tag: ${{steps.get-version.outputs.cur-version}}
 
   build-macos:
@@ -254,6 +252,7 @@ jobs:
           toolchain: stable
           default: true
       - name: Build app
+        shell: bash
         run: ./build.sh
       - uses: actions/upload-artifact@v4
         if: '!cancelled()'
@@ -269,5 +268,4 @@ jobs:
         with:
           allowUpdates: true
           artifacts: "./dist/*.rpm,./dist/*.deb,./dist/*.exe,./dist/*.pkg"
-          bodyFile: "CHANGELOG.md"
           tag: ${{steps.get-version.outputs.cur-version}}
