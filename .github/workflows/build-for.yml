@@ -209,7 +209,7 @@ jobs:
   build-macos:
     name: Build macOS
     needs: prepare-matrices
-    runs-on: [self-hosted, desktop-test, macos-latest] # app-test-macos-arm
+    runs-on: macos-latest # app-test-macos-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
