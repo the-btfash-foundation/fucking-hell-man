@@ -30,7 +30,7 @@ SIGN="false"
 NOTARIZE="false"
 # If a macOS or Windows build should create an installer artifact working on both
 # x86 and arm64
-UNIVERSAL="false"
+UNIVERSAL="true"
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
