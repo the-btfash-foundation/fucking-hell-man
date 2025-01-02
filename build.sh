@@ -56,7 +56,7 @@ done
 # sign the artifacts, AND we are currently building on a release git tag.
 # Everything that is not a release build is called a "dev build" and has "-dev-{commit hash}"
 # appended to the version name.
-IS_RELEASE="true"
+IS_RELEASE="false"
 if [[ "$SIGN" == "true" && "$OPTIMIZE" == "true" && "$PRODUCT_VERSION" != *"-dev-"* ]]; then
     IS_RELEASE="true"
 fi
