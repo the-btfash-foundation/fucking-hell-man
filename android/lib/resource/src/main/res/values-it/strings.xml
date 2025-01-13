@@ -60,8 +60,6 @@
     <string name="blocking_internet_device_offline">Blocco di Internet (dispositivo offline)</string>
     <string name="buy_credit">Acquista credito</string>
     <string name="cancel">Annulla</string>
-    <string name="changelog_title">Changelog</string>
-    <string name="changes_dialog_subtitle">Modifiche in questa versione:</string>
     <string name="cipher">Codice</string>
     <string name="clear_input">Cancella inserimento</string>
     <string name="close">Chiudi</string>
@@ -287,7 +285,6 @@
     <string name="quantum_resistant_info_second_paragaph">L\'operazione viene effettuata eseguendo uno scambio di chiavi aggiuntivo con un algoritmo di sicurezza quantistica e mescolando il risultato nella normale crittografia di WireGuard. Questo passaggio aggiuntivo utilizza circa 500 kiB di traffico ogni volta che viene stabilito un nuovo tunnel.</string>
     <string name="quantum_resistant_title">Tunnel resistente agli attacchi quantistici</string>
     <string name="reconnect">Riconnetti</string>
-    <string name="reconnecting">Riconnessione...</string>
     <string name="redeem">Riscatta</string>
     <string name="redeem_voucher">Riscatta voucher</string>
     <string name="remove_button">Rimuovi</string>

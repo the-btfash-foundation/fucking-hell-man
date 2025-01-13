@@ -118,10 +118,10 @@ Linux distro:
 
   ```bash
   cd "$ANDROID_HOME"  # Or some other directory to place the Android NDK
-  wget https://dl.google.com/android/repository/android-ndk-r27b-linux.zip
-  unzip android-ndk-r27b-linux.zip
+  wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+  unzip android-ndk-r27c-linux.zip
 
-  cd android-ndk-r27b
+  cd android-ndk-r27c
   export ANDROID_NDK_HOME="$PWD"
   ```
 
@@ -162,7 +162,7 @@ Run the following command to download wireguard-go-rs submodule: `git submodule 
 ### Debug build
 Run the following command to build a debug build:
 ```bash
-../build-apk.sh --dev-build
+../android/build.sh --dev-build
 ```
 
 ### Release build
@@ -170,7 +170,7 @@ Run the following command to build a debug build:
 2. Move, copy or symlink the directory from step 1 to [./credentials/](./credentials/) (`<repository>/android/credentials/`).
 3. Run the following command to build:
    ```bash
-   ../build-apk.sh --app-bundle
+   ../android/build.sh --app-bundle
    ```
 
 ## Configure signing key
@@ -218,13 +218,6 @@ rm ./gradle/verification-metadata.xml
 
 ## Gradle properties
 Some gradle properties can be set to simplify development. These are listed below.
-
-### Always show changelog
-For development purposes, `ALWAYS_SHOW_CHANGELOG` can be set in `local.properties` to always show
-the changelog dialog on each app start. For example:
-```
-ALWAYS_SHOW_CHANGELOG=true
-```
 
 ### Override version code and version name
 To avoid or override the rust based version generation, the `OVERRIDE_VERSION_CODE` and

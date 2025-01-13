@@ -7,13 +7,14 @@ import { AccessMethodSetting } from '../../shared/daemon-rpc-types';
 import { messages } from '../../shared/gettext';
 import { useAppContext } from '../context';
 import { useApiAccessMethodTest } from '../lib/api-access-methods';
-import { Flex } from '../lib/components';
+import { Container, Flex } from '../lib/components';
 import { Spacings } from '../lib/foundations';
 import { useHistory } from '../lib/history';
 import { generateRoutePath } from '../lib/routeHelpers';
 import { RoutePath } from '../lib/routes';
 import { useBoolean } from '../lib/utility-hooks';
 import { useSelector } from '../redux/store';
+import { AppNavigationHeader } from './';
 import * as Cell from './cell';
 import {
   ContextMenu,
@@ -24,23 +25,11 @@ import {
 import ImageView from './ImageView';
 import InfoButton from './InfoButton';
 import { BackAction } from './KeyboardNavigation';
-import {
-  Layout,
-  SettingsContainer,
-  SettingsContent,
-  SettingsNavigationScrollbars,
-  SettingsStack,
-} from './Layout';
+import { Layout, SettingsContainer, SettingsContent, SettingsNavigationScrollbars } from './Layout';
 import { ModalAlert, ModalAlertType } from './Modal';
-import {
-  NavigationBar,
-  NavigationContainer,
-  NavigationInfoButton,
-  NavigationItems,
-  TitleBarItem,
-} from './NavigationBar';
+import { NavigationContainer } from './NavigationContainer';
 import SettingsHeader, { HeaderSubTitle, HeaderTitle } from './SettingsHeader';
-import { SmallButton, SmallButtonColor, SmallButtonGroup } from './SmallButton';
+import { SmallButton, SmallButtonColor } from './SmallButton';
 
 const StyledContextMenuButton = styled(Cell.Icon)({
   alignItems: 'center',
@@ -48,7 +37,7 @@ const StyledContextMenuButton = styled(Cell.Icon)({
   marginRight: Spacings.spacing3,
 });
 
-const StyledMethodInfoButton = styled(InfoButton)({
+const StyledMethodInfoButton = styled(InfoButton).attrs({ size: 'small' })({
   marginRight: Spacings.spacing4,
 });
 
@@ -88,32 +77,28 @@ export default function ApiAccessMethods() {
       <Layout>
         <SettingsContainer>
           <NavigationContainer>
-            <NavigationBar>
-              <NavigationItems>
-                <TitleBarItem>
-                  {
-                    // TRANSLATORS: Title label in navigation bar
-                    messages.pgettext('navigation-bar', 'API access')
-                  }
-                </TitleBarItem>
-                <NavigationInfoButton
-                  message={[
-                    messages.pgettext(
-                      'api-access-methods-view',
-                      'The app needs to communicate with a Mullvad API server to log you in, fetch server lists, and other critical operations.',
-                    ),
-                    messages.pgettext(
-                      'api-access-methods-view',
-                      'On some networks, where various types of censorship are being used, the API servers might not be directly reachable.',
-                    ),
-                    messages.pgettext(
-                      'api-access-methods-view',
-                      'This feature allows you to circumvent that censorship by adding custom ways to access the API via proxies and similar methods.',
-                    ),
-                  ]}
-                />
-              </NavigationItems>
-            </NavigationBar>
+            <AppNavigationHeader
+              title={
+                // TRANSLATORS: Title label in navigation bar
+                messages.pgettext('navigation-bar', 'API access')
+              }>
+              <AppNavigationHeader.InfoButton
+                message={[
+                  messages.pgettext(
+                    'api-access-methods-view',
+                    'The app needs to communicate with a Mullvad API server to log you in, fetch server lists, and other critical operations.',
+                  ),
+                  messages.pgettext(
+                    'api-access-methods-view',
+                    'On some networks, where various types of censorship are being used, the API servers might not be directly reachable.',
+                  ),
+                  messages.pgettext(
+                    'api-access-methods-view',
+                    'This feature allows you to circumvent that censorship by adding custom ways to access the API via proxies and similar methods.',
+                  ),
+                ]}
+              />
+            </AppNavigationHeader>
 
             <SettingsNavigationScrollbars fillContainer>
               <SettingsContent>
@@ -127,7 +112,7 @@ export default function ApiAccessMethods() {
                   </HeaderSubTitle>
                 </SettingsHeader>
 
-                <SettingsStack>
+                <Flex $flexDirection="column" $gap={Spacings.spacing6}>
                   <Cell.Group $noMarginBottom>
                     <ApiAccessMethod
                       method={methods.direct}
@@ -150,11 +135,10 @@ export default function ApiAccessMethods() {
                       />
                     ))}
                   </Cell.Group>
-
-                  <SmallButtonGroup $noMarginTop>
+                  <Container size="4" $flex={1} $justifyContent="flex-end">
                     <SmallButton onClick={navigateToNew}>{messages.gettext('Add')}</SmallButton>
-                  </SmallButtonGroup>
-                </SettingsStack>
+                  </Container>
+                </Flex>
               </SettingsContent>
             </SettingsNavigationScrollbars>
           </NavigationContainer>

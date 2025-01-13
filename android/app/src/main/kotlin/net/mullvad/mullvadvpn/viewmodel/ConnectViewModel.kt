@@ -8,7 +8,6 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.map
@@ -27,6 +26,7 @@ import net.mullvad.mullvadvpn.lib.model.WebsiteAuthToken
 import net.mullvad.mullvadvpn.lib.shared.AccountRepository
 import net.mullvad.mullvadvpn.lib.shared.ConnectionProxy
 import net.mullvad.mullvadvpn.lib.shared.DeviceRepository
+import net.mullvad.mullvadvpn.repository.ChangelogRepository
 import net.mullvad.mullvadvpn.repository.InAppNotificationController
 import net.mullvad.mullvadvpn.repository.NewDeviceRepository
 import net.mullvad.mullvadvpn.usecase.LastKnownLocationUseCase
@@ -36,11 +36,13 @@ import net.mullvad.mullvadvpn.usecase.SelectedLocationTitleUseCase
 import net.mullvad.mullvadvpn.util.combine
 import net.mullvad.mullvadvpn.util.daysFromNow
 import net.mullvad.mullvadvpn.util.isSuccess
+import net.mullvad.mullvadvpn.util.withPrev
 
 @Suppress("LongParameterList")
 class ConnectViewModel(
     private val accountRepository: AccountRepository,
     private val deviceRepository: DeviceRepository,
+    private val changelogRepository: ChangelogRepository,
     inAppNotificationController: InAppNotificationController,
     private val newDeviceRepository: NewDeviceRepository,
     selectedLocationTitleUseCase: SelectedLocationTitleUseCase,
@@ -62,14 +64,14 @@ class ConnectViewModel(
         combine(
                 selectedLocationTitleUseCase(),
                 inAppNotificationController.notifications,
-                connectionProxy.tunnelState,
+                connectionProxy.tunnelState.withPrev(),
                 lastKnownLocationUseCase.lastKnownDisconnectedLocation,
                 accountRepository.accountData,
                 deviceRepository.deviceState.map { it?.displayName() },
             ) {
                 selectedRelayItemTitle,
                 notifications,
-                tunnelState,
+                (tunnelState, prevTunnelState),
                 lastKnownDisconnectedLocation,
                 accountData,
                 deviceName ->
@@ -80,14 +82,22 @@ class ConnectViewModel(
                                 tunnelState.location ?: lastKnownDisconnectedLocation
                             is TunnelState.Connecting -> tunnelState.location
                             is TunnelState.Connected -> tunnelState.location
-                            is TunnelState.Disconnecting -> lastKnownDisconnectedLocation
+                            is TunnelState.Disconnecting ->
+                                when (tunnelState.actionAfterDisconnect) {
+                                    ActionAfterDisconnect.Nothing -> lastKnownDisconnectedLocation
+                                    ActionAfterDisconnect.Block -> lastKnownDisconnectedLocation
+                                    // Keep the previous connected location when reconnecting, after
+                                    // this state we will reach Connecting with the new relay
+                                    // location
+                                    ActionAfterDisconnect.Reconnect -> prevTunnelState?.location()
+                                }
                             is TunnelState.Error -> lastKnownDisconnectedLocation
                         },
                     selectedRelayItemTitle = selectedRelayItemTitle,
                     tunnelState = tunnelState,
                     showLocation =
                         when (tunnelState) {
-                            is TunnelState.Disconnected -> true
+                            is TunnelState.Disconnected -> tunnelState.location != null
                             is TunnelState.Disconnecting -> {
                                 when (tunnelState.actionAfterDisconnect) {
                                     ActionAfterDisconnect.Nothing -> false
@@ -105,7 +115,6 @@ class ConnectViewModel(
                     isPlayBuild = isPlayBuild,
                 )
             }
-            .debounce(UI_STATE_DEBOUNCE_DURATION_MILLIS)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), ConnectUiState.INITIAL)
 
     init {
@@ -184,6 +193,9 @@ class ConnectViewModel(
     fun dismissNewDeviceNotification() {
         newDeviceRepository.clearNewDeviceCreatedNotification()
     }
+
+    fun dismissNewChangelogNotification() =
+        viewModelScope.launch { changelogRepository.setDismissNewChangelogNotification() }
 
     private fun outOfTimeEffect() =
         outOfTimeUseCase.isOutOfTime.filter { it == true }.map { UiSideEffect.OutOfTime }

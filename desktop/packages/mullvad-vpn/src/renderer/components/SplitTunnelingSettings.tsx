@@ -10,22 +10,24 @@ import {
 } from '../../shared/application-types';
 import { messages } from '../../shared/gettext';
 import { useAppContext } from '../context';
-import { Flex, FootnoteMini } from '../lib/components';
+import { Button, Container, Flex, FootnoteMini } from '../lib/components';
 import { Colors, Spacings } from '../lib/foundations';
 import { useHistory } from '../lib/history';
 import { formatHtml } from '../lib/html-formatter';
 import { useEffectEvent, useStyledRef } from '../lib/utility-hooks';
 import { IReduxState } from '../redux/store';
+import { AppNavigationHeader } from './';
 import Accordion from './Accordion';
 import * as AppButton from './AppButton';
 import * as Cell from './cell';
+import { measurements } from './common-styles';
 import { CustomScrollbarsRef } from './CustomScrollbars';
 import ImageView from './ImageView';
 import { BackAction } from './KeyboardNavigation';
 import { Layout, SettingsContainer } from './Layout';
 import List from './List';
 import { ModalAlert, ModalAlertType } from './Modal';
-import { NavigationBar, NavigationContainer, NavigationItems, TitleBarItem } from './NavigationBar';
+import { NavigationContainer } from './NavigationContainer';
 import SettingsHeader, { HeaderSubTitle, HeaderTitle } from './SettingsHeader';
 import {
   StyledActionIcon,
@@ -59,11 +61,7 @@ export default function SplitTunneling() {
         <Layout>
           <SettingsContainer>
             <NavigationContainer>
-              <NavigationBar>
-                <NavigationItems>
-                  <TitleBarItem>{strings.splitTunneling}</TitleBarItem>
-                </NavigationItems>
-              </NavigationBar>
+              <AppNavigationHeader title={strings.splitTunneling} />
 
               <StyledNavigationScrollbars ref={scrollbarsRef}>
                 <PlatformSpecificSplitTunnelingSettings
@@ -495,42 +493,54 @@ export function SplitTunnelingSettings(props: IPlatformSplitTunnelingSettingsPro
         <StyledSearchBar searchTerm={searchTerm} onSearch={setSearchTerm} />
       )}
 
-      <Accordion expanded={showSplitSection}>
-        <Cell.Section sectionTitle={excludedTitle}>
-          <ApplicationList
-            data-testid="split-applications"
-            applications={filteredSplitApplications}
-            rowRenderer={excludedRowRenderer}
-          />
-        </Cell.Section>
-      </Accordion>
+      <Flex
+        $flexDirection="column"
+        $gap={Spacings.spacing6}
+        $margin={{ bottom: measurements.verticalViewMargin }}>
+        <Flex $flexDirection="column" $gap={Spacings.spacing5}>
+          <Accordion expanded={showSplitSection}>
+            <Cell.Section sectionTitle={excludedTitle}>
+              <ApplicationList
+                data-testid="split-applications"
+                applications={filteredSplitApplications}
+                rowRenderer={excludedRowRenderer}
+              />
+            </Cell.Section>
+          </Accordion>
 
-      <Accordion expanded={showNonSplitSection}>
-        <Cell.Section sectionTitle={allTitle}>
-          <ApplicationList
-            data-testid="non-split-applications"
-            applications={filteredNonSplitApplications}
-            rowRenderer={includedRowRenderer}
-          />
-        </Cell.Section>
-      </Accordion>
+          <Accordion expanded={showNonSplitSection}>
+            <Cell.Section sectionTitle={allTitle}>
+              <ApplicationList
+                data-testid="non-split-applications"
+                applications={filteredNonSplitApplications}
+                rowRenderer={includedRowRenderer}
+              />
+            </Cell.Section>
+          </Accordion>
+        </Flex>
 
-      {canEditSplitTunneling && searchTerm !== '' && !showSplitSection && !showNonSplitSection && (
-        <StyledNoResult>
-          <StyledNoResultText>
-            {formatHtml(
-              sprintf(messages.gettext('No result for <b>%(searchTerm)s</b>.'), { searchTerm }),
-            )}
-          </StyledNoResultText>
-          <StyledNoResultText>{messages.gettext('Try a different search.')}</StyledNoResultText>
-        </StyledNoResult>
-      )}
+        {canEditSplitTunneling &&
+          searchTerm !== '' &&
+          !showSplitSection &&
+          !showNonSplitSection && (
+            <StyledNoResult>
+              <StyledNoResultText>
+                {formatHtml(
+                  sprintf(messages.gettext('No result for <b>%(searchTerm)s</b>.'), { searchTerm }),
+                )}
+              </StyledNoResultText>
+              <StyledNoResultText>{messages.gettext('Try a different search.')}</StyledNoResultText>
+            </StyledNoResult>
+          )}
 
-      {canEditSplitTunneling && (
-        <StyledBrowseButton onClick={addWithFilePicker}>
-          {messages.pgettext('split-tunneling-view', 'Find another app')}
-        </StyledBrowseButton>
-      )}
+        {canEditSplitTunneling && (
+          <Container size="3">
+            <Button onClick={addWithFilePicker}>
+              {messages.pgettext('split-tunneling-view', 'Find another app')}
+            </Button>
+          </Container>
+        )}
+      </Flex>
     </>
   );
 }
@@ -590,10 +600,7 @@ function ApplicationList<T extends IApplication>(props: IApplicationListProps<T>
     );
   } else {
     return (
-      <Flex
-        $flexDirection="column"
-        $margin={{ bottom: Spacings.spacing5 }}
-        data-testid={props['data-testid']}>
+      <Flex $flexDirection="column" data-testid={props['data-testid']}>
         <List
           data-testid={props['data-testid']}
           items={props.applications.sort((a, b) => a.name.localeCompare(b.name))}

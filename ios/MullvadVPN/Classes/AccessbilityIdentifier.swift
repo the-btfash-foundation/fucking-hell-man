@@ -40,7 +40,7 @@ public enum AccessibilityIdentifier: Equatable {
     case purchaseButton
     case redeemVoucherButton
     case restorePurchasesButton
-    case secureConnectionButton
+    case connectButton
     case selectLocationButton
     case closeSelectLocationButton
     case settingsButton
@@ -132,7 +132,7 @@ public enum AccessibilityIdentifier: Equatable {
     case selectLocationTableView
     case settingsTableView
     case vpnSettingsTableView
-    case tunnelControlView
+    case connectionView
     case problemReportView
     case problemReportSubmittedView
     case revokedDeviceView
@@ -156,6 +156,7 @@ public enum AccessibilityIdentifier: Equatable {
     case logOutSpinnerAlertView
     case connectionPanelInAddressRow
     case connectionPanelOutAddressRow
+    case connectionPanelOutIpv6AddressRow
     case customSwitch
     case customWireGuardPortTextField
     case dnsContentBlockersHeaderView
@@ -181,6 +182,8 @@ public enum AccessibilityIdentifier: Equatable {
     case wireGuardObfuscationOff
     case wireGuardObfuscationUdpOverTcp
     case wireGuardObfuscationShadowsocks
+    case wireGuardObfuscationUdpOverTcpPort
+    case wireGuardObfuscationShadowsocksPort
     case wireGuardPort(UInt16?)
     case udpOverTcpObfuscationSettings
 
@@ -209,6 +212,10 @@ public enum AccessibilityIdentifier: Equatable {
 
     // Multihop
     case multihopSwitch
+
+    // WireGuard obfuscation settings
+    case wireGuardObfuscationUdpOverTcpTable
+    case wireGuardObfuscationShadowsocksTable
 
     // Error
     case unknown

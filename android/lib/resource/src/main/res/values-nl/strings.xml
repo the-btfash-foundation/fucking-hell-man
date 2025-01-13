@@ -60,8 +60,6 @@
     <string name="blocking_internet_device_offline">Internet wordt geblokkeerd (apparaat offline)</string>
     <string name="buy_credit">Krediet kopen</string>
     <string name="cancel">Annuleren</string>
-    <string name="changelog_title">Changelog</string>
-    <string name="changes_dialog_subtitle">Wijzigingen in deze versie:</string>
     <string name="cipher">Versleuteling</string>
     <string name="clear_input">Invoer wissen</string>
     <string name="close">Sluiten</string>
@@ -287,7 +285,6 @@
     <string name="quantum_resistant_info_second_paragaph">Het doet dit door een extra sleuteluitwisseling uit te voeren met een kwantumveilig algoritme en het resultaat te mengen met de reguliere versleuteling van WireGuard. Deze extra stap gebruikt ongeveer 500 kiB aan verkeer elke keer dat een nieuwe tunnel wordt opgezet.</string>
     <string name="quantum_resistant_title">Kwantumbestendige tunnel</string>
     <string name="reconnect">Opnieuw verbinden</string>
-    <string name="reconnecting">Opnieuw verbinden...</string>
     <string name="redeem">Inwisselen</string>
     <string name="redeem_voucher">Voucher inwisselen</string>
     <string name="remove_button">Verwijderen</string>

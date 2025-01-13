@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -54,6 +57,7 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.NavGraphs
 import com.ramcosta.composedestinations.generated.destinations.AccountDestination
+import com.ramcosta.composedestinations.generated.destinations.ChangelogDestination
 import com.ramcosta.composedestinations.generated.destinations.DeviceRevokedDestination
 import com.ramcosta.composedestinations.generated.destinations.OutOfTimeDestination
 import com.ramcosta.composedestinations.generated.destinations.SelectLocationDestination
@@ -139,10 +143,13 @@ private fun PreviewAccountScreen(
             {},
             {},
             {},
+            {},
+            {},
         )
     }
 }
 
+@Suppress("LongMethod")
 @Destination<RootGraph>(style = HomeTransition::class)
 @Composable
 fun Connect(
@@ -234,6 +241,9 @@ fun Connect(
         onSwitchLocationClick = dropUnlessResumed { navigator.navigate(SelectLocationDestination) },
         onOpenAppListing = connectViewModel::openAppListing,
         onManageAccountClick = connectViewModel::onManageAccountClick,
+        onChangelogClick =
+            dropUnlessResumed { navigator.navigate(ChangelogDestination(ChangelogNavArgs(true))) },
+        onDismissChangelogClick = connectViewModel::dismissNewChangelogNotification,
         onSettingsClick = dropUnlessResumed { navigator.navigate(SettingsDestination) },
         onAccountClick = dropUnlessResumed { navigator.navigate(AccountDestination) },
         onDismissNewDeviceClick = connectViewModel::dismissNewDeviceNotification,
@@ -251,6 +261,8 @@ fun ConnectScreen(
     onSwitchLocationClick: () -> Unit,
     onOpenAppListing: () -> Unit,
     onManageAccountClick: () -> Unit,
+    onChangelogClick: () -> Unit,
+    onDismissChangelogClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onAccountClick: () -> Unit,
     onDismissNewDeviceClick: () -> Unit,
@@ -271,7 +283,14 @@ fun ConnectScreen(
             if (screenHeight < SCREEN_HEIGHT_THRESHOLD) SHORT_SCREEN_INDICATOR_BIAS
             else TALL_SCREEN_INDICATOR_BIAS
 
-        Box(Modifier.padding(it).fillMaxSize()) {
+        Box(
+            Modifier.padding(
+                    top = it.calculateTopPadding(),
+                    start = it.calculateStartPadding(LocalLayoutDirection.current),
+                    end = it.calculateEndPadding(LocalLayoutDirection.current),
+                )
+                .fillMaxSize()
+        ) {
             MullvadMap(state, indicatorPercentOffset)
 
             MullvadCircularProgressIndicatorLarge(
@@ -293,22 +312,26 @@ fun ConnectScreen(
                         .testTag(CIRCULAR_PROGRESS_INDICATOR),
             )
 
-            NotificationBanner(
-                notification = state.inAppNotification,
-                isPlayBuild = state.isPlayBuild,
-                openAppListing = onOpenAppListing,
-                onClickShowAccount = onManageAccountClick,
-                onClickDismissNewDevice = onDismissNewDeviceClick,
-            )
-            ConnectionCard(
-                state = state,
-                modifier = Modifier.align(Alignment.BottomCenter),
-                onSwitchLocationClick,
-                onDisconnectClick,
-                onReconnectClick,
-                onCancelClick,
-                onConnectClick,
-            )
+            Box(modifier = Modifier.fillMaxSize().padding(bottom = it.calculateBottomPadding())) {
+                NotificationBanner(
+                    notification = state.inAppNotification,
+                    isPlayBuild = state.isPlayBuild,
+                    openAppListing = onOpenAppListing,
+                    onClickShowAccount = onManageAccountClick,
+                    onClickShowChangelog = onChangelogClick,
+                    onClickDismissChangelog = onDismissChangelogClick,
+                    onClickDismissNewDevice = onDismissNewDeviceClick,
+                )
+                ConnectionCard(
+                    state = state,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    onSwitchLocationClick = onSwitchLocationClick,
+                    onDisconnectClick = onDisconnectClick,
+                    onReconnectClick = onReconnectClick,
+                    onCancelClick = onCancelClick,
+                    onConnectClick = onConnectClick,
+                )
+            }
         }
     }
 }
@@ -365,18 +388,9 @@ private fun ConnectionCard(
         Shapes.large,
         colors = CardDefaults.cardColors(containerColor = containerColor.value),
     ) {
-        Column(
-            modifier =
-                Modifier.padding(
-                    top = Dimens.mediumPadding,
-                    start = Dimens.mediumPadding,
-                    end = Dimens.mediumPadding,
-                    bottom = Dimens.smallPadding,
-                )
-        ) {
+        Column(modifier = Modifier.padding(all = Dimens.mediumPadding)) {
             ConnectionCardHeader(state, state.location, expanded) { expanded = !expanded }
 
-            Logger.d("Tunnelstate: ${state.tunnelState}, expanded: $expanded")
             AnimatedContent(
                 (state.tunnelState as? TunnelState.Connected)?.featureIndicators to expanded,
                 modifier = Modifier.weight(1f, fill = false),

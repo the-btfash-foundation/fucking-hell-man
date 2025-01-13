@@ -30,6 +30,7 @@ import net.mullvad.mullvadvpn.lib.model.WebsiteAuthToken
 import net.mullvad.mullvadvpn.lib.shared.AccountRepository
 import net.mullvad.mullvadvpn.lib.shared.ConnectionProxy
 import net.mullvad.mullvadvpn.lib.shared.DeviceRepository
+import net.mullvad.mullvadvpn.repository.ChangelogRepository
 import net.mullvad.mullvadvpn.repository.InAppNotification
 import net.mullvad.mullvadvpn.repository.InAppNotificationController
 import net.mullvad.mullvadvpn.ui.serviceconnection.ServiceConnectionManager
@@ -64,6 +65,9 @@ class ConnectViewModelTest {
 
     // Device Repository
     private val mockDeviceRepository: DeviceRepository = mockk()
+
+    // Changelog Repository
+    private val mockChangelogRepository: ChangelogRepository = mockk()
 
     // In App Notifications
     private val mockInAppNotificationController: InAppNotificationController = mockk()
@@ -113,6 +117,7 @@ class ConnectViewModelTest {
             ConnectViewModel(
                 accountRepository = mockAccountRepository,
                 deviceRepository = mockDeviceRepository,
+                changelogRepository = mockChangelogRepository,
                 inAppNotificationController = mockInAppNotificationController,
                 newDeviceRepository = mockk(),
                 outOfTimeUseCase = outOfTimeUseCase,
@@ -171,12 +176,11 @@ class ConnectViewModelTest {
     fun `given RelayListUseCase returns new selectedRelayItem uiState should emit new selectedRelayItem`() =
         runTest {
             val selectedRelayItemTitle = "Item"
-            selectedRelayItemFlow.value = selectedRelayItemTitle
-
             viewModel.uiState.test {
                 assertEquals(ConnectUiState.INITIAL, awaitItem())
-                val result = awaitItem()
-                assertEquals(selectedRelayItemTitle, result.selectedRelayItemTitle)
+
+                selectedRelayItemFlow.value = selectedRelayItemTitle
+                assertEquals(selectedRelayItemTitle, awaitItem().selectedRelayItemTitle)
             }
         }
 
@@ -196,7 +200,6 @@ class ConnectViewModelTest {
 
         // Act, Assert
         viewModel.uiState.test {
-            assertEquals(ConnectUiState.INITIAL, awaitItem())
             tunnelState.emit(TunnelState.Disconnected(null))
 
             // Start of with no location
@@ -215,12 +218,7 @@ class ConnectViewModelTest {
             val locationTestItem = null
 
             // Act, Assert
-            viewModel.uiState.test {
-                assertEquals(ConnectUiState.INITIAL, awaitItem())
-                expectNoEvents()
-                val result = awaitItem()
-                assertEquals(locationTestItem, result.location)
-            }
+            viewModel.uiState.test { assertEquals(locationTestItem, awaitItem().location) }
         }
 
     @Test
@@ -278,15 +276,12 @@ class ConnectViewModelTest {
             val mockErrorState: ErrorState = mockk()
             val expectedConnectNotificationState =
                 InAppNotification.TunnelStateError(mockErrorState)
-            val tunnelStateError = TunnelState.Error(mockErrorState)
-            notifications.value = listOf(expectedConnectNotificationState)
 
             // Act, Assert
             viewModel.uiState.test {
                 assertEquals(ConnectUiState.INITIAL, awaitItem())
-                tunnelState.emit(tunnelStateError)
-                val result = awaitItem()
-                assertEquals(expectedConnectNotificationState, result.inAppNotification)
+                notifications.value = listOf(expectedConnectNotificationState)
+                assertEquals(expectedConnectNotificationState, awaitItem().inAppNotification)
             }
         }
 
@@ -315,7 +310,6 @@ class ConnectViewModelTest {
         viewModel.uiState.test {
             awaitItem()
             outOfTimeViewFlow.value = true
-            awaitItem()
         }
 
         // Assert
@@ -328,12 +322,13 @@ class ConnectViewModelTest {
             // Arrange
             val tunnel = TunnelState.Error(mockk(relaxed = true))
             val lastKnownLocation: GeoIpLocation = mockk(relaxed = true)
-            lastKnownLocationFlow.emit(lastKnownLocation)
-            tunnelState.emit(tunnel)
 
             // Act, Assert
             viewModel.uiState.test {
                 assertEquals(ConnectUiState.INITIAL, awaitItem())
+                lastKnownLocationFlow.emit(lastKnownLocation)
+                tunnelState.emit(tunnel)
+                awaitItem()
                 val result = awaitItem()
                 assertEquals(lastKnownLocation, result.location)
             }

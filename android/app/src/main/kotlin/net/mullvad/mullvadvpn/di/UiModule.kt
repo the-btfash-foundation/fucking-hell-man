@@ -33,6 +33,7 @@ import net.mullvad.mullvadvpn.repository.UserPreferencesMigration
 import net.mullvad.mullvadvpn.repository.UserPreferencesRepository
 import net.mullvad.mullvadvpn.repository.UserPreferencesSerializer
 import net.mullvad.mullvadvpn.repository.WireguardConstraintsRepository
+import net.mullvad.mullvadvpn.service.DaemonConfig
 import net.mullvad.mullvadvpn.ui.MainActivity
 import net.mullvad.mullvadvpn.ui.serviceconnection.AppVersionInfoRepository
 import net.mullvad.mullvadvpn.ui.serviceconnection.ServiceConnectionManager
@@ -42,6 +43,7 @@ import net.mullvad.mullvadvpn.usecase.FilterChipUseCase
 import net.mullvad.mullvadvpn.usecase.FilteredRelayListUseCase
 import net.mullvad.mullvadvpn.usecase.InternetAvailableUseCase
 import net.mullvad.mullvadvpn.usecase.LastKnownLocationUseCase
+import net.mullvad.mullvadvpn.usecase.NewChangelogNotificationUseCase
 import net.mullvad.mullvadvpn.usecase.NewDeviceNotificationUseCase
 import net.mullvad.mullvadvpn.usecase.OutOfTimeUseCase
 import net.mullvad.mullvadvpn.usecase.PaymentUseCase
@@ -126,10 +128,10 @@ val uiModule = module {
     single { androidContext().assets }
     single { androidContext().contentResolver }
 
-    single { ChangelogRepository(get()) }
-    single { UserPreferencesRepository(get()) }
+    single { ChangelogRepository(get(), get(), get()) }
+    single { UserPreferencesRepository(get(), get()) }
     single { SettingsRepository(get()) }
-    single { MullvadProblemReport(get()) }
+    single { MullvadProblemReport(get(), get<DaemonConfig>().apiEndpointOverride, get()) }
     single { RelayOverridesRepository(get()) }
     single { CustomListsRepository(get()) }
     single { RelayListRepository(get(), get()) }
@@ -151,6 +153,7 @@ val uiModule = module {
     single { TunnelStateNotificationUseCase(get()) }
     single { VersionNotificationUseCase(get(), BuildConfig.ENABLE_IN_APP_VERSION_NOTIFICATIONS) }
     single { NewDeviceNotificationUseCase(get(), get()) }
+    single { NewChangelogNotificationUseCase(get()) }
     single { OutOfTimeUseCase(get(), get(), MainScope()) }
     single { InternetAvailableUseCase(get()) }
     single { SystemVpnSettingsAvailableUseCase(androidContext()) }
@@ -165,7 +168,7 @@ val uiModule = module {
     single { SelectedLocationUseCase(get(), get()) }
     single { FilterChipUseCase(get(), get(), get(), get()) }
 
-    single { InAppNotificationController(get(), get(), get(), get(), MainScope()) }
+    single { InAppNotificationController(get(), get(), get(), get(), get(), MainScope()) }
 
     single<IChangelogDataProvider> { ChangelogDataProvider(get()) }
 
@@ -187,12 +190,13 @@ val uiModule = module {
 
     // View models
     viewModel { AccountViewModel(get(), get(), get(), IS_PLAY_BUILD) }
-    viewModel { ChangelogViewModel(get(), get()) }
+    viewModel { ChangelogViewModel(get(), get(), get()) }
     viewModel {
         AppInfoViewModel(get(), get(), get(), IS_PLAY_BUILD, get(named(SELF_PACKAGE_NAME)))
     }
     viewModel {
         ConnectViewModel(
+            get(),
             get(),
             get(),
             get(),

@@ -60,8 +60,6 @@
     <string name="blocking_internet_device_offline">正在阻止网络（设备离线）</string>
     <string name="buy_credit">购买额度</string>
     <string name="cancel">取消</string>
-    <string name="changelog_title">变更日志</string>
-    <string name="changes_dialog_subtitle">此版本中的变更：</string>
     <string name="cipher">加密方式</string>
     <string name="clear_input">清除输入</string>
     <string name="close">关闭</string>
@@ -287,7 +285,6 @@
     <string name="quantum_resistant_info_second_paragaph">实现方法是使用量子安全算法执行额外的密钥交换，并将结果混合到 WireGuard 的常规加密中。每次建立新隧道时，这一额外步骤都会使用约 500 kiB 的流量。</string>
     <string name="quantum_resistant_title">抗量子隧道</string>
     <string name="reconnect">重新连接</string>
-    <string name="reconnecting">正在重新连接…</string>
     <string name="redeem">兑换</string>
     <string name="redeem_voucher">兑换优惠券</string>
     <string name="remove_button">移除</string>

@@ -30,7 +30,16 @@ Line wrap the file at 100 chars.                                              Th
 - (Linux and macOS only) Update to DAITA v2. The main difference is that many different machines are
   provided by relays instead of a bundled list. The bundled `maybenot_machines` file was removed.
 - Update Electron from 30.0.4 to 33.2.1.
+- Move changelog from a dialog to a separate view.
+- Reduce the setup time of PQ tunnels by pre-computing McEliece keys.
 
+
+## [2025.2] - 2025-01-08
+### Fixed
+- Fix crash when Wireguard tunnel setup timed out.
+
+
+## [2025.1] - 2025-01-02
 ### Fixed
 #### macOS
 - Fix GUI getting stuck when opening the split tunneling view.
