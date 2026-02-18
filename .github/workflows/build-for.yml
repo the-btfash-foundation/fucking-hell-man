@@ -102,7 +102,7 @@ jobs:
 
   build-linux-app:
     name: Build Linux App
-    needs: prepare-linux
+    needs: [prepare-linux, get-app-version]
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.prepare-linux.outputs.container_image }}
@@ -142,6 +142,13 @@ jobs:
             ./dist/*.rpm
             ./dist/*.deb
             ./dist/app-e2e-*
+      - name: Release app
+        uses: ncipollo/release-action@v1
+        if: '!cancelled()'
+        with:
+          allowUpdates: true
+          artifacts: "./dist/*.rpm,./dist/*.deb,./dist/*.exe,./dist/*.pkg"
+          tag: ${{needs.get-app-version.outputs.mullvad-version}}
 
   get-app-version:
     name: Get app version
@@ -171,9 +178,10 @@ jobs:
           echo "mullvad-version=$version" >> "$GITHUB_OUTPUT"
         shell: bash
 
+
   build-windows:
     name: Build Windows
-    needs: prepare-matrices
+    needs: [prepare-matrices, get-app-version]
     runs-on: windows-latest
     steps:
       # By default, the longest path a filename can have in git on Windows is 260 character.
@@ -200,10 +208,17 @@ jobs:
         with:
           name: windows-build
           path: .\dist\*.exe
+      - name: Release app
+        uses: ncipollo/release-action@v1
+        if: '!cancelled()'
+        with:
+          allowUpdates: true
+          artifacts: "./dist/*.rpm,./dist/*.deb,./dist/*.exe,./dist/*.pkg"
+          tag: ${{needs.get-app-version.outputs.mullvad-version}}
 
   build-macos:
     name: Build macOS
-    needs: prepare-matrices
+    needs: [prepare-matrices, get-app-version]
     if: |
       needs.prepare-matrices.outputs.macos_matrix != '[]' &&
       needs.prepare-matrices.outputs.macos_matrix != ''
@@ -221,3 +236,10 @@ jobs:
           path: |
             ./dist/*.pkg
             ./dist/app-e2e-*
+      - name: Release app
+        uses: ncipollo/release-action@v1
+        if: '!cancelled()'
+        with:
+          allowUpdates: true
+          artifacts: "./dist/*.rpm,./dist/*.deb,./dist/*.exe,./dist/*.pkg"
+          tag: ${{needs.get-app-version.outputs.mullvad-version}}
