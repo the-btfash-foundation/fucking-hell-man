@@ -1,126 +1,132 @@
 package net.mullvad.mullvadvpn.di
 
 import android.content.ComponentName
-import android.content.Context
-import android.content.pm.PackageManager
-import androidx.datastore.core.DataStore
-import androidx.datastore.dataStore
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import net.mullvad.mullvadvpn.BuildConfig
-import net.mullvad.mullvadvpn.applist.ApplicationsProvider
-import net.mullvad.mullvadvpn.compose.state.RelayListType
-import net.mullvad.mullvadvpn.constant.IS_PLAY_BUILD
-import net.mullvad.mullvadvpn.dataproxy.MullvadProblemReport
+import net.mullvad.mullvadvpn.app.MainActivity
+import net.mullvad.mullvadvpn.app.MullvadAppViewModel
+import net.mullvad.mullvadvpn.feature.account.impl.AccountViewModel
+import net.mullvad.mullvadvpn.feature.addtime.impl.AddTimeViewModel
+import net.mullvad.mullvadvpn.feature.anticensorship.impl.AntiCensorshipSettingsViewModel
+import net.mullvad.mullvadvpn.feature.anticensorship.impl.customport.CustomPortDialogViewModel
+import net.mullvad.mullvadvpn.feature.anticensorship.impl.selectport.SelectPortViewModel
+import net.mullvad.mullvadvpn.feature.apiaccess.impl.screen.delete.DeleteApiAccessMethodConfirmationViewModel
+import net.mullvad.mullvadvpn.feature.apiaccess.impl.screen.detail.ApiAccessMethodDetailsViewModel
+import net.mullvad.mullvadvpn.feature.apiaccess.impl.screen.edit.EditApiAccessMethodViewModel
+import net.mullvad.mullvadvpn.feature.apiaccess.impl.screen.list.ApiAccessListViewModel
+import net.mullvad.mullvadvpn.feature.apiaccess.impl.screen.save.SaveApiAccessMethodViewModel
+import net.mullvad.mullvadvpn.feature.appearance.impl.AppearanceViewModel
+import net.mullvad.mullvadvpn.feature.appinfo.impl.AppInfoViewModel
+import net.mullvad.mullvadvpn.feature.appinfo.impl.changelog.ChangelogViewModel
+import net.mullvad.mullvadvpn.feature.autoconnect.impl.AutoConnectAndLockdownModeViewModel
+import net.mullvad.mullvadvpn.feature.customlist.impl.screen.create.CreateCustomListDialogViewModel
+import net.mullvad.mullvadvpn.feature.customlist.impl.screen.delete.DeleteCustomListConfirmationViewModel
+import net.mullvad.mullvadvpn.feature.customlist.impl.screen.editlist.EditCustomListViewModel
+import net.mullvad.mullvadvpn.feature.customlist.impl.screen.editlocations.CustomListLocationsViewModel
+import net.mullvad.mullvadvpn.feature.customlist.impl.screen.editname.EditCustomListNameDialogViewModel
+import net.mullvad.mullvadvpn.feature.customlist.impl.screen.lists.CustomListsViewModel
+import net.mullvad.mullvadvpn.feature.daita.impl.DaitaViewModel
+import net.mullvad.mullvadvpn.feature.filter.impl.FilterViewModel
+import net.mullvad.mullvadvpn.feature.home.impl.connect.ConnectViewModel
+import net.mullvad.mullvadvpn.feature.home.impl.connect.notificationbanner.InAppNotificationController
+import net.mullvad.mullvadvpn.feature.home.impl.devicerevoked.DeviceRevokedViewModel
+import net.mullvad.mullvadvpn.feature.home.impl.outoftime.OutOfTimeViewModel
+import net.mullvad.mullvadvpn.feature.home.impl.welcome.WelcomeViewModel
+import net.mullvad.mullvadvpn.feature.location.impl.RelayListScrollConnection
+import net.mullvad.mullvadvpn.feature.location.impl.SelectLocationViewModel
+import net.mullvad.mullvadvpn.feature.location.impl.bottomsheet.LocationBottomSheetState
+import net.mullvad.mullvadvpn.feature.location.impl.bottomsheet.LocationBottomSheetViewModel
+import net.mullvad.mullvadvpn.feature.location.impl.list.SelectLocationListViewModel
+import net.mullvad.mullvadvpn.feature.location.impl.search.SearchLocationViewModel
+import net.mullvad.mullvadvpn.feature.login.impl.LoginViewModel
+import net.mullvad.mullvadvpn.feature.login.impl.apiunreachable.ApiUnreachableViewModel
+import net.mullvad.mullvadvpn.feature.login.impl.devicelist.DeviceListViewModel
+import net.mullvad.mullvadvpn.feature.managedevices.impl.ManageDevicesViewModel
+import net.mullvad.mullvadvpn.feature.multihop.impl.MultihopViewModel
+import net.mullvad.mullvadvpn.feature.notification.impl.NotificationSettingsViewModel
+import net.mullvad.mullvadvpn.feature.problemreport.impl.ReportProblemViewModel
+import net.mullvad.mullvadvpn.feature.problemreport.impl.viewlogs.ViewLogsViewModel
+import net.mullvad.mullvadvpn.feature.redeemvoucher.impl.VoucherDialogViewModel
+import net.mullvad.mullvadvpn.feature.serveripoverride.impl.ServerIpOverridesViewModel
+import net.mullvad.mullvadvpn.feature.serveripoverride.impl.reset.ResetServerIpOverridesConfirmationViewModel
+import net.mullvad.mullvadvpn.feature.settings.impl.SettingsViewModel
+import net.mullvad.mullvadvpn.feature.splittunneling.impl.SplitTunnelingViewModel
+import net.mullvad.mullvadvpn.feature.splittunneling.impl.applist.ApplicationsProvider
+import net.mullvad.mullvadvpn.feature.vpnsettings.impl.VpnSettingsViewModel
+import net.mullvad.mullvadvpn.feature.vpnsettings.impl.dns.DnsDialogViewModel
+import net.mullvad.mullvadvpn.feature.vpnsettings.impl.mtu.MtuDialogViewModel
+import net.mullvad.mullvadvpn.lib.common.constant.BillingTypes
+import net.mullvad.mullvadvpn.lib.common.constant.BuildTypes
+import net.mullvad.mullvadvpn.lib.model.RelayListType
 import net.mullvad.mullvadvpn.lib.payment.PaymentProvider
-import net.mullvad.mullvadvpn.lib.shared.VoucherRepository
-import net.mullvad.mullvadvpn.receiver.BootCompletedReceiver
-import net.mullvad.mullvadvpn.repository.ApiAccessRepository
-import net.mullvad.mullvadvpn.repository.AutoStartAndConnectOnBootRepository
-import net.mullvad.mullvadvpn.repository.ChangelogRepository
-import net.mullvad.mullvadvpn.repository.CustomListsRepository
-import net.mullvad.mullvadvpn.repository.InAppNotificationController
-import net.mullvad.mullvadvpn.repository.NewDeviceRepository
-import net.mullvad.mullvadvpn.repository.ProblemReportRepository
-import net.mullvad.mullvadvpn.repository.RelayListFilterRepository
-import net.mullvad.mullvadvpn.repository.RelayListRepository
-import net.mullvad.mullvadvpn.repository.RelayOverridesRepository
-import net.mullvad.mullvadvpn.repository.SettingsRepository
-import net.mullvad.mullvadvpn.repository.SplashCompleteRepository
-import net.mullvad.mullvadvpn.repository.SplitTunnelingRepository
-import net.mullvad.mullvadvpn.repository.UserPreferences
-import net.mullvad.mullvadvpn.repository.UserPreferencesMigration
-import net.mullvad.mullvadvpn.repository.UserPreferencesRepository
-import net.mullvad.mullvadvpn.repository.UserPreferencesSerializer
-import net.mullvad.mullvadvpn.repository.WireguardConstraintsRepository
-import net.mullvad.mullvadvpn.service.DaemonConfig
-import net.mullvad.mullvadvpn.ui.MainActivity
-import net.mullvad.mullvadvpn.ui.serviceconnection.AppVersionInfoRepository
-import net.mullvad.mullvadvpn.ui.serviceconnection.ServiceConnectionManager
-import net.mullvad.mullvadvpn.usecase.AccountExpiryInAppNotificationUseCase
-import net.mullvad.mullvadvpn.usecase.EmptyPaymentUseCase
-import net.mullvad.mullvadvpn.usecase.FilterChipUseCase
-import net.mullvad.mullvadvpn.usecase.FilteredRelayListUseCase
-import net.mullvad.mullvadvpn.usecase.InternetAvailableUseCase
-import net.mullvad.mullvadvpn.usecase.LastKnownLocationUseCase
-import net.mullvad.mullvadvpn.usecase.NewChangelogNotificationUseCase
-import net.mullvad.mullvadvpn.usecase.NewDeviceNotificationUseCase
-import net.mullvad.mullvadvpn.usecase.OutOfTimeUseCase
-import net.mullvad.mullvadvpn.usecase.PaymentUseCase
-import net.mullvad.mullvadvpn.usecase.PlayPaymentUseCase
-import net.mullvad.mullvadvpn.usecase.ProviderToOwnershipsUseCase
-import net.mullvad.mullvadvpn.usecase.SelectedLocationTitleUseCase
-import net.mullvad.mullvadvpn.usecase.SelectedLocationUseCase
-import net.mullvad.mullvadvpn.usecase.SystemVpnSettingsAvailableUseCase
-import net.mullvad.mullvadvpn.usecase.TunnelStateNotificationUseCase
-import net.mullvad.mullvadvpn.usecase.VersionNotificationUseCase
-import net.mullvad.mullvadvpn.usecase.customlists.CustomListActionUseCase
-import net.mullvad.mullvadvpn.usecase.customlists.CustomListRelayItemsUseCase
-import net.mullvad.mullvadvpn.usecase.customlists.CustomListsRelayItemUseCase
-import net.mullvad.mullvadvpn.usecase.customlists.FilterCustomListsRelayItemUseCase
-import net.mullvad.mullvadvpn.util.ChangelogDataProvider
-import net.mullvad.mullvadvpn.util.IChangelogDataProvider
-import net.mullvad.mullvadvpn.viewmodel.AccountViewModel
-import net.mullvad.mullvadvpn.viewmodel.ApiAccessListViewModel
-import net.mullvad.mullvadvpn.viewmodel.ApiAccessMethodDetailsViewModel
-import net.mullvad.mullvadvpn.viewmodel.AppInfoViewModel
-import net.mullvad.mullvadvpn.viewmodel.ChangelogViewModel
-import net.mullvad.mullvadvpn.viewmodel.ConnectViewModel
-import net.mullvad.mullvadvpn.viewmodel.CreateCustomListDialogViewModel
-import net.mullvad.mullvadvpn.viewmodel.CustomListLocationsViewModel
-import net.mullvad.mullvadvpn.viewmodel.CustomListsViewModel
-import net.mullvad.mullvadvpn.viewmodel.DaitaViewModel
-import net.mullvad.mullvadvpn.viewmodel.DeleteApiAccessMethodConfirmationViewModel
-import net.mullvad.mullvadvpn.viewmodel.DeleteCustomListConfirmationViewModel
-import net.mullvad.mullvadvpn.viewmodel.DeviceListViewModel
-import net.mullvad.mullvadvpn.viewmodel.DeviceRevokedViewModel
-import net.mullvad.mullvadvpn.viewmodel.DnsDialogViewModel
-import net.mullvad.mullvadvpn.viewmodel.EditApiAccessMethodViewModel
-import net.mullvad.mullvadvpn.viewmodel.EditCustomListNameDialogViewModel
-import net.mullvad.mullvadvpn.viewmodel.EditCustomListViewModel
-import net.mullvad.mullvadvpn.viewmodel.FilterViewModel
-import net.mullvad.mullvadvpn.viewmodel.LoginViewModel
-import net.mullvad.mullvadvpn.viewmodel.MtuDialogViewModel
-import net.mullvad.mullvadvpn.viewmodel.MullvadAppViewModel
-import net.mullvad.mullvadvpn.viewmodel.MultihopViewModel
-import net.mullvad.mullvadvpn.viewmodel.OutOfTimeViewModel
-import net.mullvad.mullvadvpn.viewmodel.PaymentViewModel
-import net.mullvad.mullvadvpn.viewmodel.PrivacyDisclaimerViewModel
-import net.mullvad.mullvadvpn.viewmodel.ReportProblemViewModel
-import net.mullvad.mullvadvpn.viewmodel.ResetServerIpOverridesConfirmationViewModel
-import net.mullvad.mullvadvpn.viewmodel.SaveApiAccessMethodViewModel
-import net.mullvad.mullvadvpn.viewmodel.ServerIpOverridesViewModel
-import net.mullvad.mullvadvpn.viewmodel.SettingsViewModel
-import net.mullvad.mullvadvpn.viewmodel.ShadowsocksCustomPortDialogViewModel
-import net.mullvad.mullvadvpn.viewmodel.ShadowsocksSettingsViewModel
-import net.mullvad.mullvadvpn.viewmodel.SplashViewModel
-import net.mullvad.mullvadvpn.viewmodel.SplitTunnelingViewModel
-import net.mullvad.mullvadvpn.viewmodel.Udp2TcpSettingsViewModel
-import net.mullvad.mullvadvpn.viewmodel.ViewLogsViewModel
-import net.mullvad.mullvadvpn.viewmodel.VoucherDialogViewModel
-import net.mullvad.mullvadvpn.viewmodel.VpnSettingsViewModel
-import net.mullvad.mullvadvpn.viewmodel.WelcomeViewModel
-import net.mullvad.mullvadvpn.viewmodel.WireguardCustomPortDialogViewModel
-import net.mullvad.mullvadvpn.viewmodel.location.SearchLocationViewModel
-import net.mullvad.mullvadvpn.viewmodel.location.SelectLocationListViewModel
-import net.mullvad.mullvadvpn.viewmodel.location.SelectLocationViewModel
+import net.mullvad.mullvadvpn.lib.repository.ApiAccessRepository
+import net.mullvad.mullvadvpn.lib.repository.AppVersionInfoRepository
+import net.mullvad.mullvadvpn.lib.repository.AutoStartAndConnectOnBootRepository
+import net.mullvad.mullvadvpn.lib.repository.ChangelogDataProvider
+import net.mullvad.mullvadvpn.lib.repository.ChangelogRepository
+import net.mullvad.mullvadvpn.lib.repository.CustomListsRepository
+import net.mullvad.mullvadvpn.lib.repository.EmptyPaymentUseCase
+import net.mullvad.mullvadvpn.lib.repository.NewDeviceRepository
+import net.mullvad.mullvadvpn.lib.repository.PaymentLogic
+import net.mullvad.mullvadvpn.lib.repository.PlayPaymentLogic
+import net.mullvad.mullvadvpn.lib.repository.ProblemReportRepository
+import net.mullvad.mullvadvpn.lib.repository.RelayListFilterRepository
+import net.mullvad.mullvadvpn.lib.repository.RelayListRepository
+import net.mullvad.mullvadvpn.lib.repository.RelayOverridesRepository
+import net.mullvad.mullvadvpn.lib.repository.SettingsRepository
+import net.mullvad.mullvadvpn.lib.repository.SplashCompleteRepository
+import net.mullvad.mullvadvpn.lib.repository.SplitTunnelingRepository
+import net.mullvad.mullvadvpn.lib.repository.VoucherRepository
+import net.mullvad.mullvadvpn.lib.repository.WireguardConstraintsRepository
+import net.mullvad.mullvadvpn.lib.usecase.DeleteCustomDnsUseCase
+import net.mullvad.mullvadvpn.lib.usecase.FilterChipUseCase
+import net.mullvad.mullvadvpn.lib.usecase.FilteredRelayListUseCase
+import net.mullvad.mullvadvpn.lib.usecase.HopSelectionUseCase
+import net.mullvad.mullvadvpn.lib.usecase.InternetAvailableUseCase
+import net.mullvad.mullvadvpn.lib.usecase.LastKnownLocationUseCase
+import net.mullvad.mullvadvpn.lib.usecase.ModifyAndEnableMultihopUseCase
+import net.mullvad.mullvadvpn.lib.usecase.ModifyMultihopUseCase
+import net.mullvad.mullvadvpn.lib.usecase.OutOfTimeUseCase
+import net.mullvad.mullvadvpn.lib.usecase.ProviderToOwnershipsUseCase
+import net.mullvad.mullvadvpn.lib.usecase.RecentsUseCase
+import net.mullvad.mullvadvpn.lib.usecase.RelayItemCanBeSelectedUseCase
+import net.mullvad.mullvadvpn.lib.usecase.SelectAndEnableMultihopUseCase
+import net.mullvad.mullvadvpn.lib.usecase.SelectSinglehopUseCase
+import net.mullvad.mullvadvpn.lib.usecase.SelectedLocationTitleUseCase
+import net.mullvad.mullvadvpn.lib.usecase.SelectedLocationUseCase
+import net.mullvad.mullvadvpn.lib.usecase.SupportEmailUseCase
+import net.mullvad.mullvadvpn.lib.usecase.SystemVpnSettingsAvailableUseCase
+import net.mullvad.mullvadvpn.lib.usecase.customlists.CustomListActionUseCase
+import net.mullvad.mullvadvpn.lib.usecase.customlists.CustomListRelayItemsUseCase
+import net.mullvad.mullvadvpn.lib.usecase.customlists.CustomListsRelayItemUseCase
+import net.mullvad.mullvadvpn.lib.usecase.customlists.FilterCustomListsRelayItemUseCase
+import net.mullvad.mullvadvpn.lib.usecase.inappnotification.AccountExpiryInAppNotificationUseCase
+import net.mullvad.mullvadvpn.lib.usecase.inappnotification.Android16UpdateWarningUseCase
+import net.mullvad.mullvadvpn.lib.usecase.inappnotification.InAppNotificationUseCase
+import net.mullvad.mullvadvpn.lib.usecase.inappnotification.NewChangelogNotificationUseCase
+import net.mullvad.mullvadvpn.lib.usecase.inappnotification.NewDeviceNotificationUseCase
+import net.mullvad.mullvadvpn.lib.usecase.inappnotification.TunnelStateNotificationUseCase
+import net.mullvad.mullvadvpn.lib.usecase.inappnotification.VersionNotificationUseCase
+import net.mullvad.mullvadvpn.receiver.AutoStartVpnBootCompletedReceiver
+import net.mullvad.mullvadvpn.screen.privacy.PrivacyDisclaimerViewModel
+import net.mullvad.mullvadvpn.screen.splash.SplashViewModel
+import net.mullvad.mullvadvpn.serviceconnection.ServiceConnectionManager
+import net.mullvad.mullvadvpn.util.BackstackObserver
 import org.apache.commons.validator.routines.InetAddressValidator
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.qualifier.named
+import org.koin.dsl.bind
 import org.koin.dsl.module
 
 val uiModule = module {
-    single<DataStore<UserPreferences>> { androidContext().userPreferencesStore }
-
-    single<PackageManager> { androidContext().packageManager }
-    single<String>(named(SELF_PACKAGE_NAME)) { androidContext().packageName }
-
     single<ComponentName>(named(BOOT_COMPLETED_RECEIVER_COMPONENT_NAME)) {
-        ComponentName(androidContext(), BootCompletedReceiver::class.java)
+        ComponentName(androidContext(), AutoStartVpnBootCompletedReceiver::class.java)
     }
 
-    viewModel { SplitTunnelingViewModel(get(), get(), Dispatchers.Default) }
+    viewModel { SplitTunnelingViewModel(get(), get(), get(), Dispatchers.Default) }
 
     single { ApplicationsProvider(get(), get(named(SELF_PACKAGE_NAME))) }
     scope<MainActivity> { scoped { ServiceConnectionManager(androidContext()) } }
@@ -129,9 +135,17 @@ val uiModule = module {
     single { androidContext().contentResolver }
 
     single { ChangelogRepository(get(), get(), get()) }
-    single { UserPreferencesRepository(get(), get()) }
     single { SettingsRepository(get()) }
-    single { MullvadProblemReport(get(), get<DaemonConfig>().apiEndpointOverride, get()) }
+    single {
+        ProblemReportRepository(
+            context = androidContext(),
+            apiEndpointOverride = getOrNull(),
+            apiEndpointFromIntentHolder = get(),
+            kermitFileLogDirName = KERMIT_FILE_LOG_DIR_NAME,
+            accountRepository = get(),
+            paymentLogic = get(),
+        )
+    }
     single { RelayOverridesRepository(get()) }
     single { CustomListsRepository(get()) }
     single { RelayListRepository(get(), get()) }
@@ -149,85 +163,168 @@ val uiModule = module {
     }
     single { WireguardConstraintsRepository(get()) }
 
-    single { AccountExpiryInAppNotificationUseCase(get()) }
-    single { TunnelStateNotificationUseCase(get()) }
-    single { VersionNotificationUseCase(get(), BuildConfig.ENABLE_IN_APP_VERSION_NOTIFICATIONS) }
-    single { NewDeviceNotificationUseCase(get(), get()) }
-    single { NewChangelogNotificationUseCase(get()) }
+    single { AccountExpiryInAppNotificationUseCase(get()) } bind InAppNotificationUseCase::class
+    single { TunnelStateNotificationUseCase(get(), get(), get()) } bind
+        InAppNotificationUseCase::class
+    single {
+        VersionNotificationUseCase(get(), BuildConfig.ENABLE_IN_APP_VERSION_NOTIFICATIONS)
+    } bind InAppNotificationUseCase::class
+    single { NewDeviceNotificationUseCase(get(), get()) } bind InAppNotificationUseCase::class
+    single { NewChangelogNotificationUseCase(get()) } bind InAppNotificationUseCase::class
+    if (Build.VERSION.SDK_INT == Build.VERSION_CODES.BAKLAVA) {
+        single { Android16UpdateWarningUseCase(get(), get()) } bind InAppNotificationUseCase::class
+    }
+
     single { OutOfTimeUseCase(get(), get(), MainScope()) }
     single { InternetAvailableUseCase(get()) }
     single { SystemVpnSettingsAvailableUseCase(androidContext()) }
     single { CustomListActionUseCase(get(), get()) }
     single { SelectedLocationTitleUseCase(get(), get()) }
     single { ProviderToOwnershipsUseCase(get()) }
-    single { FilterCustomListsRelayItemUseCase(get(), get(), get(), get()) }
+    single { FilterCustomListsRelayItemUseCase(get(), get(), get()) }
     single { CustomListsRelayItemUseCase(get(), get()) }
     single { CustomListRelayItemsUseCase(get(), get()) }
-    single { FilteredRelayListUseCase(get(), get(), get(), get()) }
+    single { FilteredRelayListUseCase(get(), get(), get()) }
     single { LastKnownLocationUseCase(get()) }
     single { SelectedLocationUseCase(get(), get()) }
-    single { FilterChipUseCase(get(), get(), get(), get()) }
+    single { FilterChipUseCase(get(), get(), get()) }
+    single { DeleteCustomDnsUseCase(get()) }
+    single { RecentsUseCase(get(), get(), get()) }
+    single { SelectSinglehopUseCase(relayListRepository = get()) }
+    single {
+        ModifyMultihopUseCase(
+            relayListRepository = get(),
+            settingsRepository = get(),
+            customListsRepository = get(),
+            wireguardConstraintsRepository = get(),
+        )
+    }
+    single {
+        SupportEmailUseCase(
+            context = androidContext(),
+            problemReportRepository = get(),
+            buildVersion = get(),
+        )
+    }
+    single {
+        HopSelectionUseCase(
+            customListRelayItemUseCase = get(),
+            relayListRepository = get(),
+            settingsRepository = get(),
+        )
+    }
+    single {
+        SelectAndEnableMultihopUseCase(relayListRepository = get(), settingsRepository = get())
+    }
+    single {
+        RelayItemCanBeSelectedUseCase(
+            filteredRelayListUseCase = get(),
+            hopSelectionUseCase = get(),
+            settingsRepository = get(),
+            relayListRepository = get(),
+        )
+    }
+    single {
+        ModifyAndEnableMultihopUseCase(
+            relayListRepository = get(),
+            settingsRepository = get(),
+            customListsRepository = get(),
+            wireguardConstraintsRepository = get(),
+        )
+    }
 
-    single { InAppNotificationController(get(), get(), get(), get(), get(), MainScope()) }
+    single { InAppNotificationController(getAll(), MainScope()) }
 
-    single<IChangelogDataProvider> { ChangelogDataProvider(get()) }
+    single { ChangelogDataProvider(get()) }
 
     // Will be resolved using from either of the two PaymentModule.kt classes.
     single { PaymentProvider(get()) }
 
-    single<PaymentUseCase> {
+    single<PaymentLogic> {
         val paymentRepository = get<PaymentProvider>().paymentRepository
         if (paymentRepository != null) {
-            PlayPaymentUseCase(paymentRepository = paymentRepository)
+            PlayPaymentLogic(paymentRepository = paymentRepository)
         } else {
             EmptyPaymentUseCase()
         }
     }
 
-    single { ProblemReportRepository() }
-
     single { AppVersionInfoRepository(get(), get()) }
 
+    single { RelayListScrollConnection() }
+
     // View models
-    viewModel { AccountViewModel(get(), get(), get(), IS_PLAY_BUILD) }
+    viewModel { AccountViewModel(get(), get(), get()) }
     viewModel { ChangelogViewModel(get(), get(), get()) }
     viewModel {
-        AppInfoViewModel(get(), get(), get(), IS_PLAY_BUILD, get(named(SELF_PACKAGE_NAME)))
+        AppInfoViewModel(
+            appVersionInfoRepository = get(),
+            resources = get(),
+            isPlayBuild = IS_PLAY_BUILD,
+            isFdroidBuild = IS_FDROID_BUILD,
+            packageName = get(named(SELF_PACKAGE_NAME)),
+        )
     }
     viewModel {
         ConnectViewModel(
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            IS_PLAY_BUILD,
-            get(named(SELF_PACKAGE_NAME)),
+            accountRepository = get(),
+            deviceRepository = get(),
+            changelogRepository = get(),
+            inAppNotificationController = get(),
+            newDeviceRepository = get(),
+            userPreferencesRepository = get(),
+            selectedLocationTitleUseCase = get(),
+            outOfTimeUseCase = get(),
+            paymentUseCase = get(),
+            connectionProxy = get(),
+            lastKnownLocationUseCase = get(),
+            systemVpnSettingsUseCase = get(),
+            resources = get(),
+            isPlayBuild = IS_PLAY_BUILD,
+            isFdroidBuild = IS_FDROID_BUILD,
+            packageName = get(named(SELF_PACKAGE_NAME)),
         )
     }
     viewModel { DeviceListViewModel(get(), get()) }
-    viewModel { DeviceRevokedViewModel(get(), get()) }
+    viewModel { ManageDevicesViewModel(get(), Dispatchers.IO, get()) }
+    viewModel { DeviceRevokedViewModel(get(), get(), get(), get()) }
     viewModel { MtuDialogViewModel(get(), get()) }
-    viewModel { DnsDialogViewModel(get(), get(), get()) }
-    viewModel { WireguardCustomPortDialogViewModel(get()) }
-    viewModel { LoginViewModel(get(), get(), get()) }
+    viewModel { DnsDialogViewModel(get(), get(), get(), get()) }
+    viewModel { CustomPortDialogViewModel(get()) }
+    viewModel { LoginViewModel(get(), get(), get(), get(), get()) }
     viewModel { PrivacyDisclaimerViewModel(get(), IS_PLAY_BUILD) }
-    viewModel { SelectLocationViewModel(get(), get(), get(), get(), get(), get(), get()) }
+    viewModel {
+        SelectLocationViewModel(
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+        )
+    }
     viewModel { SettingsViewModel(get(), get(), get(), get(), IS_PLAY_BUILD) }
     viewModel { SplashViewModel(get(), get(), get(), get()) }
-    viewModel { VoucherDialogViewModel(get()) }
+    viewModel { VoucherDialogViewModel(get(), get()) }
     viewModel { VpnSettingsViewModel(get(), get(), get(), get(), get()) }
+    viewModel { AntiCensorshipSettingsViewModel(get(), get()) }
     viewModel { WelcomeViewModel(get(), get(), get(), get(), isPlayBuild = IS_PLAY_BUILD) }
-    viewModel { ReportProblemViewModel(get(), get()) }
+    viewModel {
+        ReportProblemViewModel(
+            mullvadProblemReporter = get(),
+            problemReportRepository = get(),
+            accountRepository = get(),
+            isPlayBuild = IS_PLAY_BUILD,
+        )
+    }
     viewModel { ViewLogsViewModel(get()) }
     viewModel { OutOfTimeViewModel(get(), get(), get(), get(), get(), isPlayBuild = IS_PLAY_BUILD) }
-    viewModel { PaymentViewModel(get()) }
     viewModel { FilterViewModel(get(), get()) }
     viewModel { CreateCustomListDialogViewModel(get(), get()) }
     viewModel { CustomListLocationsViewModel(get(), get(), get(), get()) }
@@ -235,19 +332,22 @@ val uiModule = module {
     viewModel { EditCustomListNameDialogViewModel(get(), get()) }
     viewModel { CustomListsViewModel(get(), get()) }
     viewModel { DeleteCustomListConfirmationViewModel(get(), get()) }
-    viewModel { ServerIpOverridesViewModel(get(), get()) }
+    viewModel { ServerIpOverridesViewModel(get(), get(), get()) }
     viewModel { ResetServerIpOverridesConfirmationViewModel(get()) }
     viewModel { ApiAccessListViewModel(get()) }
     viewModel { EditApiAccessMethodViewModel(get(), get(), get()) }
     viewModel { SaveApiAccessMethodViewModel(get(), get()) }
     viewModel { ApiAccessMethodDetailsViewModel(get(), get()) }
     viewModel { DeleteApiAccessMethodConfirmationViewModel(get(), get()) }
-    viewModel { Udp2TcpSettingsViewModel(get()) }
-    viewModel { ShadowsocksSettingsViewModel(get(), get()) }
-    viewModel { ShadowsocksCustomPortDialogViewModel(get()) }
-    viewModel { MultihopViewModel(get()) }
+    viewModel { SelectPortViewModel(get(), get(), get(), get()) }
+    viewModel { CustomPortDialogViewModel(get()) }
+    viewModel { MultihopViewModel(get(), get()) }
+    viewModel { NotificationSettingsViewModel(get()) }
     viewModel {
         SearchLocationViewModel(
+            get(),
+            get(),
+            get(),
             get(),
             get(),
             get(),
@@ -262,21 +362,61 @@ val uiModule = module {
         )
     }
     viewModel { (relayListType: RelayListType) ->
-        SelectLocationListViewModel(relayListType, get(), get(), get(), get(), get(), get(), get())
+        SelectLocationListViewModel(
+            relayListType,
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+        )
     }
-    viewModel { DaitaViewModel(get()) }
+    viewModel { DaitaViewModel(get(), get()) }
+    viewModel {
+        AddTimeViewModel(
+            paymentUseCase = get(),
+            accountRepository = get(),
+            connectionProxy = get(),
+            isPlayBuild = IS_PLAY_BUILD,
+        )
+    }
+    viewModel {
+        ApiUnreachableViewModel(
+            apiAccessRepository = get(),
+            supportEmailUseCase = get(),
+            savedStateHandle = get(),
+        )
+    }
+    viewModel { (locationBottomSheetState: LocationBottomSheetState) ->
+        LocationBottomSheetViewModel(
+            locationBottomSheetState = locationBottomSheetState,
+            canBeSelectedUseCase = get(),
+            customListsRelayItemUseCase = get(),
+            selectedLocationUseCase = get(),
+            modifyMultihopUseCase = get(),
+            wireguardConstraintsRepository = get(),
+            selectAndEnableMultihopUseCase = get(),
+            hopSelectionUseCase = get(),
+            modifyAndEnableMultihopUseCase = get(),
+        )
+    }
+    viewModel { AppearanceViewModel(get()) }
+    viewModel { AutoConnectAndLockdownModeViewModel(isPlayBuild = IS_PLAY_BUILD) }
+
+    single { BackstackObserver() }
 
     // This view model must be single so we correctly attach lifecycle and share it with activity
-    single { MullvadAppViewModel(get(), get()) }
+    single { MullvadAppViewModel(get(), get(), get()) }
 }
 
-const val SELF_PACKAGE_NAME = "SELF_PACKAGE_NAME"
 const val APP_PREFERENCES_NAME = "${BuildConfig.APPLICATION_ID}.app_preferences"
-const val BOOT_COMPLETED_RECEIVER_COMPONENT_NAME = "BOOT_COMPLETED_RECEIVER_COMPONENT_NAME"
+const val SELF_PACKAGE_NAME = "SELF_PACKAGE_NAME"
+const val KERMIT_FILE_LOG_DIR_NAME = "android_app_logs"
 
-private val Context.userPreferencesStore: DataStore<UserPreferences> by
-    dataStore(
-        fileName = APP_PREFERENCES_NAME,
-        serializer = UserPreferencesSerializer,
-        produceMigrations = UserPreferencesMigration::migrations,
-    )
+private const val BOOT_COMPLETED_RECEIVER_COMPONENT_NAME = "BOOT_COMPLETED_RECEIVER_COMPONENT_NAME"
+private val IS_FDROID_BUILD = BuildConfig.BUILD_TYPE == BuildTypes.FDROID
+private val IS_PLAY_BUILD = BuildConfig.FLAVOR_billing == BillingTypes.PLAY

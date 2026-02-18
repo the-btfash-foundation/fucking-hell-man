@@ -10,18 +10,32 @@ impl Stats {
                 for msg in peers {
                     let mut tx_bytes = 0;
                     let mut rx_bytes = 0;
+                    let mut last_handshake_time = None;
                     let mut pub_key = None;
 
                     for nla in &msg.0 {
                         match nla {
                             PeerNla::TxBytes(bytes) => tx_bytes = *bytes,
                             PeerNla::RxBytes(bytes) => rx_bytes = *bytes,
+                            PeerNla::LastHandshakeTime(timestamp) => {
+                                if let Some(timestamp) = timestamp.as_systemtime() {
+                                    last_handshake_time = Some(timestamp)
+                                }
+                            }
                             PeerNla::PublicKey(key) => pub_key = Some(*key),
                             _ => continue,
                         }
                     }
                     if let Some(key) = pub_key {
-                        map.insert(key, Stats { tx_bytes, rx_bytes });
+                        map.insert(
+                            key,
+                            Stats {
+                                tx_bytes,
+                                rx_bytes,
+                                last_handshake_time,
+                                ..Default::default()
+                            },
+                        );
                     }
                 }
             }

@@ -3,13 +3,14 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2024-02-05.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadREST
 import MullvadSettings
 import Network
 import XCTest
+
+@testable import MullvadREST
 
 final class IPOverrideWrapperTests: XCTestCase {
     func testOverrideServerRelayInCache() throws {
@@ -77,7 +78,7 @@ extension IPOverrideWrapperTests {
             hostname: "",
             active: true,
             owned: true,
-            location: "",
+            location: "xx-yyy",
             provider: "",
             weight: 0,
             ipv4AddrIn: .any,
@@ -85,7 +86,8 @@ extension IPOverrideWrapperTests {
             publicKey: Data(),
             includeInCountry: true,
             daita: false,
-            shadowsocksExtraAddrIn: nil
+            shadowsocksExtraAddrIn: nil,
+            features: nil
         )
     }
 
@@ -94,7 +96,7 @@ extension IPOverrideWrapperTests {
             hostname: "",
             active: true,
             owned: true,
-            location: "",
+            location: "xx-yyy",
             provider: "",
             ipv4AddrIn: .any,
             weight: 0,

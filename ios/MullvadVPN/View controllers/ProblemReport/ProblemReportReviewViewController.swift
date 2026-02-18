@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 10/02/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -32,12 +32,7 @@ class ProblemReportReviewViewController: UIViewController {
         view.backgroundColor = .secondaryColor
         view.setAccessibilityIdentifier(.appLogsView)
 
-        navigationItem.title = NSLocalizedString(
-            "NAVIGATION_TITLE",
-            tableName: "ProblemReportReview",
-            value: "App logs",
-            comment: ""
-        )
+        navigationItem.title = NSLocalizedString("App logs", comment: "")
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             systemItem: .done,
@@ -48,23 +43,22 @@ class ProblemReportReviewViewController: UIViewController {
         navigationItem.rightBarButtonItem?.setAccessibilityIdentifier(.appLogsDoneButton)
 
         #if DEBUG
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            systemItem: .action,
-            primaryAction: UIAction(handler: { [weak self] _ in
-                self?.share()
-            })
-        )
-        navigationItem.leftBarButtonItem?.setAccessibilityIdentifier(.appLogsShareButton)
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                systemItem: .action,
+                primaryAction: UIAction(handler: { [weak self] _ in
+                    self?.share()
+                })
+            )
+            navigationItem.leftBarButtonItem?.setAccessibilityIdentifier(.appLogsShareButton)
         #endif
 
         textView.setAccessibilityIdentifier(.problemReportAppLogsTextView)
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.isEditable = false
-        textView.font = UIFont.monospacedSystemFont(
-            ofSize: UIFont.systemFontSize,
-            weight: .regular
-        )
+        textView.font = .mullvadSmall
+        textView.adjustsFontForContentSizeCategory = true
         textView.backgroundColor = .systemBackground
+        textView.textAlignment = .left
 
         view.addConstrainedSubviews([textView]) {
             textView.pinEdgesToSuperview(.all().excluding(.top))
@@ -97,25 +91,29 @@ class ProblemReportReviewViewController: UIViewController {
         spinnerView.startAnimating()
         interactor.fetchReportString { [weak self] reportString in
             guard let self else { return }
-            textView.text = reportString
-            spinnerView.stopAnimating()
-            spinnerContainerView.isHidden = true
+            Task { @MainActor in
+                textView.text = reportString
+                spinnerView.stopAnimating()
+                spinnerContainerView.isHidden = true
+            }
         }
     }
 
     #if DEBUG
-    private func share() {
-        interactor.fetchReportString { [weak self] reportString in
-            guard let self,!reportString.isEmpty else { return }
-            let activityController = UIActivityViewController(
-                activityItems: [reportString],
-                applicationActivities: nil
-            )
+        private func share() {
+            interactor.fetchReportString { [weak self] reportString in
+                guard let self, !reportString.isEmpty else { return }
+                Task { @MainActor in
+                    let activityController = UIActivityViewController(
+                        activityItems: [reportString],
+                        applicationActivities: nil
+                    )
 
-            activityController.popoverPresentationController?.barButtonItem = navigationItem.leftBarButtonItem
+                    activityController.popoverPresentationController?.barButtonItem = navigationItem.leftBarButtonItem
 
-            present(activityController, animated: true)
+                    present(activityController, animated: true)
+                }
+            }
         }
-    }
     #endif
 }

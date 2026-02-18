@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 09/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -19,7 +19,8 @@ class SwitchCellContentView: UIView, UIContentView, UITextFieldDelegate {
         }
         set {
             guard let newConfiguration = newValue as? SwitchCellContentConfiguration,
-                  actualConfiguration != newConfiguration else { return }
+                actualConfiguration != newConfiguration
+            else { return }
 
             let previousConfiguration = actualConfiguration
             actualConfiguration = newConfiguration
@@ -68,7 +69,9 @@ class SwitchCellContentView: UIView, UIContentView, UITextFieldDelegate {
         let textProperties = actualConfiguration.textProperties
 
         textLabel.font = textProperties.font
+        textLabel.adjustsFontForContentSizeCategory = true
         textLabel.textColor = textProperties.color
+        textLabel.numberOfLines = 0
 
         textLabel.text = actualConfiguration.text
     }
@@ -77,13 +80,15 @@ class SwitchCellContentView: UIView, UIContentView, UITextFieldDelegate {
         switchContainer.control.isOn = actualConfiguration.isOn
         switchContainer.transform = CGAffineTransform(scaleX: 0.85, y: 0.85)
         switchContainer.setAccessibilityIdentifier(actualConfiguration.accessibilityIdentifier)
+        switchContainer.isEnabled = actualConfiguration.isEnabled
     }
 
     private func addSubviews() {
+        switchContainer.setContentCompressionResistancePriority(.required, for: .horizontal)
         addConstrainedSubviews([textLabel, switchContainer]) {
             textLabel.pinEdgesToSuperviewMargins(.all().excluding(.trailing))
             switchContainer.centerYAnchor.constraint(equalTo: centerYAnchor)
-            switchContainer.pinEdgeToSuperview(.trailing(UIMetrics.SettingsCell.apiAccessSwitchCellTrailingMargin))
+            switchContainer.pinEdgeToSuperviewMargin(.trailing(-4))
             switchContainer.leadingAnchor.constraint(
                 greaterThanOrEqualToSystemSpacingAfter: textLabel.trailingAnchor,
                 multiplier: 1

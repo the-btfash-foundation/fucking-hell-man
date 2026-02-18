@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../../config.json';
 import { useScheduler } from '../../../shared/scheduler';
+import { Icon } from '../../lib/components';
+import { colors } from '../../lib/foundations';
 import { useBoolean, useEffectEvent } from '../../lib/utility-hooks';
 import { AriaInput } from '../AriaGroup';
 import { smallNormalText } from '../common-styles';
 import CustomScrollbars from '../CustomScrollbars';
-import ImageView from '../ImageView';
 
 export interface SettingsSelectItem<T extends string> {
   value: T;
@@ -18,7 +18,7 @@ const StyledSelect = styled.div.attrs({ tabIndex: 0 })(smallNormalText, {
   display: 'flex',
   flex: 1,
   position: 'relative',
-  background: 'transparent',
+  background: colors.transparent,
   border: 'none',
   color: colors.white,
   borderRadius: '4px',
@@ -38,7 +38,7 @@ const StyledItems = styled.div<{ $direction: 'down' | 'up' }>((props) => ({
   bottom: props.$direction === 'up' ? 'calc(100% + 4px)' : 'auto',
   right: '-1px',
   backgroundColor: colors.darkBlue,
-  border: `1px ${colors.darkerBlue} solid`,
+  border: `1px ${colors.darkerBlue50} solid`,
   borderRadius: '4px',
   padding: '4px 8px',
   maxHeight: '250px',
@@ -77,7 +77,7 @@ const StyledInvisibleItemsInner = styled.div({
   whiteSpace: 'nowrap',
 });
 
-const StyledChevron = styled(ImageView)({
+const StyledChevron = styled(Icon)({
   marginLeft: '6px',
   marginRight: '5px',
 });
@@ -145,6 +145,11 @@ export function SettingsSelect<T extends string>(props: SettingsSelectProps<T>) 
   // Update the parent when the value changes.
   useEffect(() => {
     updateEvent(value);
+    // These lint rules are disabled for now because the react plugin for eslint does
+    // not understand that useEffectEvent should not be added to the dependency array.
+    // Enable these rules again when eslint can lint useEffectEvent properly.
+    // eslint-disable-next-line react-compiler/react-compiler
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   return (
@@ -155,7 +160,7 @@ export function SettingsSelect<T extends string>(props: SettingsSelectProps<T>) 
             <StyledSelectedText>
               {props.items.find((item) => item.value === value)?.label ?? ''}
             </StyledSelectedText>
-            <StyledChevron tintColor={colors.white60} source="icon-chevron-down" width={22} />
+            <StyledChevron color="whiteAlpha60" icon="chevron-down" />
           </StyledSelectedContainerInner>
           <StyledInvisibleItems>
             {props.items.map((item) => (
@@ -224,7 +229,7 @@ const StyledItem = styled.div<{ $selected: boolean }>((props) => ({
   },
 }));
 
-const TickIcon = styled(ImageView)({
+const TickIcon = styled(Icon)({
   marginLeft: '5px',
   marginRight: '6px',
 });
@@ -248,7 +253,7 @@ function Item<T extends string>(props: ItemProps<T>) {
       role="option"
       $selected={props.selected}
       aria-selected={props.selected}>
-      {props.selected && <TickIcon tintColor={colors.white} source="icon-tick" width={12} />}
+      {props.selected && <TickIcon icon="checkmark" size="small" />}
       {props.item.label}
     </StyledItem>
   );

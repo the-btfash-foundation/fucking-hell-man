@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 27/01/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadLogging
@@ -15,6 +15,7 @@ import UIKit
  Coordinators help to abstract the navigation and business logic from view controllers making them
  more manageable and reusable.
  */
+@MainActor
 open class Coordinator: NSObject {
     /// Private trace log.
     private lazy var logger = Logger(label: "\(Self.self)")
@@ -45,7 +46,7 @@ open class Coordinator: NSObject {
 
     /**
      Add child coordinator.
-
+    
      Adding the same coordinator twice is a no-op.
      */
     public func addChild(_ child: Coordinator) {
@@ -59,7 +60,7 @@ open class Coordinator: NSObject {
 
     /**
      Remove child coordinator.
-
+    
      Removing coordinator that's no longer a child of this coordinator is a no-op.
      */
     public func removeChild(_ child: Coordinator) {
@@ -82,7 +83,7 @@ open class Coordinator: NSObject {
 /**
  Protocol describing coordinators that can be presented using modal presentation.
  */
-public protocol Presentable: Coordinator {
+public protocol Presentable: Coordinator, Sendable {
     /**
      View controller that is presented modally. It's expected it to be the topmost view controller
      managed by coordinator.
@@ -122,7 +123,7 @@ extension Presenting where Self: Presentable {
 extension Presenting {
     /**
      Present child coordinator.
-
+    
      Automatically adds child and removes it upon interactive dismissal.
      */
     public func presentChild(
@@ -174,10 +175,10 @@ extension Presenting {
 extension Presentable {
     /**
      Dismiss this coordinator.
-
+    
      Automatically removes itself from parent.
      */
-    public func dismiss(animated: Bool, completion: (() -> Void)? = nil) {
+    public func dismiss(animated: Bool, completion: (@MainActor () -> Void)? = nil) {
         removeFromParent()
 
         presentedViewController.dismiss(animated: animated, completion: completion)
@@ -186,7 +187,7 @@ extension Presentable {
     /**
      Add block based observer triggered if coordinator is dismissed via user interaction.
      */
-    public func onInteractiveDismissal(_ handler: @escaping (Coordinator) -> Void) {
+    public func onInteractiveDismissal(_ handler: @escaping @MainActor @Sendable (Coordinator) -> Void) {
         interactiveDismissalObservers.append(handler)
     }
 }

@@ -1,7 +1,7 @@
 import styled from 'styled-components';
 
-import { colors } from '../../config.json';
 import { messages } from '../../shared/gettext';
+import { colors } from '../lib/foundations';
 
 export enum SecuredDisplayStyle {
   secured,

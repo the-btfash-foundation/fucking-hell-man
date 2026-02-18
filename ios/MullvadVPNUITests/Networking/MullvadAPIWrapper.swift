@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-18.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import CryptoKit
@@ -15,21 +15,21 @@ enum MullvadAPIError: Error {
     case requestError
 }
 
-class MullvadAPIWrapper {
+class MullvadAPIWrapper: @unchecked Sendable {
     private var mullvadAPI: MullvadApi
     private let throttleQueue = DispatchQueue(label: "MullvadAPIWrapperThrottleQueue", qos: .userInitiated)
     private var lastCallDate: Date?
     private let throttleDelay: TimeInterval = 0.25
     private let throttleWaitTimeout: TimeInterval = 5.0
 
-    // swiftlint:disable force_cast
-    static let hostName = Bundle(for: MullvadAPIWrapper.self)
+    static let hostName =
+        Bundle(for: MullvadAPIWrapper.self)
         .infoDictionary?["ApiHostName"] as! String
 
     /// API endpoint configuration value in the format <IP-address>:<port>
-    static let endpoint = Bundle(for: MullvadAPIWrapper.self)
+    static let endpoint =
+        Bundle(for: MullvadAPIWrapper.self)
         .infoDictionary?["ApiEndpoint"] as! String
-    // swiftlint:enable force_cast
 
     init() throws {
         let apiAddress = try Self.getAPIIPAddress() + ":" + Self.getAPIPort()
@@ -38,7 +38,7 @@ class MullvadAPIWrapper {
     }
 
     /// Throttle what's in the callback. This is used for throttling requests to the app API. All requests should be throttled or else we might be rate limited. The API allows maximum 5 requests per second. Note that the implementation assumes what is being throttled is synchronous.
-    private func throttle(callback: @escaping () -> Void) {
+    private func throttle(callback: @Sendable @escaping () -> Void) {
         throttleQueue.async {
             let now = Date()
             var delay: TimeInterval = 0
@@ -85,7 +85,7 @@ class MullvadAPIWrapper {
     }
 
     func createAccount() -> String {
-        var accountNumber = String()
+        nonisolated(unsafe) var accountNumber = String()
         let requestCompletedExpectation = XCTestExpectation(description: "Create account request completed")
 
         throttle {
@@ -143,14 +143,14 @@ class MullvadAPIWrapper {
 
     /// Add multiple devices to specified account. Dummy WireGuard keys will be generated.
     func addDevices(_ numberOfDevices: Int, account: String) {
-        for i in 0 ..< numberOfDevices {
+        for i in 0..<numberOfDevices {
             self.addDevice(account)
             print("Created \(i + 1) devices")
         }
     }
 
     func getAccountExpiry(_ account: String) throws -> Date {
-        var accountExpiryDate: Date = .distantPast
+        nonisolated(unsafe) var accountExpiryDate: Date = .distantPast
         let requestCompletedExpectation = XCTestExpectation(description: "Get account expiry request completed")
 
         throttle {
@@ -171,7 +171,7 @@ class MullvadAPIWrapper {
     }
 
     func getDevices(_ account: String) throws -> [Device] {
-        var devices: [Device] = []
+        nonisolated(unsafe) var devices: [Device] = []
         let requestCompletedExpectation = XCTestExpectation(description: "Get devices request completed")
 
         throttle {

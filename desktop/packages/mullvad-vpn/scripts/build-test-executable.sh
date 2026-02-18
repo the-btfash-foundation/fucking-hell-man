@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 set -eu
+# Enable recursive “**” globbing patterns to match files in all subdirectories
+shopt -s globstar
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/.."
@@ -9,12 +11,14 @@ TARGET=${1:-$(rustc -vV | sed -n 's|host: ||p')}
 PRODUCT_VERSION=$(cargo run -q --bin mullvad-version)
 
 ASSETS=(
-    "build/src/config.json"
-    "build/src/renderer/lib/routes.js"
-    "build/test/e2e/utils.js"
-    "build/test/e2e/shared/*.js"
-    "build/test/e2e/installed/*.js"
-    "build/test/e2e/installed/**/*.js"
+    "build-standalone/src/renderer/lib/foundations/**/*.js"
+    "build-standalone/src/shared/constants/*.js"
+    "build-standalone/src/shared/routes.js"
+    "build-standalone/test/e2e/utils.js"
+    "build-standalone/test/e2e/lib/*.js"
+    "build-standalone/test/e2e/route-object-models/**/*.js"
+    "build-standalone/test/e2e/shared/*.js"
+    "build-standalone/test/e2e/installed/**/*.js"
 )
 
 NODE_MODULES=(
@@ -30,7 +34,8 @@ function build_test_executable {
     local temp_dir
     temp_dir="$(mktemp -d)"
     local temp_executable="$temp_dir/temp-test-executable$bin_suffix"
-    local output="../../../dist/app-e2e-tests-$PRODUCT_VERSION-$TARGET$bin_suffix"
+    local output_name="app-e2e-tests-$PRODUCT_VERSION-$TARGET$bin_suffix"
+    local output="../../../dist/$output_name"
     local node_copy_path="$temp_dir/node$bin_suffix"
     local node_path
     node_path="$(volta which node || which node)"
@@ -38,7 +43,7 @@ function build_test_executable {
     # pack assets
     cp "$node_path" "$node_copy_path"
     # shellcheck disable=SC2068
-    tar -czf ./build/test/assets.tar.gz ${ASSETS[@]} -C ../../ ${NODE_MODULES[@]}
+    tar -czf ./build-standalone/assets.tar.gz ${ASSETS[@]} -C ../../ ${NODE_MODULES[@]}
 
     cp "$node_copy_path" "$temp_executable"
     node --experimental-sea-config standalone-tests.sea.json
@@ -60,9 +65,12 @@ function build_test_executable {
 
     mkdir -p "$(dirname "$output")"
     mv "$temp_executable" "$output"
+    echo "Test executable created: $output_name"
 
     rm -rf "$temp_dir"
 }
+
+npm run build:standalone
 
 case "$TARGET" in
     "aarch64-unknown-linux-gnu")

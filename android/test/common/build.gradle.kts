@@ -1,4 +1,10 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import utilities.BuildTypes
+import utilities.FlavorDimensions
+import utilities.Flavors
+
 plugins {
+    alias(libs.plugins.mullvad.utilities)
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
@@ -6,19 +12,21 @@ plugins {
 
 android {
     namespace = "net.mullvad.mullvadvpn.test.common"
-    compileSdk = Versions.compileSdkVersion
-    buildToolsVersion = Versions.buildToolsVersion
+    compileSdk = libs.versions.compile.sdk.get().toInt()
+    buildToolsVersion = libs.versions.build.tools.get()
 
-    defaultConfig { minSdk = Versions.minSdkVersion }
+    defaultConfig { minSdk = libs.versions.min.sdk.get().toInt() }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = Versions.jvmTarget
-        allWarningsAsErrors = true
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.fromTarget(libs.versions.jvm.target.get())
+            allWarningsAsErrors = true
+        }
     }
 
     lint {
@@ -37,6 +45,19 @@ android {
                 )
         }
     }
+
+    // We need to setup the dimensions and flavors in order for the baseline profile
+    // module to be able to to use :test:common.
+    flavorDimensions += FlavorDimensions.BILLING
+    flavorDimensions += FlavorDimensions.INFRASTRUCTURE
+
+    productFlavors {
+        create(Flavors.OSS) { dimension = FlavorDimensions.BILLING }
+        create(Flavors.PLAY) { dimension = FlavorDimensions.BILLING }
+        create(Flavors.PROD) { dimension = FlavorDimensions.INFRASTRUCTURE }
+        create(Flavors.DEVMOLE) { dimension = FlavorDimensions.INFRASTRUCTURE }
+        create(Flavors.STAGEMOLE) { dimension = FlavorDimensions.INFRASTRUCTURE }
+    }
 }
 
 androidComponents {
@@ -47,12 +68,16 @@ androidComponents {
 
 dependencies {
     implementation(projects.lib.endpoint)
+    implementation(projects.lib.ui.tag)
+    implementation(projects.lib.grpc)
+    implementation(projects.lib.model)
 
+    implementation(libs.arrow)
     implementation(libs.androidx.test.core)
     implementation(libs.androidx.test.runner)
     implementation(libs.androidx.test.rules)
     implementation(libs.androidx.test.uiautomator)
-    implementation(Dependencies.junitJupiterEngine)
+    implementation(libs.junit.jupiter.engine)
     implementation(libs.kermit)
     implementation(libs.kotlin.stdlib)
 

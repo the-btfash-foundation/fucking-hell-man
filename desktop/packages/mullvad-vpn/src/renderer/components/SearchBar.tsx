@@ -1,11 +1,12 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../config.json';
 import { messages } from '../../shared/gettext';
-import { useEffectEvent, useStyledRef } from '../lib/utility-hooks';
+import { useFocusReferenceBeforePaint } from '../hooks';
+import { Icon, IconButton } from '../lib/components';
+import { colors } from '../lib/foundations';
+import { useStyledRef } from '../lib/utility-hooks';
 import { normalText } from './common-styles';
-import ImageView from './ImageView';
 
 export const StyledSearchContainer = styled.div({
   position: 'relative',
@@ -20,63 +21,63 @@ export const StyledSearchInput = styled.input.attrs({ type: 'text' })({
   padding: '9px 38px',
   margin: 0,
   lineHeight: '24px',
-  color: colors.white60,
-  backgroundColor: colors.white10,
+  color: colors.whiteAlpha60,
+  backgroundColor: colors.whiteOnDarkBlue10,
   '&&::placeholder': {
-    color: colors.white60,
+    color: colors.whiteOnDarkBlue60,
   },
   '&&:focus': {
     color: colors.blue,
     backgroundColor: colors.white,
   },
-  '&&:focus::placeholder': {
-    color: colors.blue40,
+  '&&:disabled': {
+    backgroundColor: colors.whiteOnDarkBlue5,
+    '&&::placeholder': {
+      color: colors.whiteAlpha20,
+    },
   },
 });
 
-export const StyledClearButton = styled.button({
+export const StyledClearButton = styled(IconButton)({
   position: 'absolute',
   top: '50%',
   transform: 'translateY(-50%)',
   right: '9px',
-  border: 'none',
-  background: 'none',
-  padding: 0,
 });
 
-export const StyledSearchIcon = styled(ImageView)({
+export const StyledClearIcon = styled(Icon)({
+  background: colors.whiteOnDarkBlue60,
+  '&&:hover': {
+    backgroundColor: colors.whiteOnDarkBlue40,
+  },
+});
+
+export const StyledSearchIcon = styled(Icon)({
   position: 'absolute',
   top: '50%',
   transform: 'translateY(-50%)',
-  left: '9px',
+  left: '8px',
   [`${StyledSearchInput}:focus ~ &&`]: {
     backgroundColor: colors.blue,
   },
-});
-
-export const StyledClearIcon = styled(ImageView)({
-  '&&:hover': {
-    backgroundColor: colors.white60,
-  },
-  [`${StyledSearchInput}:focus ~ ${StyledClearButton} &&`]: {
-    backgroundColor: colors.blue40,
-  },
-  [`${StyledSearchInput}:focus ~ ${StyledClearButton} &&:hover`]: {
-    backgroundColor: colors.blue,
+  [`${StyledSearchInput}:disabled ~ &&`]: {
+    backgroundColor: colors.whiteAlpha20,
   },
 });
 
-interface ISearchBarProps {
+export interface ISearchBarProps {
   searchTerm: string;
+  disabled?: boolean;
   onSearch: (searchTerm: string) => void;
   className?: string;
   disableAutoFocus?: boolean;
 }
 
 export default function SearchBar(props: ISearchBarProps) {
-  const { onSearch } = props;
+  const { disabled, onSearch } = props;
 
   const inputRef = useStyledRef<HTMLInputElement>();
+  useFocusReferenceBeforePaint(inputRef, !props.disableAutoFocus);
 
   const onInput = useCallback(
     (event: React.FormEvent) => {
@@ -91,26 +92,19 @@ export default function SearchBar(props: ISearchBarProps) {
     inputRef.current?.blur();
   }, [inputRef, onSearch]);
 
-  const focusInput = useEffectEvent(() => {
-    if (!props.disableAutoFocus) {
-      inputRef.current?.focus({ preventScroll: true });
-    }
-  });
-
-  useEffect(() => focusInput(), []);
-
   return (
     <StyledSearchContainer className={props.className}>
       <StyledSearchInput
+        disabled={disabled}
         ref={inputRef}
         value={props.searchTerm}
         onInput={onInput}
         placeholder={messages.gettext('Search for...')}
       />
-      <StyledSearchIcon source="icon-search" width={24} tintColor={colors.white60} />
+      <StyledSearchIcon icon="search" color="whiteAlpha60" />
       {props.searchTerm.length > 0 && (
-        <StyledClearButton onClick={onClear}>
-          <StyledClearIcon source="icon-close" width={18} tintColor={colors.white40} />
+        <StyledClearButton variant="secondary" onClick={onClear}>
+          <StyledClearIcon icon="cross-circle" />
         </StyledClearButton>
       )}
     </StyledSearchContainer>

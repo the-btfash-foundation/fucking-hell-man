@@ -3,32 +3,36 @@
 mod api;
 mod classes;
 mod problem_report;
-mod talpid_vpn_service;
 
 use jnix::{
-    jni::{
-        objects::{JClass, JObject},
-        JNIEnv,
-    },
     FromJava, JnixEnv,
+    jni::{
+        JNIEnv,
+        objects::{JClass, JObject},
+    },
 };
 use mullvad_api::ApiEndpoint;
 use mullvad_daemon::{
-    cleanup_old_rpc_socket, exception_logging, logging, runtime::new_multi_thread, version, Daemon,
-    DaemonCommandChannel, DaemonCommandSender, DaemonConfig,
+    Daemon, DaemonCommandChannel, DaemonCommandSender, DaemonConfig, cleanup_old_rpc_socket,
+    exception_logging, logging,
+    logging::{LogHandle, LogLocation},
+    runtime::new_multi_thread,
+    version,
 };
+use std::{collections::HashMap, sync::OnceLock};
 use std::{
+    ffi::CString,
     io,
+    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, Once, OnceLock},
+    sync::{Arc, Mutex, Once},
 };
-use talpid_types::{android::AndroidContext, ErrorExt};
-
-const LOG_FILENAME: &str = "daemon.log";
+use talpid_types::{ErrorExt, android::AndroidContext};
 
 /// Mullvad daemon instance. It must be initialized and destroyed by `MullvadDaemon.initialize` and
 /// `MullvadDaemon.shutdown`, respectively.
 static DAEMON_CONTEXT: Mutex<Option<DaemonContext>> = Mutex::new(None);
+static LOG_HANDLE: OnceLock<LogHandle> = OnceLock::new();
 
 static LOAD_CLASSES: Once = Once::new();
 
@@ -52,7 +56,7 @@ pub enum Error {
 
 /// Throw a Java exception and return if `result` is an error
 macro_rules! ok_or_throw {
-    ($env:expr, $result:expr) => {{
+    ($env:expr_2021, $result:expr_2021) => {{
         match $result {
             Ok(val) => val,
             Err(err) => {
@@ -74,8 +78,8 @@ struct DaemonContext {
 
 /// Spawn Mullvad daemon. There can only be a single instance, which must be shut down using
 /// `MullvadDaemon.shutdown`. On success, nothing is returned. On error, an exception is thrown.
-#[no_mangle]
-pub extern "system" fn Java_net_mullvad_mullvadvpn_service_MullvadDaemon_initialize(
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_net_mullvad_mullvadvpn_app_service_MullvadDaemon_initialize(
     env: JNIEnv<'_>,
     _class: JClass<'_>,
     vpn_service: JObject<'_>,
@@ -83,22 +87,42 @@ pub extern "system" fn Java_net_mullvad_mullvadvpn_service_MullvadDaemon_initial
     files_directory: JObject<'_>,
     cache_directory: JObject<'_>,
     api_endpoint: JObject<'_>,
+    extra_metadata: JObject<'_>,
 ) {
     let mut ctx = DAEMON_CONTEXT.lock().unwrap();
     assert!(ctx.is_none(), "multiple calls to MullvadDaemon.initialize");
 
     let env = JnixEnv::from(env);
+    let files_dir = pathbuf_from_java(&env, files_directory);
 
+    // In some cases, this function may be called multiple times for the same daemon process.
+    // Since the tracing dispatcher can only be initialized once, we use a OnceLock to
+    // reuse the existing log handle
+    let log_handle = LOG_HANDLE
+        .get_or_init(|| {
+            start_logging(&files_dir)
+                .map_err(Error::InitializeLogging)
+                .unwrap()
+        })
+        .clone();
+
+    version::log_version();
+
+    log::info!("Pre-loading classes!");
     LOAD_CLASSES.call_once(|| env.preload_classes(classes::CLASSES.iter().cloned()));
+    log::info!("Done loading classes");
+
+    talpid_platform_metadata::set_extra_metadata(HashMap::from_java(&env, extra_metadata));
 
     let rpc_socket = pathbuf_from_java(&env, rpc_socket_path);
-    let files_dir = pathbuf_from_java(&env, files_directory);
     let cache_dir = pathbuf_from_java(&env, cache_directory);
 
     let android_context = ok_or_throw!(&env, create_android_context(&env, vpn_service));
+    log::info!("Created Android Context");
 
     let api_endpoint = api::api_endpoint_from_java(&env, api_endpoint);
 
+    log::info!("Starting daemon");
     let daemon = ok_or_throw!(
         &env,
         start(
@@ -107,6 +131,7 @@ pub extern "system" fn Java_net_mullvad_mullvadvpn_service_MullvadDaemon_initial
             files_dir,
             cache_dir,
             api_endpoint,
+            log_handle
         )
     );
 
@@ -114,9 +139,8 @@ pub extern "system" fn Java_net_mullvad_mullvadvpn_service_MullvadDaemon_initial
 }
 
 /// Shut down Mullvad daemon that was initialized using `MullvadDaemon.initialize`.
-#[no_mangle]
-#[allow(non_snake_case)]
-pub extern "system" fn Java_net_mullvad_mullvadvpn_service_MullvadDaemon_shutdown(
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_net_mullvad_mullvadvpn_app_service_MullvadDaemon_shutdown(
     _: JNIEnv<'_>,
     _class: JClass<'_>,
 ) {
@@ -127,6 +151,14 @@ pub extern "system" fn Java_net_mullvad_mullvadvpn_service_MullvadDaemon_shutdow
         // Dropping the tokio runtime will block if there are any tasks in flight.
         // That is, until all async tasks yield *and* all blocking threads have stopped.
     }
+
+    // Flush any remaining logs to file
+    _ = LOG_HANDLE
+        .get()
+        .expect("Log handle has been initialized")
+        .logfile_writer
+        .clone() // clone the inner Arcs
+        .flush();
 }
 
 fn start(
@@ -134,11 +166,9 @@ fn start(
     rpc_socket: PathBuf,
     files_dir: PathBuf,
     cache_dir: PathBuf,
-    api_endpoint: Option<mullvad_api::ApiEndpoint>,
+    api_endpoint: Option<ApiEndpoint>,
+    log_handle: LogHandle,
 ) -> Result<DaemonContext, Error> {
-    start_logging(&files_dir).map_err(Error::InitializeLogging)?;
-    version::log_version();
-
     #[cfg(not(feature = "api-override"))]
     if api_endpoint.is_some() {
         log::warn!("api_endpoint will be ignored since 'api-override' is not enabled");
@@ -150,6 +180,7 @@ fn start(
         files_dir,
         cache_dir,
         api_endpoint.unwrap_or(ApiEndpoint::from_env_vars()),
+        log_handle,
     )
 }
 
@@ -159,6 +190,7 @@ fn spawn_daemon(
     files_dir: PathBuf,
     cache_dir: PathBuf,
     endpoint: ApiEndpoint,
+    log_handle: LogHandle,
 ) -> Result<DaemonContext, Error> {
     let daemon_command_channel = DaemonCommandChannel::new();
     let daemon_command_tx = daemon_command_channel.sender();
@@ -173,6 +205,7 @@ fn spawn_daemon(
         cache_dir,
         android_context,
         endpoint,
+        log_handle,
     };
 
     let running_daemon =
@@ -208,21 +241,22 @@ async fn spawn_daemon_inner(
     Ok(running_daemon)
 }
 
-fn start_logging(log_dir: &Path) -> Result<(), String> {
-    static LOGGER_RESULT: OnceLock<Result<(), String>> = OnceLock::new();
-    LOGGER_RESULT
-        .get_or_init(|| start_logging_inner(log_dir).map_err(|e| e.display_chain()))
-        .to_owned()
-}
+fn start_logging(log_dir: &Path) -> Result<LogHandle, String> {
+    let log_location = LogLocation {
+        directory: log_dir.to_owned(),
+        filename: PathBuf::from("daemon.log"),
+    };
+    let exception_log_path = CString::new(log_location.log_path().as_os_str().as_bytes())
+        .map_err(|_| "Log file path contained interior null bytes: {log_file:?}")?;
 
-fn start_logging_inner(log_dir: &Path) -> Result<(), logging::Error> {
-    let log_file = log_dir.join(LOG_FILENAME);
+    let log_handle = logging::init_logger(log::LevelFilter::Debug, Some(log_location), true)
+        .map_err(|e| e.display_chain())?;
 
-    logging::init_logger(log::LevelFilter::Debug, Some(&log_file), true)?;
-    exception_logging::enable();
     log_panics::init();
+    exception_logging::set_log_file(exception_log_path);
+    exception_logging::enable();
 
-    Ok(())
+    Ok(log_handle)
 }
 
 fn create_android_context(

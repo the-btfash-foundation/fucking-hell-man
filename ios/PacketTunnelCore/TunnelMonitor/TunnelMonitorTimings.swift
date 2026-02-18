@@ -3,12 +3,12 @@
 //  PacketTunnelCore
 //
 //  Created by Jon Petersson on 2023-09-18.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadTypes
 
-public struct TunnelMonitorTimings {
+public struct TunnelMonitorTimings: Sendable {
     /// Interval for periodic heartbeat ping issued when traffic is flowing.
     /// Should help to detect connectivity issues on networks that drop traffic in one of directions,
     /// regardless if tx/rx counters are being updated.

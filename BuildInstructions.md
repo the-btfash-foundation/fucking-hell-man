@@ -9,23 +9,35 @@ on your platform please submit an issue or a pull request.
 ## All platforms
 
 - Get the latest **stable** Rust toolchain via [rustup.rs](https://rustup.rs/).
+  - Install default targets and components needed for your platform:
+    ```bash
+    ./scripts/setup-rust android|ios|windows|linux|macos
+     ```
+  - (Optional) Run the following to install a git `post-checkout` hook that will automatically
+    run the `setup-rust` script when the Rust version specified in the `rust-toolchain.toml` file changes:
+    ```bash
+    .scripts/setup-rust install-hook
+    ```
 
 - You need Node.js and npm. You can find the exact versions in the `volta` section of
   `desktop/package.json`. The toolchain is managed by volta.
 
-  - Linux & macOS
+  - Linux
+
+    Follow instructions on [volta.sh](https://volta.sh/)
+
+  - macOS
 
     ```bash
-    cargo install --git https://github.com/volta-cli/volta && volta setup
+    brew install volta && volta setup
     ````
 
   - Windows
 
     Install the `msi` hosted here: https://github.com/volta-cli/volta
 
-- (Not Windows) Install Go (ideally version `1.21`) by following the [official
-  instructions](https://golang.org/doc/install).  Newer versions may work
-  too.
+- Install Go (ideally version `1.21`) by following the [official instructions](https://golang.org/doc/install).
+  Newer versions may work too.
 
 - Install a protobuf compiler (version 3.15 and up), it can be installed on most major Linux distros
   via the package name `protobuf-compiler`, `protobuf` on macOS via Homebrew, and on Windows
@@ -34,6 +46,15 @@ on your platform please submit an issue or a pull request.
   Linux distro:
   - `protobuf-devel` on Fedora.
   - `libprotobuf-dev` on Debian/Ubuntu.
+
+- **`bash` must be installed and available in PATH on all platforms**. This is required for building
+  the desktop app:
+- Bash version 4.0 or later is required for all platforms and must be added to your PATH environment variable.
+  - Linux: Bash is typically installed by default, otherwise refer to your distribution for instructions on how to install it.
+  - macOS: The default installed version (3.2.5) is not supported. Install a newer version via Homebrew: `brew install bash`
+  - Windows: Install [Git for Windows] which includes Git Bash and other required unix utilities.
+
+[Git for Windows]: https://git-scm.com/download/win
 
 ## Linux
 
@@ -54,6 +75,20 @@ sudo dnf install dbus-devel
 # For building the installer
 sudo dnf install rpm-build
 ```
+
+## Using nix devshell
+
+This is supported on Linux (x86_64) as well as macOS (x86_64 and aarch64).
+[Install nix](./android/docs/BuildInstructions.md#Build-using-nix-devshell) if you haven't already.
+
+   ```bash
+   nix develop
+   ```
+
+#### direnv
+
+Provided in the repository root is a [direnv](https://direnv.net/) for automatically sourcing the devshell.
+Allow it by executing `direnv allow .` (in `<repository>`) once.
 
 ### Cross-compiling for ARM64
 
@@ -93,8 +128,10 @@ The host has to have the following installed:
 
 - Windows 10 (or Windows 11) SDK.
 
-- `bash` installed as well as a few base unix utilities, including `sed` and `tail`.
-  You are recommended to use [Git for Windows].
+- `bash` and base Unix utilities must be installed and available in PATH (see the requirement in
+  the [All platforms](#all-platforms) section above).
+
+- `zig` installed and available in `%PATH%`. 0.14 or later is recommended: https://ziglang.org/download/.
 
 - `msbuild.exe` available in `%PATH%`. If you installed Visual Studio Community edition, the
   binary can be found under:
@@ -113,8 +150,6 @@ The host has to have the following installed:
   ```bash
   rustup target add i686-pc-windows-msvc
   ```
-
-[Git for Windows]: https://git-scm.com/download/win
 
 ### Cross-compiling for ARM64
 
@@ -135,12 +170,6 @@ rustup target add aarch64-pc-windows-msvc
 
 In addition to the above requirements:
 
-- `x86_64-pc-windows-msvc` is required to build `talpid-openvpn-plugin`:
-
-  ```bash
-  rustup target add x86_64-pc-windows-msvc
-  ```
-
 - `clang` is required (can be found in the Visual Studio installer) in `PATH`.
 
   `INCLUDE` also needs to include the correct headers for clang. This can be found by running
@@ -153,7 +182,7 @@ In addition to the above requirements:
   the Electron app:
 
   ```
-  pushd gui
+  pushd desktop/packages/mullvad-vpn
   npm install --target_arch=x64 grpc-tools
   popd
   ```
@@ -243,7 +272,7 @@ On Linux, you may also have to specify `USE_SYSTEM_FPM=true` to generate the deb
 
 This section is for building the system service individually.
 
-1. Source `env.sh` to set the default environment variables:
+1. On macOS, source `env.sh` to set the default environment variables:
     ```bash
     source env.sh
     ```
@@ -252,19 +281,14 @@ This section is for building the system service individually.
     ```bash
     ./build-windows-modules.sh
     ```
+    And copy the `wintun.dll` next to the daemon binary:
+    ```bash
+    cp dist-assets/binaries/x86_64-pc-windows-msvc/wintun.dll target/debug/
+    ```
 
 1. Build the system daemon plus the other Rust tools and programs:
     ```bash
     cargo build
-    ```
-
-1. Copy the OpenVPN binaries, and our plugin for it, to the directory we will
-    use as a resource directory. If you want to use any other directory, you would need to copy
-    even more files.
-    ```bash
-    cp dist-assets/binaries/<platform>/openvpn[.exe] dist-assets/
-    cp target/debug/*talpid_openvpn_plugin* dist-assets/
-    cp dist-assets/binaries/x86_64-pc-windows-msvc/wintun.dll target/debug/
     ```
 
 1. On Windows, the daemon must be run as the SYSTEM user. You can use

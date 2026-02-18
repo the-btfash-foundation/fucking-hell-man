@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-06-29.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -11,9 +11,4 @@ import UIKit
 struct MarkdownStylingOptions {
     var font: UIFont
     var paragraphStyle: NSParagraphStyle = .default
-
-    var boldFont: UIFont {
-        let fontDescriptor = font.fontDescriptor.withSymbolicTraits(.traitBold) ?? font.fontDescriptor
-        return UIFont(descriptor: fontDescriptor, size: font.pointSize)
-    }
 }

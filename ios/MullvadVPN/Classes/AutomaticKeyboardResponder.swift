@@ -3,12 +3,13 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 24/03/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadLogging
 import UIKit
 
+@MainActor
 class AutomaticKeyboardResponder {
     weak var targetView: UIView?
     private let handler: (UIView, CGFloat) -> Void
@@ -46,34 +47,25 @@ class AutomaticKeyboardResponder {
 
     private func handleKeyboardNotification(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
-              let targetView else { return }
-        // In iOS 16.1 and later, the keyboard notification object is the screen the keyboard appears on.
-        if #available(iOS 16.1, *) {
-            guard let screen = notification.object as? UIScreen,
-                  // Get the keyboard’s frame at the end of its animation.
-                  let keyboardFrameEnd = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let targetView
+        else { return }
+        guard let screen = notification.object as? UIScreen,
+            // Get the keyboard’s frame at the end of its animation.
+            let keyboardFrameEnd = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        else { return }
 
-            // Use that screen to get the coordinate space to convert from.
-            let fromCoordinateSpace = screen.coordinateSpace
+        // Use that screen to get the coordinate space to convert from.
+        let fromCoordinateSpace = screen.coordinateSpace
 
-            // Get your view's coordinate space.
-            let toCoordinateSpace: UICoordinateSpace = targetView
+        // Get your view's coordinate space.
+        let toCoordinateSpace: UICoordinateSpace = targetView
 
-            // Convert the keyboard's frame from the screen's coordinate space to your view's coordinate space.
-            let convertedKeyboardFrameEnd = fromCoordinateSpace.convert(keyboardFrameEnd, to: toCoordinateSpace)
+        // Convert the keyboard's frame from the screen's coordinate space to your view's coordinate space.
+        let convertedKeyboardFrameEnd = fromCoordinateSpace.convert(keyboardFrameEnd, to: toCoordinateSpace)
 
-            lastKeyboardRect = convertedKeyboardFrameEnd
+        lastKeyboardRect = convertedKeyboardFrameEnd
 
-            adjustContentInsets(convertedKeyboardFrameEnd: convertedKeyboardFrameEnd)
-        } else {
-            guard let keyboardValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue
-            else { return }
-            let keyboardFrameEnd = keyboardValue.cgRectValue
-            let convertedKeyboardFrameEnd = targetView.convert(keyboardFrameEnd, from: targetView.window)
-            lastKeyboardRect = convertedKeyboardFrameEnd
-
-            adjustContentInsets(convertedKeyboardFrameEnd: convertedKeyboardFrameEnd)
-        }
+        adjustContentInsets(convertedKeyboardFrameEnd: convertedKeyboardFrameEnd)
     }
 
     private func adjustContentInsets(convertedKeyboardFrameEnd: CGRect) {
@@ -104,7 +96,8 @@ extension AutomaticKeyboardResponder {
         self.init(targetView: targetView) { scrollView, offset in
             if scrollView.canBecomeFirstResponder {
                 scrollView.contentInset.bottom = targetView.isFirstResponder ? offset : 0
-                scrollView.verticalScrollIndicatorInsets.bottom = targetView.isFirstResponder
+                scrollView.verticalScrollIndicatorInsets.bottom =
+                    targetView.isFirstResponder
                     ? offset
                     : 0
             } else {

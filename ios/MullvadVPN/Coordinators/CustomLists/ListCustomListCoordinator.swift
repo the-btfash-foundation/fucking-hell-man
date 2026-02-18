@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-03-06.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
@@ -58,27 +58,11 @@ class ListCustomListCoordinator: Coordinator, Presentable, Presenting {
             nodes: nodes
         )
 
-        coordinator.didFinish = { [weak self] editCustomListCoordinator, action, list in
+        coordinator.didFinish = { [weak self] editCustomListCoordinator, list in
             guard let self else { return }
 
             popToList()
             editCustomListCoordinator.removeFromParent()
-
-            var relayConstraints = tunnelManager.settings.relayConstraints
-            relayConstraints.entryLocations = self.updateRelayConstraint(
-                relayConstraints.entryLocations,
-                for: action,
-                in: list
-            )
-            relayConstraints.exitLocations = self.updateRelayConstraint(
-                relayConstraints.exitLocations,
-                for: action,
-                in: list
-            )
-
-            tunnelManager.updateSettings([.relayConstraints(relayConstraints)]) { [weak self] in
-                self?.tunnelManager.reconnectTunnel(selectNewRelay: true)
-            }
         }
 
         coordinator.didCancel = { [weak self] editCustomListCoordinator in
@@ -91,47 +75,13 @@ class ListCustomListCoordinator: Coordinator, Presentable, Presenting {
         addChild(coordinator)
     }
 
-    private func updateRelayConstraint(
-        _ relayConstraint: RelayConstraint<UserSelectedRelays>,
-        for action: EditCustomListCoordinator.FinishAction,
-        in list: CustomList
-    ) -> RelayConstraint<UserSelectedRelays> {
-        var relayConstraint = relayConstraint
-
-        guard let customListSelection = relayConstraint.value?.customListSelection,
-              customListSelection.listId == list.id
-        else { return relayConstraint }
-
-        switch action {
-        case .save:
-            if customListSelection.isList {
-                let selectedRelays = UserSelectedRelays(
-                    locations: list.locations,
-                    customListSelection: UserSelectedRelays.CustomListSelection(listId: list.id, isList: true)
-                )
-                relayConstraint = .only(selectedRelays)
-            } else {
-                let selectedConstraintIsRemovedFromList = list.locations.filter {
-                    relayConstraint.value?.locations.contains($0) ?? false
-                }.isEmpty
-
-                if selectedConstraintIsRemovedFromList {
-                    relayConstraint = .only(UserSelectedRelays(locations: []))
-                }
-            }
-        case .delete:
-            relayConstraint = .only(UserSelectedRelays(locations: []))
-        }
-
-        return relayConstraint
-    }
-
     private func popToList() {
         if interactor.fetchAll().isEmpty {
             navigationController.dismiss(animated: true)
             didFinish?(self)
         } else if let listController = navigationController.viewControllers
-            .first(where: { $0 is ListCustomListViewController }) {
+            .first(where: { $0 is ListCustomListViewController })
+        {
             navigationController.popToViewController(listController, animated: true)
             listViewController.updateDataSource(reloadExisting: true, animated: false)
         }

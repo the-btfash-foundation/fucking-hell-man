@@ -1,6 +1,6 @@
 package net.mullvad.mullvadvpn.lib.model
 
-import org.joda.time.Duration
+import java.time.Duration
 
 sealed interface Notification {
     val actions: List<NotificationAction>
@@ -17,7 +17,6 @@ sealed interface Notification {
     data class AccountExpiry(
         override val channelId: NotificationChannelId,
         override val actions: List<NotificationAction.AccountExpiry>,
-        val websiteAuthToken: WebsiteAuthToken?,
         val durationUntilExpiry: Duration,
     ) : Notification {
         override val ongoing: Boolean = false

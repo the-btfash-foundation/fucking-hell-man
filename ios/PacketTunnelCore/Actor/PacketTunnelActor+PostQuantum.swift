@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by Andrew Bulhak on 2024-05-13.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -30,21 +30,23 @@ extension PacketTunnelActor {
      Called on receipt of the new PQ-negotiated key, to reconnect to the relay, in PQ-secure mode.
      */
     internal func connectWithEphemeralPeer() async {
+        // Don't reconnect if we're in error state - stay in error state
+        // The error occurred during configuration, not negotiation
+        if case .error = state {
+            logger.error("Cannot connect with ephemeral peer: actor is in error state. Staying in error state.")
+            return
+        }
+
         guard let connectionData = state.connectionData else {
             logger.error("Could not create connection state in PostQuantumConnect")
             eventChannel.send(.reconnect(.current))
             return
         }
 
-        stopDefaultPathObserver()
-
         state = .connecting(connectionData)
 
         // Resume tunnel monitoring and use IPv4 gateway as a probe address.
         tunnelMonitor.start(probeAddress: connectionData.selectedRelays.exit.endpoint.ipv4Gateway)
-        // Restart default path observer and notify the observer with the current path that might have changed while
-        // path observer was paused.
-        startDefaultPathObserver(notifyObserverWithCurrentPath: false)
     }
 
     /**
@@ -56,11 +58,13 @@ extension PacketTunnelActor {
          because the obfuscation may be tied to a specific UDP session, as is the case for udp2tcp.
          */
         let settings: Settings = try settingsReader.read()
-        guard let connectionData = try obfuscateConnection(
-            nextRelays: .current,
-            settings: settings,
-            reason: .userInitiated
-        ) else {
+        guard
+            let connectionData = try obfuscateConnection(
+                nextRelays: .current,
+                settings: settings,
+                reason: .userInitiated
+            )
+        else {
             logger.error("Tried to update ephemeral peer negotiation in invalid state: \(state.name)")
             return
         }
@@ -77,6 +81,7 @@ extension PacketTunnelActor {
             if settings.daita.daitaState.isEnabled, let daitaSettings = hop.configuration.daitaParameters {
                 daitaConfiguration = DaitaConfiguration(daita: daitaSettings)
             }
+            try await tunnelAdapter.apply(settings: exitConfiguration.asTunnelSettings())
             try await tunnelAdapter.start(configuration: exitConfiguration, daita: daitaConfiguration)
 
         case let .multi(firstHop, secondHop):
@@ -90,6 +95,11 @@ extension PacketTunnelActor {
                 daitaConfiguration = DaitaConfiguration(daita: daitaSettings)
             }
 
+            try await tunnelAdapter
+                .apply(
+                    settings: connectionConfiguration.exitConfiguration
+                        .asTunnelSettings()
+                )
             try await tunnelAdapter.startMultihop(
                 entryConfiguration: connectionConfiguration.entryConfiguration,
                 exitConfiguration: connectionConfiguration.exitConfiguration, daita: daitaConfiguration

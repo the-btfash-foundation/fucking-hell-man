@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-02-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -40,13 +40,11 @@ enum CustomListItemIdentifier: Hashable, CaseIterable {
     var text: String? {
         switch self {
         case .name:
-            NSLocalizedString("NAME", tableName: "CustomLists", value: "Name", comment: "")
-        case .addLocations:
-            NSLocalizedString("ADD", tableName: "CustomLists", value: "Add locations", comment: "")
-        case .editLocations:
-            NSLocalizedString("EDIT", tableName: "CustomLists", value: "Edit locations", comment: "")
+            NSLocalizedString("Name", comment: "")
+        case .addLocations, .editLocations:
+            NSLocalizedString("Locations", comment: "")
         case .deleteList:
-            NSLocalizedString("Delete", tableName: "CustomLists", value: "Delete list", comment: "")
+            NSLocalizedString("Delete list", comment: "")
         }
     }
 

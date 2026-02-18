@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 
-import { colors } from '../../config.json';
+import { colors } from '../lib/foundations';
 
 export default styled.span({
   display: 'inline-block',

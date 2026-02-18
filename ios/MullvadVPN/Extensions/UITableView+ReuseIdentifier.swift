@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 09/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -103,7 +103,8 @@ extension UITableView {
     /// - Parameter identifier: header footer view identifier.
     /// - Returns: table header footer view.
     func dequeueReusableView(withIdentifier identifier: some HeaderFooterIdentifierProtocol)
-        -> UITableViewHeaderFooterView? {
+        -> UITableViewHeaderFooterView?
+    {
         dequeueReusableHeaderFooterView(withIdentifier: identifier.rawValue)
     }
 }

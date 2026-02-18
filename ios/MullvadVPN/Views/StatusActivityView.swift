@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Andreas Lif on 2022-08-15.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -42,7 +42,7 @@ class StatusActivityView: UIView {
         addSubview(activityIndicator)
 
         NSLayoutConstraint.activate([
-            activityIndicator.widthAnchor.constraint(equalTo: statusImageView.widthAnchor),
+            activityIndicator.widthAnchor.constraint(equalTo: activityIndicator.heightAnchor),
             activityIndicator.heightAnchor.constraint(equalTo: statusImageView.heightAnchor),
             statusImageView.topAnchor.constraint(equalTo: topAnchor),
             statusImageView.bottomAnchor.constraint(equalTo: bottomAnchor),

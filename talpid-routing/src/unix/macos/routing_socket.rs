@@ -2,13 +2,13 @@ use std::{
     collections::VecDeque,
     mem::size_of,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 
 use nix::{
     fcntl,
-    sys::socket::{socket, AddressFamily, SockFlag, SockType},
+    sys::socket::{AddressFamily, SockFlag, SockType, socket},
 };
 use std::{
     fs::File,
@@ -16,9 +16,9 @@ use std::{
     os::fd::{AsRawFd, RawFd},
 };
 
-use super::data::{rt_msghdr_short, MessageType, RouteMessage};
+use super::data::{MessageType, RouteMessage, ffi::rt_msghdr_short};
 
-use tokio::io::{unix::AsyncFd, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncWrite, AsyncWriteExt, unix::AsyncFd};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -134,12 +134,12 @@ impl RoutingSocket {
         // SAFETY: `msg_buffer` is guaranteed to be at least as large as `rt_msghdr`.
         unsafe {
             std::ptr::copy_nonoverlapping(
-                &header as *const _ as *const u8,
+                (&raw const header).cast::<u8>(),
                 msg_buffer.as_mut_ptr(),
-                size_of::<super::data::rt_msghdr>(),
+                size_of::<libc::rt_msghdr>(),
             );
         }
-        let mut sockaddr_buf = &mut msg_buffer[std::mem::size_of::<super::data::rt_msghdr>()..];
+        let mut sockaddr_buf = &mut msg_buffer[std::mem::size_of::<libc::rt_msghdr>()..];
         for socket_addr in payload {
             sockaddr_buf
                 .write_all(socket_addr.as_slice())
@@ -158,10 +158,7 @@ struct RoutingSocketInner {
 impl RoutingSocketInner {
     fn new() -> io::Result<Self> {
         let fd = socket(AddressFamily::Route, SockType::Raw, SockFlag::empty(), None)?;
-        let _ = fcntl::fcntl(
-            fd.as_raw_fd(),
-            fcntl::FcntlArg::F_SETFL(fcntl::OFlag::O_NONBLOCK),
-        )?;
+        let _ = fcntl::fcntl(&fd, fcntl::FcntlArg::F_SETFL(fcntl::OFlag::O_NONBLOCK))?;
         let socket = File::from(fd);
         Ok(Self {
             socket: AsyncFd::new(socket)?,
@@ -173,7 +170,7 @@ impl RoutingSocketInner {
             let mut guard = self.socket.readable().await?;
             match guard.try_io(|sock| sock.get_ref().read(out)) {
                 Ok(result) => return result,
-                Err(_err) => continue,
+                Err(_would_block) => continue,
             }
         }
     }

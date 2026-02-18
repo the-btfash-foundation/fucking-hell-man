@@ -1,7 +1,16 @@
 package net.mullvad.mullvadvpn.test.common.page
 
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
+import androidx.test.uiautomator.Until
+import androidx.test.uiautomator.waitForStableInActiveWindow
+import net.mullvad.mullvadvpn.lib.ui.tag.EXPAND_BUTTON_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.GEOLOCATION_ITEM_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.SELECT_LOCATION_LIST_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.SELECT_LOCATION_MENU_BUTTON_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.SELECT_LOCATION_SCREEN_TEST_TAG
 import net.mullvad.mullvadvpn.test.common.extension.findObjectWithTimeout
+import net.mullvad.mullvadvpn.test.common.misc.TestRelay
 
 class SelectLocationPage internal constructor() : Page() {
     override fun assertIsDisplayed() {
@@ -9,7 +18,13 @@ class SelectLocationPage internal constructor() : Page() {
     }
 
     fun clickLocationExpandButton(locationName: String) {
-        val locationCell = uiDevice.findObjectWithTimeout(By.text(locationName)).parent.parent
+        val locationCell =
+            uiDevice
+                .findObjectWithTimeout(
+                    By.textContains(locationName).hasAncestor(By.res(GEOLOCATION_ITEM_TAG))
+                )
+                .parent
+                .parent
         val expandButton = locationCell.findObjectWithTimeout(By.res(EXPAND_BUTTON_TEST_TAG))
         expandButton.click()
     }
@@ -18,8 +33,33 @@ class SelectLocationPage internal constructor() : Page() {
         uiDevice.findObjectWithTimeout(By.text(locationName)).click()
     }
 
-    companion object {
-        const val SELECT_LOCATION_SCREEN_TEST_TAG = "select_location_screen_test_tag"
-        const val EXPAND_BUTTON_TEST_TAG = "expand_button_test_tag"
+    fun scrollUntilCell(locationName: String) {
+        val scrollView2 = uiDevice.findObjectWithTimeout(By.res(SELECT_LOCATION_LIST_TEST_TAG))
+        scrollView2.scrollUntil(Direction.DOWN, Until.hasObject(By.res(locationName)))
+    }
+
+    fun scrollUntilText(text: String, direction: Direction) {
+        val scrollView2 = uiDevice.findObjectWithTimeout(By.res(SELECT_LOCATION_LIST_TEST_TAG))
+        scrollView2.scrollUntil(direction, Until.hasObject(By.text(text)))
+    }
+
+    fun clickMenuButton() {
+        uiDevice.findObjectWithTimeout(By.res(SELECT_LOCATION_MENU_BUTTON_TEST_TAG)).click()
+    }
+
+    fun clickDisableRecentsButton() {
+        uiDevice.findObjectWithTimeout(By.text("Disable recents")).click()
+    }
+
+    fun clickEnableRecentsButton() {
+        uiDevice.findObjectWithTimeout(By.text("Enable recents")).click()
+    }
+
+    fun expandAndClickRelay(testRelay: TestRelay) {
+        clickLocationExpandButton(testRelay.country)
+        uiDevice.waitForStableInActiveWindow()
+        clickLocationExpandButton(testRelay.city)
+        uiDevice.waitForStableInActiveWindow()
+        clickLocationCell(testRelay.relay)
     }
 }

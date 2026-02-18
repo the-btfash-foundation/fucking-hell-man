@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-12.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -99,6 +99,27 @@ class SettingsPage: Page {
     @discardableResult func tapReportAProblemCell() -> Self {
         app.tables[AccessibilityIdentifier.settingsTableView]
             .cells[AccessibilityIdentifier.problemReportCell]
+            .tap()
+
+        return self
+    }
+
+    @discardableResult func tapLanguageCell() -> Self {
+        app.tables[AccessibilityIdentifier.settingsTableView]
+            .cells[AccessibilityIdentifier.languageCell]
+            .tap()
+
+        return self
+    }
+
+    @discardableResult func dismissAlert() -> Self {
+        app.buttons["Cancel"]
+        return self
+    }
+
+    @discardableResult func tapIncludeAllNetworksCell() -> Self {
+        app.tables[AccessibilityIdentifier.settingsTableView]
+            .cells[AccessibilityIdentifier.includeAllNetworksCell]
             .tap()
 
         return self

@@ -3,7 +3,7 @@
 //  MullvadREST
 //
 //  Created by pronebird on 03/11/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -23,12 +23,19 @@ struct ExponentialBackoff: IteratorProtocol {
     mutating func next() -> Duration? {
         let next = _next
 
-        if next > maxDelay {
+        if next >= maxDelay {
             return maxDelay
         }
 
-        _next = next * Int(multiplier)
+        let nextMilliseconds = next.milliseconds
+        let maxMilliseconds = maxDelay.milliseconds
 
+        let (value, overflow) = nextMilliseconds.multipliedReportingOverflow(by: Int(multiplier))
+        if overflow {
+            _next = .milliseconds(maxMilliseconds)
+        } else {
+            _next = .milliseconds(value)
+        }
         return next
     }
 }

@@ -21,7 +21,91 @@ Line wrap the file at 100 chars.                                              Th
 * **Fixed**: for any bug fixes.
 * **Security**: in case of vulnerabilities.
 
-## Unreleased
+## UNRELEASED
+### Add
+- Add support for additional languages.
+- Add recent connections in the Select location view.
+- Show disabled servers in location view.
+- Add ability which types of local notifications are delivered.
+
+### Changed
+- Improve reliability of the bridge API connection method.
+
+## [2025.10 - 2025-12-01]
+### Added
+- Allow using port 443 for UDP-over-TCP.
+
+### Changed
+- Rework location view.
+
+
+## [2025.9 - 2025-11-24]
+### Changed
+- Bump minimum version to iOS 17.0
+- Quantum-resistant tunnel setting is now on by default through the "Automatic" setting.
+
+### Added
+- Add a checkbox that lets users include their account token in problem reports.
+
+## [2025.8 - 2025-10-10]
+### Fixed
+- Fix in-app purchases.
+
+## [2025.7 - 2025-10-10]
+### Fixed
+- Fix IP overrides breaking certain obfuscation methods.
+
+## [2025.6 - 2025-09-23]
+### Added
+- Add support for obfuscating WireGuard tunnel traffic as the QUIC protocol. This helps
+  circumvent censorship.
+- Make feature indicators clickable shortcuts to their corresponding settings.
+- Let users cancel sending a problem report.
+- Add possibility to manage devices from account view.
+- Add support for Dynamic Type to allow fonts to scale according to user's system settings.
+- Add notification that shows when the user is connected to WireGuard with a port that is not
+  supported.
+
+### Changed
+- Replace Classic McEliece with HQC as one of the post-quantum safe key exchange
+  mechanisms used for the quantum-resistant tunnels. The main benefits here are that HQC
+  uses a lot less CPU to compute the keypair, and the public key sent to the server
+  is drastically smaller.
+
+## [2025.5 - 2025-06-17]
+### Changed
+- Make the app feel more responsive when reconnecting.
+
+### Fixed
+- Fix app thinking the device is offline when another VPN is already active.
+
+## [2025.4 - 2025-05-20]
+### Added
+- Make account number copyable on welcome screen.
+- Add animations for connection view.
+
+### Changed
+- Improve the filter view to display the number of available servers based on selected criteria.
+- Improve location view to filter out servers not compatible with custom obfuscation port.
+
+## [2025.3 - 2025-03-06]
+### Fixed
+- Fix DAITA for multihop.
+
+## [2025.2 - 2025-02-08]
+### Added
+- Add different themes for app icons
+
+### Fixed
+- Broken DAITA settings view on iOS 15.
+
+### Changed
+- Move changelog to settings and add an in-app notification banner for app update.
+
+### Removed
+- Remove Google's resolvers from encrypted DNS proxy.
+
+## [2025.1 - 2025-01-14]
 ### Added
 - Update to DAITA v2 - now machines are provided by relays dynamically instead
   of using bundled ones.

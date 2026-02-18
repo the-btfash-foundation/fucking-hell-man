@@ -1,7 +1,7 @@
-use super::{ios_tcp_connection::*, DaitaParameters, EphemeralPeerParameters, PacketTunnelBridge};
+use super::{DaitaParameters, EphemeralPeerParameters, PacketTunnelBridge, ios_tcp_connection::*};
 use std::{ffi::CStr, sync::Mutex, thread};
 use talpid_tunnel_config_client::{
-    request_ephemeral_peer_with, EphemeralPeer, Error, RelayConfigService,
+    EphemeralPeer, Error, RelayConfigService, request_ephemeral_peer_with,
 };
 use talpid_types::net::wireguard::{PrivateKey, PublicKey};
 use tokio::{runtime::Handle as TokioHandle, task::JoinHandle};
@@ -27,11 +27,11 @@ impl ExchangeCancelToken {
 
     /// Blocks until the associated ephemeral peer exchange task is finished.
     pub fn cancel(&self) {
-        if let Ok(mut inner) = self.inner.lock() {
-            if let Some(task) = inner.task.take() {
-                task.abort();
-                let _ = inner.tokio_handle.block_on(task);
-            }
+        if let Ok(mut inner) = self.inner.lock()
+            && let Some(task) = inner.task.take()
+        {
+            task.abort();
+            let _ = inner.tokio_handle.block_on(task);
         }
     }
 }
@@ -48,7 +48,7 @@ pub struct EphemeralPeerExchange {
     peer_parameters: EphemeralPeerParameters,
 }
 
-// # Safety
+// # Safety:
 // This is safe because the void pointer in PacketTunnelBridge is valid for the lifetime of the
 // process where this type is intended to be used.
 unsafe impl Send for EphemeralPeerExchange {}

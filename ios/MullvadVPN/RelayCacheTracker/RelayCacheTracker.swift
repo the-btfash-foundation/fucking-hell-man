@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 05/06/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -13,10 +13,10 @@ import MullvadTypes
 import Operations
 import UIKit
 
-protocol RelayCacheTrackerProtocol {
+protocol RelayCacheTrackerProtocol: Sendable {
     func startPeriodicUpdates()
     func stopPeriodicUpdates()
-    func updateRelays(completionHandler: ((Result<RelaysFetchResult, Error>) -> Void)?) -> Cancellable
+    func updateRelays(completionHandler: ((sending Result<RelaysFetchResult, Error>) -> Void)?) -> Cancellable
     func getCachedRelays() throws -> CachedRelays
     func getNextUpdateDate() -> Date
     func addObserver(_ observer: RelayCacheTrackerObserver)
@@ -24,12 +24,12 @@ protocol RelayCacheTrackerProtocol {
     func refreshCachedRelays() throws
 }
 
-final class RelayCacheTracker: RelayCacheTrackerProtocol {
+final class RelayCacheTracker: RelayCacheTrackerProtocol, @unchecked Sendable {
     /// Relay update interval.
     static let relayUpdateInterval: Duration = .hours(1)
 
     /// Tracker log.
-    private let logger = Logger(label: "RelayCacheTracker")
+    nonisolated(unsafe) private let logger = Logger(label: "RelayCacheTracker")
 
     /// Relay cache.
     private let cache: RelayCacheProtocol
@@ -63,8 +63,19 @@ final class RelayCacheTracker: RelayCacheTrackerProtocol {
         cache = relayCache
 
         do {
-            cachedRelays = try cache.read().cachedRelays
-            try hotfixRelaysThatDoNotHaveDaita()
+            cachedRelays = try cache.read()
+            try hotfixRelaysThatDoNotHaveFeatures()
+
+            #if NEVER_IN_PRODUCTION
+                // If relay list is empty with no etag, fetch on next run loop (non-production builds only)
+                // Deferred to avoid circular initialization issues with API client
+                if let cachedRelays, cachedRelays.relays.isEmpty, cachedRelays.etag == nil {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.logger.debug("Relay list is empty, triggering immediate fetch.")
+                        _ = self?.updateRelays(completionHandler: nil)
+                    }
+                }
+            #endif
         } catch {
             logger.error(
                 error: error,
@@ -75,42 +86,41 @@ final class RelayCacheTracker: RelayCacheTrackerProtocol {
         }
     }
 
-    /// This method updates the cached relay to include daita information
+    /// This method updates the cached relay to include "feature" information
     ///
-    /// This is a hotfix meant to upgrade clients shipped with 2024.5 or before that did not have
-    /// daita information in their representation of `ServerRelay`.
-    /// If a version <= 2024.5 is installed less than an hour before a new upgrade,
-    /// no servers will be shown in locations when filtering for daita relays.
+    /// This is a hotfix meant to upgrade clients shipped with 2025.6 or before that did not have
+    /// feature information in their representation of `ServerRelay`.
+    /// If a version <= 2025.6 is installed less than an hour before a new upgrade,
+    /// no servers will be shown in locations when filtering for relays requiring a certain feature.
     ///
     /// > Info: `relayCacheLock` does not need to be accessed here, this method should be ran from `init` only.
-    private func hotfixRelaysThatDoNotHaveDaita() throws {
+    private func hotfixRelaysThatDoNotHaveFeatures() throws {
         guard let cachedRelays else { return }
-        let daitaPropertyMissing = cachedRelays.relays.wireguard.relays.first { $0.daita ?? false } == nil
+        let featurePropertyMissing = cachedRelays.relays.wireguard.relays.first { $0.features != nil } == nil
         // If the cached relays already have daita information, this fix is not necessary
-        guard daitaPropertyMissing else { return }
+        guard featurePropertyMissing else { return }
 
         let preBundledRelays = try cache.readPrebundledRelays().relays
-        let preBundledDaitaRelays = preBundledRelays.wireguard.relays.filter { $0.daita == true }
-        var cachedRelaysWithFixedDaita = cachedRelays.relays.wireguard.relays
+        let preBundledFeatureRelays = preBundledRelays.wireguard.relays.filter { $0.features != nil }
+        var cachedRelaysWithFixedFeatures = cachedRelays.relays.wireguard.relays
 
-        // For each daita enabled relay in the prebundled relays
-        // Find the corresponding relay in the cache by matching relay hostnames
-        // Then update it to toggle daita
-        for index in 0 ..< cachedRelaysWithFixedDaita.endIndex {
-            let relay = cachedRelaysWithFixedDaita[index]
-            preBundledDaitaRelays.forEach {
+        // For each relay with features in the prebundled relays, find the corresponding relay
+        // in the cache by matching relay hostnames and update it.
+        for index in 0..<cachedRelaysWithFixedFeatures.endIndex {
+            let relay = cachedRelaysWithFixedFeatures[index]
+            preBundledFeatureRelays.forEach {
                 if $0.hostname == relay.hostname {
-                    cachedRelaysWithFixedDaita[index] = relay.override(daita: true)
+                    cachedRelaysWithFixedFeatures[index] = relay.override(features: $0.features)
                 }
             }
         }
 
         let wireguard = REST.ServerWireguardTunnels(
             ipv4Gateway:
-            cachedRelays.relays.wireguard.ipv4Gateway,
+                cachedRelays.relays.wireguard.ipv4Gateway,
             ipv6Gateway: cachedRelays.relays.wireguard.ipv6Gateway,
             portRanges: cachedRelays.relays.wireguard.portRanges,
-            relays: cachedRelaysWithFixedDaita,
+            relays: cachedRelaysWithFixedFeatures,
             shadowsocksPortRanges: cachedRelays.relays.wireguard.shadowsocksPortRanges
         )
 
@@ -164,8 +174,9 @@ final class RelayCacheTracker: RelayCacheTrackerProtocol {
         timerSource = nil
     }
 
-    func updateRelays(completionHandler: ((Result<RelaysFetchResult, Error>) -> Void)? = nil)
-        -> Cancellable {
+    func updateRelays(completionHandler: ((sending Result<RelaysFetchResult, Error>) -> Void)? = nil)
+        -> Cancellable
+    {
         let operation = ResultBlockOperation<RelaysFetchResult> { finish in
             let cachedRelays = try? self.getCachedRelays()
 
@@ -207,7 +218,7 @@ final class RelayCacheTracker: RelayCacheTrackerProtocol {
     }
 
     func refreshCachedRelays() throws {
-        let newCachedRelays = try cache.read().cachedRelays
+        let newCachedRelays = try cache.read()
 
         relayCacheLock.lock()
         cachedRelays = newCachedRelays
@@ -246,13 +257,21 @@ final class RelayCacheTracker: RelayCacheTrackerProtocol {
             return now
         }
 
+        #if NEVER_IN_PRODUCTION
+            // Empty relays can always update immediately in non-production builds
+            if cachedRelays.relays.isEmpty {
+                return now
+            }
+        #endif
+
         let nextUpdate = cachedRelays.updatedAt.addingTimeInterval(Self.relayUpdateInterval.timeInterval)
 
         return max(nextUpdate, Date())
     }
 
     private func handleResponse(result: Result<REST.ServerRelaysCacheResponse, Error>)
-        -> Result<RelaysFetchResult, Error> {
+        -> Result<RelaysFetchResult, Error>
+    {
         result.tryMap { response -> RelaysFetchResult in
             switch response {
             case let .newContent(etag, rawData):

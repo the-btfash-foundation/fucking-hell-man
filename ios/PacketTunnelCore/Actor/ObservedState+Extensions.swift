@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by pronebird on 16/10/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -33,8 +33,7 @@ extension ObservedState {
 
     public var connectionState: ObservedConnectionState? {
         switch self {
-        case
-            let .connecting(connectionState),
+        case let .connecting(connectionState),
             let .reconnecting(connectionState),
             let .connected(connectionState),
             let .negotiatingEphemeralPeer(connectionState, _),

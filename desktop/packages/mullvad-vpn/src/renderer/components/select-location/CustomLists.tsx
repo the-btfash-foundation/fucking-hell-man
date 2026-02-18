@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../../config.json';
-import { CustomListError, CustomLists, RelayLocation } from '../../../shared/daemon-rpc-types';
+import {
+  CustomListError,
+  type CustomLists,
+  type RelayLocation,
+} from '../../../shared/daemon-rpc-types';
 import { messages } from '../../../shared/gettext';
 import log from '../../../shared/logging';
 import { useAppContext } from '../../context';
+import { colors } from '../../lib/foundations';
 import { useBoolean, useStyledRef } from '../../lib/utility-hooks';
 import Accordion from '../Accordion';
 import * as Cell from '../cell';
 import { measurements } from '../common-styles';
-import { BackAction } from '../KeyboardNavigation';
+import { BackAction } from '../keyboard-navigation';
 import SimpleInput from '../SimpleInput';
 import { useRelayListContext } from './RelayListContext';
 import RelayLocationList from './RelayLocationList';
@@ -49,11 +53,9 @@ const StyledAddListCellButton = styled(StyledCellButton)({
   marginLeft: 'auto',
 });
 
-const StyledSideButtonIcon = styled(Cell.Icon)({
-  padding: '3px',
-
+const StyledSideButtonIcon = styled(Cell.CellIcon)({
   [`${StyledCellButton}:disabled &&, ${StyledAddListCellButton}:disabled &&`]: {
-    backgroundColor: colors.white40,
+    backgroundColor: colors.whiteAlpha40,
   },
 
   [`${StyledCellButton}:not(:disabled):hover &&, ${StyledAddListCellButton}:not(:disabled):hover &&`]:
@@ -79,7 +81,10 @@ export default function CustomLists(props: CustomListsProps) {
 
   const createList = useCallback(
     async (name: string): Promise<void | CustomListError> => {
-      const result = await createCustomList(name);
+      const result = await createCustomList({
+        name,
+        locations: [],
+      });
       // If an error is returned it should be passed as the return value.
       if (result) {
         return result;
@@ -104,7 +109,7 @@ export default function CustomLists(props: CustomListsProps) {
           $backgroundColor={colors.blue}
           $backgroundColorHover={colors.blue80}
           onClick={showAddList}>
-          <StyledSideButtonIcon source="icon-add" tintColor={colors.white60} width={18} />
+          <StyledSideButtonIcon icon="add-circle" color="whiteAlpha60" />
         </StyledCellButton>
       </StyledCellContainer>
 
@@ -200,7 +205,7 @@ function AddListForm(props: AddListFormProps) {
             $backgroundColorHover={colors.blue80}
             disabled={!nameValid}
             onClick={createList}>
-            <StyledSideButtonIcon source="icon-check" tintColor={colors.white60} width={18} />
+            <StyledSideButtonIcon icon="checkmark" color="whiteAlpha60" />
           </StyledAddListCellButton>
         </StyledCellContainer>
         <Cell.CellFooter>

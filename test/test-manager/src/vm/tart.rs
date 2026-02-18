@@ -1,11 +1,11 @@
 use crate::config::{self, Config, VmConfig};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use regex::Regex;
 use std::{net::IpAddr, process::Stdio, time::Duration};
 use tokio::process::{Child, Command};
 use uuid::Uuid;
 
-use super::{logging::forward_logs, util::find_pty, VmInstance};
+use super::{VmInstance, logging::forward_logs, util::find_pty};
 
 const LOG_PREFIX: &str = "[tart] ";
 const STDERR_LOG_LEVEL: log::Level = log::Level::Error;
@@ -48,6 +48,10 @@ pub async fn run(config: &Config, vm_config: &VmConfig) -> Result<TartInstance> 
     } else {
         MachineCopy::clone_vm(&vm_config.image_path).await?
     };
+
+    if let Err(err) = machine_copy.configure(vm_config).await {
+        log::error!("Failed to configure tart vm: {err}");
+    }
 
     // Start VM
     let mut tart_cmd = Command::new("tart");
@@ -165,6 +169,28 @@ impl MachineCopy {
             name: clone_name,
             should_destroy: true,
         })
+    }
+
+    pub async fn configure(&self, vm_config: &VmConfig) -> Result<()> {
+        let mut args = vec![];
+        if let Some(cpu) = vm_config.vcpus {
+            args.extend(["--cpu".to_owned(), cpu.to_string()]);
+            log::info!("vCPUs: {cpu}");
+        }
+        if let Some(mem) = vm_config.memory {
+            args.extend(["--memory".to_owned(), mem.to_string()]);
+            log::info!("Memory: {mem} MB");
+        }
+        if !args.is_empty() {
+            let mut tart_cmd = Command::new("tart");
+            tart_cmd.args(["set", &self.name]);
+            tart_cmd.args(args);
+            tart_cmd
+                .status()
+                .await
+                .context("failed to update tart config")?;
+        }
+        Ok(())
     }
 
     pub async fn cleanup(mut self) {

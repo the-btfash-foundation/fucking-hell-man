@@ -1,12 +1,13 @@
 package net.mullvad.mullvadvpn.lib.common.util
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.Settings
+import androidx.core.net.toUri
+import arrow.core.Either
+import co.touchlab.kermit.Logger
 import net.mullvad.mullvadvpn.lib.model.WebsiteAuthToken
-
-private const val ALWAYS_ON_VPN_APP = "always_on_vpn_app"
 
 fun createAccountUri(accountUri: String, websiteAuthToken: WebsiteAuthToken?): Uri {
     val urlString = buildString {
@@ -16,20 +17,29 @@ fun createAccountUri(accountUri: String, websiteAuthToken: WebsiteAuthToken?): U
             append(websiteAuthToken.value)
         }
     }
-    return Uri.parse(urlString)
+    return urlString.toUri()
 }
 
-// NOTE: This function will return the current Always-on VPN package's name. In case of either
-// Always-on VPN being disabled or not being able to read the state, NULL will be returned.
-fun Context.resolveAlwaysOnVpnPackageName(): String? {
-    return try {
-        Settings.Secure.getString(contentResolver, ALWAYS_ON_VPN_APP)
-    } catch (ex: SecurityException) {
-        null
-    }
-}
+// Activity not found can be return if the device does not have system vpn settings available.
+// This is the case for Android TV devices. In normal cases, this action should not be available
+// for those devices (see SystemVpnSettingsAvailableUseCase). This is an extra safety check.
 
-fun Context.openVpnSettings() {
-    val intent = Intent("android.settings.VPN_SETTINGS")
-    startActivity(intent)
-}
+fun Context.openVpnSettings(): Either<ActivityNotFoundException, Unit> =
+    Either.catch {
+            val intent = Intent("android.settings.VPN_SETTINGS")
+            startActivity(intent)
+        }
+        .onLeft { Logger.e("Failed to open VPN settings", it) }
+        .mapLeft { it as? ActivityNotFoundException ?: throw it }
+
+fun Context.openAppDetailsSettings(): Either<ActivityNotFoundException, Unit> =
+    Either.catch {
+            val intent =
+                Intent(
+                    "android.settings.APPLICATION_DETAILS_SETTINGS",
+                    "package:$packageName".toUri(),
+                )
+            startActivity(intent)
+        }
+        .onLeft { Logger.e("Failed to open app details settings", it) }
+        .mapLeft { it as? ActivityNotFoundException ?: throw it }

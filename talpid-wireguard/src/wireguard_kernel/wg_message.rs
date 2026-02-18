@@ -1,16 +1,25 @@
-use super::{super::config::Config, parsers, Error};
+use crate::wireguard_kernel::parsers::{parse_cstring, parse_inet_sockaddr, parse_ip_addr};
+
+use super::timespec::KernelTimespec;
+use super::{super::config::Config, Error, parsers};
 use byteorder::{ByteOrder, NativeEndian};
 use ipnetwork::IpNetwork;
 use netlink_packet_core::{
+    DecodeError, NLA_F_NESTED, Nla, NlaBuffer, NlasIterator, parse_u8, parse_u16, parse_u32,
+    parse_u64,
+};
+use netlink_packet_core::{Emitable, Parseable};
+use netlink_packet_core::{
     NetlinkDeserializable, NetlinkHeader, NetlinkPayload, NetlinkSerializable,
 };
-use netlink_packet_utils::{
-    nla::{Nla, NlaBuffer, NlasIterator, NLA_F_NESTED},
-    traits::{Emitable, Parseable},
-    DecodeError,
+use nix::sys::socket::{SockaddrIn, SockaddrIn6};
+use std::{
+    ffi::CString,
+    io::Write,
+    mem,
+    net::{IpAddr, SocketAddr},
 };
-use nix::sys::{socket::InetAddr, time::TimeSpec};
-use std::{ffi::CString, io::Write, mem, net::IpAddr};
+use zerocopy::IntoBytes;
 
 /// WireGuard netlink constants
 mod constants {
@@ -78,11 +87,10 @@ impl DeviceMessage {
         let mut peers = vec![];
 
         for peer in config.peers() {
-            let peer_endpoint = InetAddr::from_std(&peer.endpoint);
             let allowed_ips = peer.allowed_ips.iter().map(From::from).collect();
             let mut peer_nlas = vec![
                 PeerNla::PublicKey(*peer.public_key.as_bytes()),
-                PeerNla::Endpoint(peer_endpoint),
+                PeerNla::Endpoint(peer.endpoint),
                 PeerNla::AllowedIps(allowed_ips),
                 PeerNla::Flags(WGPEER_F_REPLACE_ALLOWEDIPS),
             ];
@@ -140,7 +148,7 @@ impl DeviceMessage {
         if cmd == WG_CMD_GET_DEVICE || cmd == WG_CMD_SET_DEVICE {
             Ok(cmd)
         } else {
-            Err(Error::UnnkownWireguardCommmand(cmd))
+            Err(Error::UnknownWireguardCommand(cmd))
         }
     }
 }
@@ -262,13 +270,13 @@ impl<'a, T: AsRef<[u8]> + 'a + ?Sized + core::fmt::Debug> Parseable<NlaBuffer<&'
         let value = buf.value();
         let kind = buf.kind();
         let nla = match kind {
-            WGDEVICE_A_IFINDEX => IfIndex(parsers::parse_u32(value)?),
-            WGDEVICE_A_IFNAME => IfName(parsers::parse_cstring(value)?),
+            WGDEVICE_A_IFINDEX => IfIndex(parse_u32(value)?),
+            WGDEVICE_A_IFNAME => IfName(parse_cstring(value)?),
             WGDEVICE_A_PRIVATE_KEY => PrivateKey(parsers::parse_wg_key(value)?),
             WGDEVICE_A_PUBLIC_KEY => PublicKey(parsers::parse_wg_key(value)?),
-            WGDEVICE_A_FLAGS => Flags(parsers::parse_u32(value)?),
-            WGDEVICE_A_LISTEN_PORT => ListenPort(parsers::parse_u16(value)?),
-            WGDEVICE_A_FWMARK => Fwmark(parsers::parse_u32(value)?),
+            WGDEVICE_A_FLAGS => Flags(parse_u32(value)?),
+            WGDEVICE_A_LISTEN_PORT => ListenPort(parse_u16(value)?),
+            WGDEVICE_A_FWMARK => Fwmark(parse_u32(value)?),
             WGDEVICE_A_PEERS => {
                 let peers = NlasIterator::new(value)
                     .map(|nla_bytes| {
@@ -333,9 +341,9 @@ pub enum PeerNla {
     PublicKey(PublicKey),
     PresharedKey(PresharedKey),
     Flags(u32),
-    Endpoint(InetAddr),
+    Endpoint(SocketAddr),
     PersistentKeepaliveInterval(u16),
-    LastHandshakeTime(TimeSpec),
+    LastHandshakeTime(KernelTimespec),
     RxBytes(u64),
     TxBytes(u64),
     AllowedIps(Vec<AllowedIpMessage>),
@@ -348,11 +356,11 @@ impl Nla for PeerNla {
         match self {
             PublicKey(key) | PresharedKey(key) => key.len(),
             Endpoint(endpoint) => match &endpoint {
-                InetAddr::V4(_) => mem::size_of::<libc::sockaddr_in>(),
-                InetAddr::V6(_) => mem::size_of::<libc::sockaddr_in6>(),
+                SocketAddr::V4(_) => mem::size_of::<libc::sockaddr_in>(),
+                SocketAddr::V6(_) => mem::size_of::<libc::sockaddr_in6>(),
             },
             PersistentKeepaliveInterval(_) => 2,
-            LastHandshakeTime(_) => mem::size_of::<libc::timespec>(),
+            LastHandshakeTime(_) => size_of::<KernelTimespec>(),
             RxBytes(_) | TxBytes(_) => 8,
             AllowedIps(ips) => ips.as_slice().buffer_len(),
             Flags(_) | ProtocolVersion(_) => 4,
@@ -384,16 +392,20 @@ impl Nla for PeerNla {
                 let _ = buffer.write(key).expect("Buffer too small for a key");
             }
             Flags(value) | ProtocolVersion(value) => NativeEndian::write_u32(buffer, *value),
-            Endpoint(endpoint) => match &endpoint {
-                InetAddr::V4(sockaddr_in) => {
-                    // SAFETY: `sockaddr_in` has no padding bytes
+            &Endpoint(endpoint) => match endpoint {
+                SocketAddr::V4(addr) => {
+                    let sockaddr_in = SockaddrIn::from(addr);
+                    let sockaddr_in: &libc::sockaddr_in = sockaddr_in.as_ref();
                     buffer
+                        // SAFETY: `sockaddr_in` has no padding bytes
                         .write_all(unsafe { struct_as_slice(sockaddr_in) })
                         .expect("Buffer too small for sockaddr_in");
                 }
-                InetAddr::V6(sockaddr_in6) => {
-                    // SAFETY: `sockaddr_in` has no padding bytes
+                SocketAddr::V6(addr) => {
+                    let sockaddr_in6 = SockaddrIn6::from(addr);
+                    let sockaddr_in6: &libc::sockaddr_in6 = sockaddr_in6.as_ref();
                     buffer
+                        // SAFETY: `sockaddr_in` has no padding bytes
                         .write_all(unsafe { struct_as_slice(sockaddr_in6) })
                         .expect("Buffer too small for sockaddr_in6");
                 }
@@ -402,11 +414,9 @@ impl Nla for PeerNla {
                 NativeEndian::write_u16(buffer, *interval);
             }
             LastHandshakeTime(last_handshake) => {
-                let timespec: &libc::timespec = last_handshake.as_ref();
-                // SAFETY: `timespec` has no padding bytes
                 buffer
-                    .write_all(unsafe { struct_as_slice(timespec) })
-                    .expect("Buffer too small for timespec");
+                    .write_all(last_handshake.as_bytes())
+                    .expect("Buffer too small for __kernel_timespec");
             }
             RxBytes(num_bytes) | TxBytes(num_bytes) => NativeEndian::write_u64(buffer, *num_bytes),
             AllowedIps(ips) => ips.as_slice().emit(buffer),
@@ -426,15 +436,16 @@ impl<'a, T: AsRef<[u8]> + 'a + ?Sized> Parseable<NlaBuffer<&'a T>> for PeerNla {
         let nla = match buf.kind() {
             WGPEER_A_PUBLIC_KEY => PublicKey(parsers::parse_wg_key(value)?),
             WGPEER_A_PRESHARED_KEY => PresharedKey(parsers::parse_wg_key(value)?),
-            WGPEER_A_FLAGS => Flags(parsers::parse_u32(value)?),
-            WGPEER_A_ENDPOINT => Endpoint(parsers::parse_inet_sockaddr(value)?),
+            WGPEER_A_FLAGS => Flags(parse_u32(value)?),
+            WGPEER_A_ENDPOINT => Endpoint(parse_inet_sockaddr(value)?),
             WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL => {
-                PersistentKeepaliveInterval(parsers::parse_u16(value)?)
+                PersistentKeepaliveInterval(parse_u16(value)?)
             }
-
-            WGPEER_A_LAST_HANDSHAKE_TIME => LastHandshakeTime(parsers::parse_timespec(value)?),
-            WGPEER_A_RX_BYTES => RxBytes(parsers::parse_u64(value)?),
-            WGPEER_A_TX_BYTES => TxBytes(parsers::parse_u64(value)?),
+            WGPEER_A_LAST_HANDSHAKE_TIME => {
+                LastHandshakeTime(parsers::parse_last_handshake_time(value)?)
+            }
+            WGPEER_A_RX_BYTES => RxBytes(parse_u64(value)?),
+            WGPEER_A_TX_BYTES => TxBytes(parse_u64(value)?),
             WGPEER_A_ALLOWEDIPS => {
                 let nlas = NlasIterator::new(value)
                     .map(|nla_buffer| AllowedIpMessage::parse(&nla_buffer?))
@@ -442,7 +453,7 @@ impl<'a, T: AsRef<[u8]> + 'a + ?Sized> Parseable<NlaBuffer<&'a T>> for PeerNla {
 
                 AllowedIps(nlas)
             }
-            WGPEER_A_PROTOCOL_VERSION => ProtocolVersion(parsers::parse_u32(value)?),
+            WGPEER_A_PROTOCOL_VERSION => ProtocolVersion(parse_u32(value)?),
             WGPEER_A_UNSPEC => Unspec(value.to_vec()),
             _ => {
                 return Err(format!("Unexpected peer attribute kind: {}", buf.kind()).into());
@@ -550,9 +561,9 @@ impl<'a, T: AsRef<[u8]> + 'a + ?Sized> Parseable<NlaBuffer<&'a T>> for AllowedIp
         use AllowedIpNla::*;
         let value = buf.value();
         let nla = match buf.kind() {
-            WGALLOWEDIP_A_FAMILY => AddressFamily(parsers::parse_u16(value)?),
-            WGALLOWEDIP_A_IPADDR => IpAddr(parsers::parse_ip_addr(value)?),
-            WGALLOWEDIP_A_CIDR_MASK => CidrMask(parsers::parse_u8(value)?),
+            WGALLOWEDIP_A_FAMILY => AddressFamily(parse_u16(value)?),
+            WGALLOWEDIP_A_IPADDR => IpAddr(parse_ip_addr(value)?),
+            WGALLOWEDIP_A_CIDR_MASK => CidrMask(parse_u8(value)?),
             WGALLOWEDIP_A_UNSPEC => Unspec(value.to_vec()),
             _ => Err(format!(
                 "Unexpected allowed IP attribute kind: {}",
@@ -575,7 +586,7 @@ unsafe fn struct_as_slice<T: Sized>(t: &T) -> &[u8] {
     let ptr = t as *const T as *const u8;
     // SAFETY: The memory from `ptr` and `size` bytes forward is always the same as the struct.
     // The caller is responsible for not using this with structs containing padding.
-    std::slice::from_raw_parts(ptr, size)
+    unsafe { std::slice::from_raw_parts(ptr, size) }
 }
 
 fn ip_addr_to_bytes(addr: &IpAddr) -> Vec<u8> {
@@ -587,12 +598,18 @@ fn ip_addr_to_bytes(addr: &IpAddr) -> Vec<u8> {
 
 #[cfg(test)]
 mod test {
+    use zerocopy::FromZeros;
+
     use super::*;
-    use nix::sys::time::TimeValLike;
-    use std::net::Ipv4Addr;
+    use std::{net::Ipv4Addr, str::FromStr};
 
     #[test]
     fn deserialize_netlink_message() {
+        assert!(
+            cfg!(target_endian = "little"),
+            "this test assumes little-endian"
+        );
+
         #[rustfmt::skip]
         let payload = vec![
             0x00, 0x01, 0x00, 0x00,
@@ -624,9 +641,10 @@ mod test {
                         0x24, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        // 20 bytes of WGPEER_A_LAST_HANDSHAKE_TIME 0
-                        0x14, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        // 20 bytes of WGPEER_A_LAST_HANDSHAKE_TIME (!= UNIX_EPOCH)
+                        0x14, 0x00, 0x06, 0x00,
+                        0x13, 0x37, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // tv_sec
+                        0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // tv_nsec
                         // 6 bytes of WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL 0
                         0x06, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
                         // 12 bytes of WGPEER_A_TX_BYTES 0
@@ -658,9 +676,10 @@ mod test {
                         0x24, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        // 20 bytes of WGPEER_A_LAST_HANDSHAKE_TIME
-                        0x14, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        // 20 bytes of WGPEER_A_LAST_HANDSHAKE_TIME (UNIX_EPOCH)
+                        0x14, 0x00, 0x06, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // tv_sec
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // tv_nsec
                         // 6 bytes of WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL + 2 bytes of padding
                         0x06, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
                         // 12 bytes of WGPEER_A_TX_BYTES
@@ -683,13 +702,12 @@ mod test {
                                     // 8 bytes of WGALLOWEDIP_A_IPADDR 192.168.40.2
                                     0x08, 0x00, 0x02, 0x00, 0xc0, 0xa8, 0x27, 0x02,
         ];
-        let header = NetlinkHeader {
-            length: payload.len() as u32,
-            message_type: 0,
-            flags: 0,
-            sequence_number: 0,
-            port_number: 0,
+        let header = {
+            let mut header = NetlinkHeader::default();
+            header.length = payload.len() as u32;
+            header
         };
+
         let message = DeviceMessage::deserialize(&header, &payload).unwrap();
 
         let mut serialized_message = vec![0u8; payload.len()];
@@ -705,75 +723,59 @@ mod test {
         use DeviceNla::*;
         use PeerNla::*;
 
-        let if_name = CString::new(b"wg-test".to_vec()).unwrap();
+        let if_name = c"wg-test".to_owned();
 
-        let peer_1 = PeerMessage(
-            [
-                PeerNla::PublicKey([
-                    32, 224, 68, 5, 23, 136, 103, 229, 206, 59, 34, 231, 215, 139, 214, 236, 80,
-                    81, 187, 7, 154, 197, 251, 36, 171, 156, 48, 73, 145, 47, 134, 54,
-                ]),
-                PeerNla::PresharedKey([
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0,
-                ]),
-                LastHandshakeTime(TimeSpec::seconds(0)),
-                PersistentKeepaliveInterval(0),
-                TxBytes(0),
-                RxBytes(0),
-                ProtocolVersion(1),
-                Endpoint(InetAddr::from_std(&"192.168.40.1:9797".parse().unwrap())),
-                AllowedIps(
-                    [AllowedIpMessage(
-                        [
-                            CidrMask(32),
-                            AddressFamily(2),
-                            IpAddr(Ipv4Addr::new(192, 168, 39, 1).into()),
-                        ]
-                        .to_vec(),
-                    )]
-                    .to_vec()
-                    .to_vec(),
-                ),
-            ]
-            .to_vec(),
-        );
+        let peer_1 = PeerMessage(vec![
+            PeerNla::PublicKey([
+                32, 224, 68, 5, 23, 136, 103, 229, 206, 59, 34, 231, 215, 139, 214, 236, 80, 81,
+                187, 7, 154, 197, 251, 36, 171, 156, 48, 73, 145, 47, 134, 54,
+            ]),
+            PeerNla::PresharedKey([
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0,
+            ]),
+            LastHandshakeTime(KernelTimespec {
+                tv_sec: 0x3713,
+                tv_nsec: 0x8080,
+            }),
+            PersistentKeepaliveInterval(0),
+            TxBytes(0),
+            RxBytes(0),
+            ProtocolVersion(1),
+            Endpoint(SocketAddr::from_str("192.168.40.1:9797").unwrap()),
+            AllowedIps(vec![AllowedIpMessage(vec![
+                CidrMask(32),
+                AddressFamily(2),
+                IpAddr(Ipv4Addr::new(192, 168, 39, 1).into()),
+            ])]),
+        ]);
 
-        let peer_2 = PeerMessage(
-            [
-                PeerNla::PublicKey([
-                    244, 28, 206, 12, 79, 36, 88, 183, 194, 157, 54, 38, 54, 183, 127, 32, 142, 24,
-                    251, 158, 217, 56, 12, 146, 208, 21, 132, 157, 162, 68, 2, 44,
-                ]),
-                PresharedKey([
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0,
-                ]),
-                LastHandshakeTime(TimeSpec::seconds(0)),
-                PersistentKeepaliveInterval(0),
-                TxBytes(0),
-                RxBytes(0),
-                ProtocolVersion(1),
-                Endpoint(InetAddr::from_std(&"192.168.40.2:9797".parse().unwrap())),
-                AllowedIps(
-                    [AllowedIpMessage(
-                        [
-                            CidrMask(32),
-                            AddressFamily(2),
-                            IpAddr(Ipv4Addr::new(192, 168, 39, 2).into()),
-                        ]
-                        .to_vec(),
-                    )]
-                    .to_vec(),
-                ),
-            ]
-            .to_vec(),
-        );
+        let peer_2 = PeerMessage(vec![
+            PeerNla::PublicKey([
+                244, 28, 206, 12, 79, 36, 88, 183, 194, 157, 54, 38, 54, 183, 127, 32, 142, 24,
+                251, 158, 217, 56, 12, 146, 208, 21, 132, 157, 162, 68, 2, 44,
+            ]),
+            PresharedKey([
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0,
+            ]),
+            LastHandshakeTime(KernelTimespec::new_zeroed()),
+            PersistentKeepaliveInterval(0),
+            TxBytes(0),
+            RxBytes(0),
+            ProtocolVersion(1),
+            Endpoint(SocketAddr::from_str("192.168.40.2:9797").unwrap()),
+            AllowedIps(vec![AllowedIpMessage(vec![
+                CidrMask(32),
+                AddressFamily(2),
+                IpAddr(Ipv4Addr::new(192, 168, 39, 2).into()),
+            ])]),
+        ]);
 
         DeviceMessage {
             command: WG_CMD_GET_DEVICE,
             message_type: 0,
-            nlas: [
+            nlas: vec![
                 ListenPort(51820),
                 Fwmark(0),
                 IfIndex(320),
@@ -786,9 +788,8 @@ mod test {
                     102, 218, 178, 222, 191, 21, 59, 83, 124, 180, 124, 41, 91, 10, 134, 199, 84,
                     186, 27, 218, 53, 216, 20, 93, 203, 82, 68, 74, 189, 142, 99, 59,
                 ]),
-                Peers([peer_1, peer_2].to_vec()),
-            ]
-            .to_vec(),
+                Peers(vec![peer_1, peer_2]),
+            ],
         }
     }
 
@@ -799,71 +800,56 @@ mod test {
 
         let if_name = CString::new("wg-test".to_string()).unwrap();
 
-        let peer_1 = PeerMessage(
-            [
-                PeerNla::PublicKey([
-                    32, 224, 68, 5, 23, 136, 103, 229, 206, 59, 34, 231, 215, 139, 214, 236, 80,
-                    81, 187, 7, 154, 197, 251, 36, 171, 156, 48, 73, 145, 47, 134, 54,
-                ]),
-                Endpoint(InetAddr::from_std(&"192.168.40.1:9797".parse().unwrap())),
-                PeerNla::Flags(WGPEER_F_REPLACE_ALLOWEDIPS),
-                AllowedIps(
-                    [AllowedIpMessage(
-                        [
-                            AddressFamily(2),
-                            IpAddr(Ipv4Addr::new(192, 168, 39, 1).into()),
-                            CidrMask(32),
-                        ]
-                        .to_vec(),
-                    )]
-                    .to_vec()
-                    .to_vec(),
-                ),
-            ]
-            .to_vec(),
-        );
+        let peer_1 = PeerMessage(vec![
+            PeerNla::PublicKey([
+                32, 224, 68, 5, 23, 136, 103, 229, 206, 59, 34, 231, 215, 139, 214, 236, 80, 81,
+                187, 7, 154, 197, 251, 36, 171, 156, 48, 73, 145, 47, 134, 54,
+            ]),
+            Endpoint(SocketAddr::from_str("192.168.40.1:9797").unwrap()),
+            PeerNla::Flags(WGPEER_F_REPLACE_ALLOWEDIPS),
+            AllowedIps(vec![AllowedIpMessage(vec![
+                AddressFamily(2),
+                IpAddr(Ipv4Addr::new(192, 168, 39, 1).into()),
+                CidrMask(32),
+            ])]),
+        ]);
 
-        let peer_2 = PeerMessage(
-            [
-                PeerNla::PublicKey([
-                    244, 28, 206, 12, 79, 36, 88, 183, 194, 157, 54, 38, 54, 183, 127, 32, 142, 24,
-                    251, 158, 217, 56, 12, 146, 208, 21, 132, 157, 162, 68, 2, 44,
-                ]),
-                Endpoint(InetAddr::from_std(&"192.168.40.2:9797".parse().unwrap())),
-                PeerNla::Flags(WGPEER_F_REPLACE_ALLOWEDIPS),
-                AllowedIps(
-                    [AllowedIpMessage(
-                        [
-                            AddressFamily(2),
-                            IpAddr(Ipv4Addr::new(192, 168, 39, 2).into()),
-                            CidrMask(32),
-                        ]
-                        .to_vec(),
-                    )]
-                    .to_vec(),
-                ),
-            ]
-            .to_vec(),
-        );
+        let peer_2 = PeerMessage(vec![
+            PeerNla::PublicKey([
+                244, 28, 206, 12, 79, 36, 88, 183, 194, 157, 54, 38, 54, 183, 127, 32, 142, 24,
+                251, 158, 217, 56, 12, 146, 208, 21, 132, 157, 162, 68, 2, 44,
+            ]),
+            Endpoint(SocketAddr::from_str("192.168.40.2:9797").unwrap()),
+            PeerNla::Flags(WGPEER_F_REPLACE_ALLOWEDIPS),
+            AllowedIps(vec![AllowedIpMessage(vec![
+                AddressFamily(2),
+                IpAddr(Ipv4Addr::new(192, 168, 39, 2).into()),
+                CidrMask(32),
+            ])]),
+        ]);
 
         DeviceMessage {
             command: WG_CMD_SET_DEVICE,
             message_type: 0,
-            nlas: [
+            nlas: vec![
                 IfName(if_name),
                 PrivateKey([
                     56, 71, 244, 173, 101, 223, 85, 22, 171, 175, 15, 39, 53, 180, 193, 198, 73,
                     55, 53, 59, 188, 26, 52, 74, 173, 179, 22, 213, 161, 71, 252, 125,
                 ]),
                 ListenPort(51820),
-                Peers([peer_1, peer_2].to_vec()),
-            ]
-            .to_vec(),
+                Peers(vec![peer_1, peer_2]),
+            ],
         }
     }
 
     #[test]
     fn serialize_netlink_message() {
+        assert!(
+            cfg!(target_endian = "little"),
+            "this test assumes little-endian"
+        );
+
         let expected_payload: &[u8] = &[
             0x01, 0x01, 0x00, 0x00, 0x0c, 0x00, 0x02, 0x00, 0x77, 0x67, 0x2d, 0x74, 0x65, 0x73,
             0x74, 0x00, 0x24, 0x00, 0x03, 0x00, 0x38, 0x47, 0xf4, 0xad, 0x65, 0xdf, 0x55, 0x16,
@@ -891,12 +877,10 @@ mod test {
 
         let mut payload_buffer = vec![0u8; message.buffer_len()];
         message.serialize(&mut payload_buffer);
-        let header = NetlinkHeader {
-            length: payload_buffer.len() as u32,
-            message_type: 0,
-            flags: 0,
-            sequence_number: 0,
-            port_number: 0,
+        let header = {
+            let mut header = NetlinkHeader::default();
+            header.length = payload_buffer.len() as u32;
+            header
         };
         let deserialized_device = DeviceMessage::deserialize(&header, &payload_buffer).unwrap();
 

@@ -3,52 +3,44 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2023-06-27.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
-protocol WelcomeContentViewDelegate: AnyObject {
+protocol WelcomeContentViewDelegate: AnyObject, Sendable {
     func didTapPurchaseButton(welcomeContentView: WelcomeContentView, button: AppButton)
-    func didTapRedeemVoucherButton(welcomeContentView: WelcomeContentView, button: AppButton)
     func didTapInfoButton(welcomeContentView: WelcomeContentView, button: UIButton)
+    func didTapCopyButton(welcomeContentView: WelcomeContentView, button: UIButton)
 }
 
-struct WelcomeViewModel {
+struct WelcomeViewModel: Sendable {
     let deviceName: String
     let accountNumber: String
 }
 
-final class WelcomeContentView: UIView {
+final class WelcomeContentView: UIView, Sendable {
+    private var revertCopyImageWorkItem: DispatchWorkItem?
+
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .preferredFont(forTextStyle: .largeTitle, weight: .bold)
+        label.font = .mullvadLarge
         label.textColor = .white
         label.adjustsFontForContentSizeCategory = true
         label.lineBreakMode = .byWordWrapping
         label.numberOfLines = .zero
-        label.text = NSLocalizedString(
-            "WELCOME_PAGE_TITLE",
-            tableName: "Welcome",
-            value: "Congrats!",
-            comment: ""
-        )
+        label.text = NSLocalizedString("Congrats!", comment: "")
         return label
     }()
 
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.font = .preferredFont(forTextStyle: .body)
+        label.font = .mullvadSmall
         label.textColor = .white
         label.adjustsFontForContentSizeCategory = true
         label.lineBreakMode = .byWordWrapping
         label.numberOfLines = .zero
-        label.text = NSLocalizedString(
-            "WELCOME_PAGE_SUBTITLE",
-            tableName: "Welcome",
-            value: "Here’s your account number. Save it!",
-            comment: ""
-        )
+        label.text = NSLocalizedString("Here’s your account number. Save it!", comment: "")
         return label
     }()
 
@@ -58,28 +50,40 @@ final class WelcomeContentView: UIView {
         label.adjustsFontForContentSizeCategory = true
         label.lineBreakMode = .byWordWrapping
         label.numberOfLines = .zero
-        label.font = .preferredFont(forTextStyle: .title2, weight: .bold)
+        label.font = .mullvadMedium
         label.textColor = .white
         return label
+    }()
+
+    private let copyButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setAccessibilityIdentifier(.copyButton)
+        button.adjustsImageSizeForAccessibilityContentSizeCategory = true
+        button.tintColor = .white
+        button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        button.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        return button
     }()
 
     private let deviceNameLabel: UILabel = {
         let label = UILabel()
         label.adjustsFontForContentSizeCategory = true
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .preferredFont(forTextStyle: .body)
+        label.font = .mullvadSmall
         label.textColor = .white
         label.setContentHuggingPriority(.defaultLow, for: .horizontal)
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.numberOfLines = 0
         return label
     }()
 
     private let infoButton: UIButton = {
         let button = IncreasedHitButton(type: .system)
         button.setAccessibilityIdentifier(.infoButton)
+        button.adjustsImageSizeForAccessibilityContentSizeCategory = true
         button.tintColor = .white
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.setImage(UIImage(named: "IconInfo"), for: .normal)
+        button.setImage(UIImage.Buttons.info, for: .normal)
         button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         button.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         return button
@@ -87,53 +91,43 @@ final class WelcomeContentView: UIView {
 
     private let descriptionLabel: UILabel = {
         let label = UILabel()
-        label.font = .preferredFont(forTextStyle: .body)
+        label.font = .mullvadSmall
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .white
         label.numberOfLines = .zero
         label.lineBreakMode = .byWordWrapping
         label.lineBreakStrategy = []
-        label.text = NSLocalizedString(
-            "WELCOME_PAGE_DESCRIPTION",
-            tableName: "Welcome",
-            value: """
-            To start using the app, you first need to \
-            add time to your account. Either buy credit \
-            on our website or redeem a voucher.
-            """,
-            comment: ""
-        )
+        label.text = [
+            NSLocalizedString(
+                "To start using the app, you first need to add time to your account.",
+                comment: ""
+            ),
+            NSLocalizedString(
+                "Either buy credit on our website or redeem a voucher.", comment: ""
+            ),
+        ].joined(separator: " ")
         return label
     }()
 
     private let purchaseButton: InAppPurchaseButton = {
         let button = InAppPurchaseButton()
         button.setAccessibilityIdentifier(.purchaseButton)
-        let localizedString = NSLocalizedString(
-            "BUY_CREDIT_BUTTON",
-            tableName: "Welcome",
-            value: "Buy credit",
-            comment: ""
-        )
+        let localizedString = NSLocalizedString("Add time", comment: "")
         button.setTitle(localizedString, for: .normal)
-        return button
-    }()
-
-    private let redeemVoucherButton: AppButton = {
-        let button = AppButton(style: .success)
-        button.setAccessibilityIdentifier(.redeemVoucherButton)
-        button.setTitle(NSLocalizedString(
-            "REDEEM_VOUCHER_BUTTON_TITLE",
-            tableName: "Account",
-            value: "Redeem voucher",
-            comment: ""
-        ), for: .normal)
         return button
     }()
 
     private let textsStackView: UIStackView = {
         let stackView = UIStackView()
         stackView.axis = .vertical
+        return stackView
+    }()
+
+    private let accountRowStackView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.distribution = .fill
+        stackView.spacing = UIMetrics.padding8
         return stackView
     }()
 
@@ -158,35 +152,16 @@ final class WelcomeContentView: UIView {
         return stackView
     }()
 
+    private let scrollView = UIScrollView()
+
     weak var delegate: WelcomeContentViewDelegate?
     var viewModel: WelcomeViewModel? {
         didSet {
             accountNumberLabel.text = viewModel?.accountNumber
-            deviceNameLabel.text = String(format: NSLocalizedString(
-                "DEVICE_NAME_TEXT",
-                tableName: "Welcome",
-                value: "Device name: %@",
-                comment: ""
-            ), viewModel?.deviceName ?? "")
-        }
-    }
-
-    var isPurchasing = false {
-        didSet {
-            let alpha = isPurchasing ? 0.7 : 1.0
-            purchaseButton.isLoading = isPurchasing
-            purchaseButton.isEnabled = !isPurchasing
-            purchaseButton.alpha = alpha
-            redeemVoucherButton.isEnabled = !isPurchasing
-            redeemVoucherButton.alpha = alpha
-        }
-    }
-
-    var productState: ProductState = .none {
-        didSet {
-            purchaseButton.setTitle(productState.purchaseButtonTitle, for: .normal)
-            purchaseButton.isLoading = productState.isFetching
-            purchaseButton.isEnabled = productState.isReceived
+            deviceNameLabel.text = String(
+                format: NSLocalizedString("Device name: %@", comment: ""),
+                viewModel?.deviceName ?? ""
+            )
         }
     }
 
@@ -195,7 +170,6 @@ final class WelcomeContentView: UIView {
 
         setAccessibilityIdentifier(.welcomeView)
         backgroundColor = .primaryColor
-        directionalLayoutMargins = UIMetrics.contentLayoutMargins
         backgroundColor = .secondaryColor
 
         configureUI()
@@ -207,12 +181,16 @@ final class WelcomeContentView: UIView {
     }
 
     private func configureUI() {
+        accountRowStackView.addArrangedSubview(accountNumberLabel)
+        accountRowStackView.addArrangedSubview(copyButton)
+        accountRowStackView.addArrangedSubview(UIView())  // To push content to the left.
+
         textsStackView.addArrangedSubview(titleLabel)
         textsStackView.setCustomSpacing(UIMetrics.padding8, after: titleLabel)
         textsStackView.addArrangedSubview(subtitleLabel)
         textsStackView.setCustomSpacing(UIMetrics.padding16, after: subtitleLabel)
-        textsStackView.addArrangedSubview(accountNumberLabel)
-        textsStackView.setCustomSpacing(UIMetrics.padding16, after: accountNumberLabel)
+        textsStackView.addArrangedSubview(accountRowStackView)
+        textsStackView.setCustomSpacing(UIMetrics.padding16, after: accountRowStackView)
 
         deviceRowStackView.addArrangedSubview(deviceNameLabel)
         deviceRowStackView.setCustomSpacing(UIMetrics.padding8, after: deviceNameLabel)
@@ -224,27 +202,51 @@ final class WelcomeContentView: UIView {
         textsStackView.addArrangedSubview(descriptionLabel)
 
         buttonsStackView.addArrangedSubview(purchaseButton)
-        #if DEBUG
-        buttonsStackView.addArrangedSubview(redeemVoucherButton)
-        #endif
 
-        addSubview(textsStackView)
-        addSubview(buttonsStackView)
         addConstraints()
+
+        showCheckmark(false)
     }
 
     private func addConstraints() {
-        addConstrainedSubviews([textsStackView, buttonsStackView]) {
-            textsStackView
-                .pinEdgesToSuperviewMargins(.all().excluding(.bottom))
+        scrollView.addConstrainedSubviews([textsStackView]) {
+            textsStackView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .leading(0),
+                    .trailing(0),
+                ]))
 
-            buttonsStackView
-                .pinEdgesToSuperviewMargins(.all().excluding(.top))
+            textsStackView.pinEdgesToSuperview(
+                PinnableEdges([
+                    .top(0),
+                    .bottom(0),
+                ]))
+        }
+
+        addConstrainedSubviews([scrollView, buttonsStackView]) {
+            scrollView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .top(UIMetrics.contentLayoutMargins.top),
+                    .leading(0),
+                    .trailing(0),
+                ]))
+
+            buttonsStackView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .leading(UIMetrics.padding8),
+                    .trailing(UIMetrics.padding8),
+                    .bottom(UIMetrics.contentLayoutMargins.bottom),
+                ]))
+
+            buttonsStackView.topAnchor.constraint(
+                equalTo: scrollView.bottomAnchor,
+                constant: UIMetrics.contentLayoutMargins.top
+            )
         }
     }
 
     private func addActions() {
-        [redeemVoucherButton, purchaseButton, infoButton].forEach {
+        [purchaseButton, infoButton, copyButton].forEach {
             $0.addTarget(self, action: #selector(tapped(button:)), for: .touchUpInside)
         }
     }
@@ -253,11 +255,42 @@ final class WelcomeContentView: UIView {
         switch button.accessibilityIdentifier {
         case AccessibilityIdentifier.purchaseButton.asString:
             delegate?.didTapPurchaseButton(welcomeContentView: self, button: button)
-        case AccessibilityIdentifier.redeemVoucherButton.asString:
-            delegate?.didTapRedeemVoucherButton(welcomeContentView: self, button: button)
         case AccessibilityIdentifier.infoButton.asString:
             delegate?.didTapInfoButton(welcomeContentView: self, button: button)
+        case AccessibilityIdentifier.copyButton.asString:
+            didTapCopyAccountNumber()
         default: return
         }
+    }
+
+    private func showCheckmark(_ showCheckmark: Bool) {
+        if showCheckmark {
+            let tickIcon = UIImage(named: "IconTick")
+
+            copyButton.setImage(tickIcon, for: .normal)
+            copyButton.tintColor = .successColor
+        } else {
+            let copyIcon = UIImage(named: "IconCopy")
+
+            copyButton.setImage(copyIcon, for: .normal)
+            copyButton.tintColor = .white
+        }
+    }
+
+    @objc private func didTapCopyAccountNumber() {
+        let delayedWorkItem = DispatchWorkItem { [weak self] in
+            self?.showCheckmark(false)
+        }
+
+        revertCopyImageWorkItem?.cancel()
+        revertCopyImageWorkItem = delayedWorkItem
+
+        showCheckmark(true)
+        delegate?.didTapCopyButton(welcomeContentView: self, button: copyButton)
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .seconds(2),
+            execute: delayedWorkItem
+        )
     }
 }

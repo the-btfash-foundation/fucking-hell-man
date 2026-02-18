@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2024-01-25.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -18,20 +18,10 @@ public enum CustomRelayListError: LocalizedError, Hashable {
     public var errorDescription: String? {
         switch self {
         case .duplicateName:
-            NSLocalizedString(
-                "DUPLICATE_CUSTOM_LISTS_ERROR",
-                tableName: "CustomLists",
-                value: "A custom list with this name exists, please choose a unique name.",
-                comment: ""
-            )
+            NSLocalizedString("Name is already taken.", comment: "")
         case .nameTooLong:
             String(
-                format: NSLocalizedString(
-                    "CUSTOM_LIST_NAME_TOO_LONG_ERROR",
-                    tableName: "CustomLists",
-                    value: "Name should be no longer than %i characters.",
-                    comment: ""
-                ),
+                format: NSLocalizedString("Name should be no longer than %i characters.", comment: ""),
                 NameInputFormatter.maxLength
             )
         }
@@ -58,7 +48,8 @@ public struct CustomListRepository: CustomListRepositoryProtocol {
         list.name = list.name.trimmingCharacters(in: .whitespaces)
 
         if let listWithSameName = lists.first(where: { $0.name.compare(list.name) == .orderedSame }),
-           listWithSameName.id != list.id {
+            listWithSameName.id != list.id
+        {
             throw CustomRelayListError.duplicateName
         } else if let index = lists.firstIndex(where: { $0.id == list.id }) {
             lists[index] = list

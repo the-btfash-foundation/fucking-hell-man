@@ -3,12 +3,12 @@
 //  MullvadMockData
 //
 //  Created by Jon Petersson on 2024-06-19.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 extension TimeInterval {
     struct UnitTest {
-        static let timeout: TimeInterval = 60
+        static let timeout: TimeInterval = 10
         static let invertedTimeout: TimeInterval = 0.5
     }
 }

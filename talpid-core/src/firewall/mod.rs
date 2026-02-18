@@ -1,55 +1,59 @@
-#[cfg(not(target_os = "android"))]
-use crate::dns::ResolvedDnsConfig;
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use std::{
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::LazyLock,
 };
-use talpid_types::net::{AllowedEndpoint, AllowedTunnelTraffic, ALLOWED_LAN_NETS};
+#[cfg(not(target_os = "android"))]
+use talpid_dns::ResolvedDnsConfig;
+use talpid_tunnel::TunnelMetadata;
+use talpid_types::net::{ALLOWED_LAN_NETS, AllowedEndpoint, AllowedTunnelTraffic};
 
-#[cfg(target_os = "macos")]
-#[path = "macos.rs"]
-mod imp;
+cfg_if::cfg_if! {
+    if #[cfg(target_os = "windows")] {
+        /// Firewall implementation for Windows
+        mod windows;
+        use windows as imp;
+    } else if #[cfg(target_os = "macos")] {
+        /// Firewall implementation for macOS
+        mod macos;
+        use macos as imp;
+    } else if #[cfg(target_os = "linux")] {
+        /// Firewall implementation for desktop Linux
+        pub mod linux;
+        use linux as imp;
+    } else if #[cfg(target_os = "android")] {
+        /// Firewall implementation for Android
+        mod android;
+        use android as imp;
+    }
+}
 
 #[cfg(target_os = "linux")]
-#[path = "linux.rs"]
-mod imp;
-
-#[cfg(windows)]
-#[path = "windows/mod.rs"]
-mod imp;
-
-#[cfg(target_os = "android")]
-#[path = "android.rs"]
-mod imp;
+use crate::tunnel_state_machine::LinuxNetworkingIdentifiers;
+#[cfg(target_os = "linux")]
+use talpid_cgroup::v2::CGroup2;
 
 pub use self::imp::Error;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-static IPV6_LINK_LOCAL: LazyLock<Ipv6Network> =
-    LazyLock::new(|| Ipv6Network::new(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10).unwrap());
+const IPV6_LINK_LOCAL: Ipv6Network =
+    Ipv6Network::new_checked(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10).unwrap();
 /// The allowed target addresses of outbound DHCPv6 requests
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-static DHCPV6_SERVER_ADDRS: LazyLock<[Ipv6Addr; 2]> = LazyLock::new(|| {
-    [
-        Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 1, 2),
-        Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 1, 3),
-    ]
-});
+const DHCPV6_SERVER_ADDRS: [Ipv6Addr; 2] = [
+    Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 1, 2),
+    Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 1, 3),
+];
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-static ROUTER_SOLICITATION_OUT_DST_ADDR: LazyLock<Ipv6Addr> =
-    LazyLock::new(|| Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 2));
+const ROUTER_SOLICITATION_OUT_DST_ADDR: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 2);
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-static SOLICITED_NODE_MULTICAST: LazyLock<Ipv6Network> = LazyLock::new(|| {
-    Ipv6Network::new(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 1, 0xFF00, 0), 104).unwrap()
-});
-static LOOPBACK_NETS: LazyLock<[IpNetwork; 2]> = LazyLock::new(|| {
-    [
-        IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(127, 0, 0, 0), 8).unwrap()),
-        IpNetwork::V6(Ipv6Network::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 128).unwrap()),
-    ]
-});
+const SOLICITED_NODE_MULTICAST: Ipv6Network =
+    Ipv6Network::new_checked(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 1, 0xFF00, 0), 104).unwrap();
+const LOOPBACK_NETS: [IpNetwork; 2] = [
+    IpNetwork::V4(Ipv4Network::new_checked(Ipv4Addr::new(127, 0, 0, 0), 8).unwrap()),
+    IpNetwork::V6(Ipv6Network::new_checked(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 128).unwrap()),
+];
 
 #[cfg(all(unix, not(target_os = "android")))]
 const DHCPV4_SERVER_PORT: u16 = 67;
@@ -63,11 +67,10 @@ const DHCPV6_CLIENT_PORT: u16 = 546;
 const ROOT_UID: u32 = 0;
 
 /// Returns whether an address belongs to a private subnet.
-pub fn is_local_address(address: &IpAddr) -> bool {
-    let address = *address;
-    (*ALLOWED_LAN_NETS)
+pub fn is_local_address(address: IpAddr) -> bool {
+    ALLOWED_LAN_NETS
         .iter()
-        .chain(&*LOOPBACK_NETS)
+        .chain(&LOOPBACK_NETS)
         .any(|net| net.contains(address))
 }
 
@@ -81,10 +84,13 @@ pub fn is_local_address(address: &IpAddr) -> bool {
 pub enum FirewallPolicy {
     /// Allow traffic only to server
     Connecting {
-        /// The peer endpoint that should be allowed.
-        peer_endpoint: AllowedEndpoint,
+        /// The peer endpoints that should be allowed.
+        peer_endpoints: Vec<AllowedEndpoint>,
+        /// IP of the exit endpoint, iff it differs from `peer_endpoint`
+        #[cfg(target_os = "windows")]
+        exit_endpoint_ip: Option<IpAddr>,
         /// Metadata about the tunnel and tunnel interface.
-        tunnel: Option<crate::tunnel::TunnelMetadata>,
+        tunnel: Option<TunnelMetadata>,
         /// Flag setting if communication with LAN networks should be possible.
         allow_lan: bool,
         /// Host that should be reachable while connecting.
@@ -94,18 +100,17 @@ pub enum FirewallPolicy {
         /// Interface to redirect (VPN tunnel) traffic to
         #[cfg(target_os = "macos")]
         redirect_interface: Option<String>,
-        /// Destination port for DNS traffic redirection. Traffic destined to `127.0.0.1:53` will
-        /// be redirected to `127.0.0.1:$dns_redirect_port`.
-        #[cfg(target_os = "macos")]
-        dns_redirect_port: u16,
     },
 
     /// Allow traffic only to server and over tunnel interface
     Connected {
-        /// The peer endpoint that should be allowed.
-        peer_endpoint: AllowedEndpoint,
+        /// The peer endpoints that should be allowed.
+        peer_endpoints: Vec<AllowedEndpoint>,
+        /// IP of the exit endpoint, iff it differs from `peer_endpoint`
+        #[cfg(target_os = "windows")]
+        exit_endpoint_ip: Option<IpAddr>,
         /// Metadata about the tunnel and tunnel interface.
-        tunnel: crate::tunnel::TunnelMetadata,
+        tunnel: TunnelMetadata,
         /// Flag setting if communication with LAN networks should be possible.
         allow_lan: bool,
         /// Servers that are allowed to respond to DNS requests.
@@ -114,10 +119,6 @@ pub enum FirewallPolicy {
         /// Interface to redirect (VPN tunnel) traffic to
         #[cfg(target_os = "macos")]
         redirect_interface: Option<String>,
-        /// Destination port for DNS traffic redirection. Traffic destined to `127.0.0.1:53` will
-        /// be redirected to `127.0.0.1:$dns_redirect_port`.
-        #[cfg(target_os = "macos")]
-        dns_redirect_port: u16,
     },
 
     /// Block all network traffic in and out from the computer.
@@ -126,19 +127,15 @@ pub enum FirewallPolicy {
         allow_lan: bool,
         /// Host that should be reachable while in the blocked state.
         allowed_endpoint: Option<AllowedEndpoint>,
-        /// Destination port for DNS traffic redirection. Traffic destined to `127.0.0.1:53` will
-        /// be redirected to `127.0.0.1:$dns_redirect_port`.
-        #[cfg(target_os = "macos")]
-        dns_redirect_port: u16,
     },
 }
 
 impl FirewallPolicy {
     /// Return the tunnel peer endpoint, if available
-    pub fn peer_endpoint(&self) -> Option<&AllowedEndpoint> {
+    pub fn peer_endpoints(&self) -> Option<&[AllowedEndpoint]> {
         match self {
-            FirewallPolicy::Connecting { peer_endpoint, .. }
-            | FirewallPolicy::Connected { peer_endpoint, .. } => Some(peer_endpoint),
+            FirewallPolicy::Connecting { peer_endpoints, .. }
+            | FirewallPolicy::Connected { peer_endpoints, .. } => Some(peer_endpoints),
             _ => None,
         }
     }
@@ -158,7 +155,7 @@ impl FirewallPolicy {
     }
 
     /// Return tunnel metadata, if available
-    pub fn tunnel(&self) -> Option<&crate::tunnel::TunnelMetadata> {
+    pub fn tunnel(&self) -> Option<&TunnelMetadata> {
         match self {
             FirewallPolicy::Connecting {
                 tunnel: Some(tunnel),
@@ -189,13 +186,43 @@ impl FirewallPolicy {
             | FirewallPolicy::Blocked { allow_lan, .. } => *allow_lan,
         }
     }
+
+    /// Return the interface to redirect (VPN tunnel) traffic to, if any.
+    #[cfg(target_os = "macos")]
+    pub fn redirect_interface(&self) -> Option<&str> {
+        match self {
+            FirewallPolicy::Connecting {
+                redirect_interface, ..
+            } => redirect_interface.as_deref(),
+            FirewallPolicy::Connected {
+                redirect_interface, ..
+            } => redirect_interface.as_deref(),
+            FirewallPolicy::Blocked { .. } => None,
+        }
+    }
 }
 
 impl fmt::Display for FirewallPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn print_peer_endpoints(
+            f: &mut fmt::Formatter<'_>,
+            endpoints: &[AllowedEndpoint],
+        ) -> fmt::Result {
+            if let Some((first, remaining)) = endpoints.split_first() {
+                write!(f, "{{ {first} ")?;
+                for endpoint in remaining {
+                    write!(f, "| {endpoint} ")?;
+                }
+                write!(f, "}}")?;
+            } else {
+                write!(f, "unknown")?;
+            }
+            Ok(())
+        }
+
         match self {
             FirewallPolicy::Connecting {
-                peer_endpoint,
+                peer_endpoints,
                 tunnel,
                 allow_lan,
                 allowed_endpoint,
@@ -203,10 +230,12 @@ impl fmt::Display for FirewallPolicy {
                 ..
             } => {
                 if let Some(tunnel) = tunnel {
+                    write!(f, "Connecting to ")?;
+                    print_peer_endpoints(f, peer_endpoints)?;
+
                     write!(
                         f,
-                        "Connecting to {} over \"{}\" (ip: {}, v4 gw: {}, v6 gw: {:?}, allowed in-tunnel traffic: {}), {} LAN. Allowing endpoint {}",
-                        peer_endpoint,
+                        " over \"{}\" (ip: {}, v4 gw: {}, v6 gw: {:?}, allowed in-tunnel traffic: {}), {} LAN. Allowing endpoint {}",
                         tunnel.interface,
                         tunnel
                             .ips
@@ -221,35 +250,39 @@ impl fmt::Display for FirewallPolicy {
                         allowed_endpoint,
                     )
                 } else {
+                    write!(f, "Connecting to ")?;
+                    print_peer_endpoints(f, peer_endpoints)?;
                     write!(
                         f,
-                        "Connecting to {}, {} LAN, interface: none. Allowing endpoint {}",
-                        peer_endpoint,
+                        ", {} LAN, interface: none. Allowing endpoint {}",
                         if *allow_lan { "Allowing" } else { "Blocking" },
                         allowed_endpoint,
                     )
                 }
             }
             FirewallPolicy::Connected {
-                peer_endpoint,
+                peer_endpoints,
                 tunnel,
                 allow_lan,
                 ..
-            } => write!(
-                f,
-                "Connected to {} over \"{}\" (ip: {}, v4 gw: {}, v6 gw: {:?}), {} LAN",
-                peer_endpoint,
-                tunnel.interface,
-                tunnel
-                    .ips
-                    .iter()
-                    .map(|ip| ip.to_string())
-                    .collect::<Vec<_>>()
-                    .join(","),
-                tunnel.ipv4_gateway,
-                tunnel.ipv6_gateway,
-                if *allow_lan { "Allowing" } else { "Blocking" }
-            ),
+            } => {
+                write!(f, "Connected to ")?;
+                print_peer_endpoints(f, peer_endpoints)?;
+                write!(
+                    f,
+                    " over \"{}\" (ip: {}, v4 gw: {}, v6 gw: {:?}), {} LAN",
+                    tunnel.interface,
+                    tunnel
+                        .ips
+                        .iter()
+                        .map(|ip| ip.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    tunnel.ipv4_gateway,
+                    tunnel.ipv6_gateway,
+                    if *allow_lan { "Allowing" } else { "Blocking" }
+                )
+            }
             FirewallPolicy::Blocked {
                 allow_lan,
                 allowed_endpoint,
@@ -279,10 +312,10 @@ pub struct FirewallArguments {
     pub initial_state: InitialFirewallState,
     /// This argument is required for the blocked state to configure the firewall correctly.
     pub allow_lan: bool,
-    /// Specifies the firewall mark used to identify traffic that is allowed to be excluded from
-    /// the tunnel and _leaked_ during blocked states.
+    /// Specifies the cgroup2 and firewall mark used to identify traffic that is allowed to be
+    /// excluded from the tunnel and _leaked_ during blocked states.
     #[cfg(target_os = "linux")]
-    pub fwmark: u32,
+    pub linux_ids: LinuxNetworkingIdentifiers,
 }
 
 /// State to enter during firewall init.
@@ -302,11 +335,19 @@ impl Firewall {
     }
 
     /// Createsa new firewall instance.
-    pub fn new(#[cfg(target_os = "linux")] fwmark: u32) -> Result<Self, Error> {
+    pub fn new(
+        #[cfg(target_os = "linux")] fwmark: u32,
+        #[cfg(target_os = "linux")] excluded_cgroup: Option<CGroup2>,
+        #[cfg(target_os = "linux")] net_cls: Option<u32>,
+    ) -> Result<Self, Error> {
         Ok(Firewall {
             inner: imp::Firewall::new(
                 #[cfg(target_os = "linux")]
                 fwmark,
+                #[cfg(target_os = "linux")]
+                excluded_cgroup,
+                #[cfg(target_os = "linux")]
+                net_cls,
             )?,
         })
     }
@@ -323,5 +364,11 @@ impl Firewall {
     pub fn reset_policy(&mut self) -> Result<(), Error> {
         log::info!("Resetting firewall policy");
         self.inner.reset_policy()
+    }
+
+    /// Sets whether the firewall should persist the blocking rules across a reboot.
+    #[cfg(target_os = "windows")]
+    pub fn persist(&mut self, persist: bool) {
+        self.inner.persist(persist);
     }
 }

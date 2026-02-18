@@ -3,7 +3,7 @@
 //  CachedRelays
 //
 //  Created by pronebird on 27/07/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -24,4 +24,19 @@ public struct CachedRelays: Codable, Equatable {
         self.relays = relays
         self.updatedAt = updatedAt
     }
+
+    /// Returns true if the relay list contains no usable relays
+    public var isEmpty: Bool {
+        relays.isEmpty
+    }
+
+    /// Empty relay list used when prebundled file is empty (Debug/Staging builds)
+    public static var empty: CachedRelays {
+        CachedRelays(
+            etag: nil,
+            relays: .empty,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+    }
+
 }

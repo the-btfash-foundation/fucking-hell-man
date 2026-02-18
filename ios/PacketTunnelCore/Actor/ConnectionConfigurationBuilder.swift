@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by Mojgan on 2024-09-16.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -63,20 +63,21 @@ private struct NormalConnectionConfiguration: Configuration {
     }
 
     func make() throws -> ConnectionConfiguration {
-        let entryConfiguration: TunnelAdapterConfiguration? = if connectionData.selectedRelays.entry != nil {
-            try ConfigurationBuilder(
-                privateKey: activeKey,
-                interfaceAddresses: settings.interfaceAddresses,
-                dns: settings.dnsServers,
-                endpoint: connectionData.connectedEndpoint,
-                allowedIPs: [
-                    IPAddressRange(from: "\(connectionData.selectedRelays.exit.endpoint.ipv4Relay.ip)/32")!,
-                ],
-                pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddress.rawValue)!
-            ).makeConfiguration()
-        } else {
-            nil
-        }
+        let entryConfiguration: TunnelAdapterConfiguration? =
+            if connectionData.selectedRelays.entry != nil {
+                try ConfigurationBuilder(
+                    privateKey: activeKey,
+                    interfaceAddresses: settings.interfaceAddresses,
+                    dns: settings.dnsServers,
+                    endpoint: connectionData.connectedEndpoint,
+                    allowedIPs: [
+                        IPAddressRange(from: "\(connectionData.selectedRelays.exit.endpoint.socketAddress.ip)/32")!
+                    ],
+                    pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddressIpV4.rawValue)!
+                ).makeConfiguration()
+            } else {
+                nil
+            }
         let exitConfiguration = try ConfigurationBuilder(
             privateKey: activeKey,
             interfaceAddresses: settings.interfaceAddresses,
@@ -88,7 +89,7 @@ private struct NormalConnectionConfiguration: Configuration {
                 IPAddressRange(from: "0.0.0.0/0")!,
                 IPAddressRange(from: "::/0")!,
             ],
-            pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddress.rawValue)!
+            pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddressIpV4.rawValue)!
         ).makeConfiguration()
 
         return ConnectionConfiguration(
@@ -117,7 +118,7 @@ private struct EphemeralConnectionConfiguration: Configuration {
                 endpoint: connectionData.connectedEndpoint,
                 allowedIPs: hop.configuration.allowedIPs,
                 preSharedKey: hop.configuration.preSharedKey,
-                pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddress.rawValue)!
+                pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddressIpV4.rawValue)!
             ).makeConfiguration()
 
             return ConnectionConfiguration(entryConfiguration: nil, exitConfiguration: exitConfiguration)
@@ -130,7 +131,7 @@ private struct EphemeralConnectionConfiguration: Configuration {
                 endpoint: connectionData.connectedEndpoint,
                 allowedIPs: firstHop.configuration.allowedIPs,
                 preSharedKey: firstHop.configuration.preSharedKey,
-                pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddress.rawValue)!
+                pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddressIpV4.rawValue)!
             ).makeConfiguration()
 
             let exitConfiguration = try ConfigurationBuilder(
@@ -140,7 +141,7 @@ private struct EphemeralConnectionConfiguration: Configuration {
                 endpoint: secondHop.relay.endpoint,
                 allowedIPs: secondHop.configuration.allowedIPs,
                 preSharedKey: secondHop.configuration.preSharedKey,
-                pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddress.rawValue)!
+                pingableGateway: IPv4Address(LocalNetworkIPs.gatewayAddressIpV4.rawValue)!
             ).makeConfiguration()
 
             return ConnectionConfiguration(entryConfiguration: entryConfiguration, exitConfiguration: exitConfiguration)

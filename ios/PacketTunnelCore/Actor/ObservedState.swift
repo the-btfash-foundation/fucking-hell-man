@@ -3,18 +3,19 @@
 //  PacketTunnelCore
 //
 //  Created by pronebird on 11/10/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import Foundation
 import MullvadREST
+import MullvadSettings
 import MullvadTypes
 import Network
-import WireGuardKitTypes
+@preconcurrency import WireGuardKitTypes
 
 /// A serializable representation of internal state.
-public enum ObservedState: Equatable, Codable {
+public enum ObservedState: Equatable, Codable, Sendable {
     case initial
     case connecting(ObservedConnectionState)
     case reconnecting(ObservedConnectionState)
@@ -26,7 +27,7 @@ public enum ObservedState: Equatable, Codable {
 }
 
 /// A serializable representation of internal connection state.
-public struct ObservedConnectionState: Equatable, Codable {
+public struct ObservedConnectionState: Equatable, Codable, Sendable {
     public var selectedRelays: SelectedRelays
     public var relayConstraints: RelayConstraints
     public var networkReachability: NetworkReachability
@@ -36,6 +37,11 @@ public struct ObservedConnectionState: Equatable, Codable {
     public var lastKeyRotation: Date?
     public let isPostQuantum: Bool
     public let isDaitaEnabled: Bool
+
+    /// The obfuscation method, derived from the selected relays' ingress endpoint.
+    public var obfuscationMethod: ObfuscationMethod {
+        selectedRelays.obfuscation
+    }
 
     public var isNetworkReachable: Bool {
         networkReachability != .unreachable
@@ -65,7 +71,7 @@ public struct ObservedConnectionState: Equatable, Codable {
 }
 
 /// A serializable representation of internal blocked state.
-public struct ObservedBlockedState: Equatable, Codable {
+public struct ObservedBlockedState: Equatable, Codable, Sendable {
     public var reason: BlockedStateReason
     public var relayConstraints: RelayConstraints?
 

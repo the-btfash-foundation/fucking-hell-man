@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-11-13.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import SwiftUI
@@ -18,17 +18,35 @@ struct SwitchRowView: View {
     var didTapInfoButton: (() -> Void)?
 
     var body: some View {
-        Toggle(isOn: $isOn, label: {
+        HStack {
             Text(text)
-        })
-        .toggleStyle(CustomToggleStyle(
-            disabled: disabled,
-            accessibilityId: accessibilityId,
-            infoButtonAction: didTapInfoButton
-        ))
-        .disabled(disabled)
-        .font(.headline)
-        .frame(height: UIMetrics.SettingsRowView.height)
+                .opacity(disabled ? 0.2 : 1)
+
+            if let didTapInfoButton {
+                Button(action: didTapInfoButton) {
+                    Image(.iconInfo)
+                }
+                .adjustingTapAreaSize()
+                .tint(.white)
+            }
+
+            Spacer()
+            Toggle(
+                isOn: $isOn,
+                label: {
+                    Text(text)
+                }
+            )
+            .toggleStyle(
+                CustomToggleStyle(
+                    disabled: disabled,
+                    accessibilityId: accessibilityId,
+                    infoButtonAction: didTapInfoButton
+                )
+            )
+            .disabled(disabled)
+        }
+        .font(.mullvadSmall)
         .padding(UIMetrics.SettingsRowView.layoutMargins)
         .background(Color(.primaryColor))
         .foregroundColor(Color(.primaryTextColor))

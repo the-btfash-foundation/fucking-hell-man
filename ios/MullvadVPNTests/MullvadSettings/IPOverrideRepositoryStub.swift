@@ -3,10 +3,10 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2024-01-31.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-import Combine
+@preconcurrency import Combine
 import MullvadSettings
 
 struct IPOverrideRepositoryStub: IPOverrideRepositoryProtocol {

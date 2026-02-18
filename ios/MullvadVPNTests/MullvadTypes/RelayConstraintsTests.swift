@@ -3,11 +3,12 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2024-03-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadTypes
 import XCTest
+
+@testable import MullvadTypes
 
 // There's currently no test for migrating from V2 (RelayConstraint<RelayLocations>) to
 // V3 (RelayConstraint<UserSelectedLocations>) due to the only part being changed was an
@@ -41,22 +42,22 @@ extension RelayConstraintsTests {
 extension RelayConstraintsTests {
     private var constraintsV1: String {
         return """
-        {
-            "port": {
-                "only": 80
-            },
-            "location": {
-                "only": ["se", "got"]
-            },
-            "filter": {
-                "only": {
-                    "providers": "any",
-                    "ownership": {
-                        "rented": {}
+            {
+                "port": {
+                    "only": 80
+                },
+                "location": {
+                    "only": ["se", "got"]
+                },
+                "filter": {
+                    "only": {
+                        "providers": "any",
+                        "ownership": {
+                            "rented": {}
+                        }
                     }
                 }
             }
-        }
-        """
+            """
     }
 }

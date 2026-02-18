@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Andrew Bulhak on 2024-11-06.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import SwiftUI
@@ -49,8 +49,6 @@ import SwiftUI
   ```
   */
 
-// swiftlint:disable function_parameter_count
-
 struct SingleChoiceList<Value>: View where Value: Equatable {
     let title: String
     private let options: [OptionSpec]
@@ -59,6 +57,8 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
     let tableAccessibilityIdentifier: String
     let itemDescription: (Value) -> String
     let customFieldMode: CustomFieldMode
+    // a latch to keep the custom field selected through changes of focus until the user taps elsewhere
+    @State var customFieldSelected = false
 
     /// The configuration for the field for a custom value row
     enum CustomFieldMode {
@@ -170,15 +170,17 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
     ) {
         self.init(
             title: title,
-            optionSpecs: options.map { .literal($0) } + [.custom(
-                label: customLabel,
-                prompt: customPrompt,
-                legend: customLegend,
-                minInputWidth: customInputMinWidth,
-                maxInputLength: customInputMaxLength,
-                toValue: parseCustomValue,
-                fromValue: formatCustomValue
-            )],
+            optionSpecs: options.map { .literal($0) } + [
+                .custom(
+                    label: customLabel,
+                    prompt: customPrompt,
+                    legend: customLegend,
+                    minInputWidth: customInputMinWidth,
+                    maxInputLength: customInputMaxLength,
+                    toValue: parseCustomValue,
+                    fromValue: formatCustomValue
+                )
+            ],
             value: value,
             tableAccessibilityIdentifier: tableAccessibilityIdentifier,
             itemDescription: itemDescription,
@@ -189,16 +191,16 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
     // Construct a row with arbitrary content and the correct style
     private func row<V: View>(isSelected: Bool, @ViewBuilder items: () -> V) -> some View {
         HStack {
-            Image(uiImage: UIImage(resource: .iconTick)).opacity(isSelected ? 1.0 : 0.0)
+            Image(uiImage: UIImage.tick).opacity(isSelected ? 1.0 : 0.0)
             Spacer().frame(width: UIMetrics.SettingsCell.selectableSettingsCellLeftViewSpacing)
 
             items()
         }
-        .padding(EdgeInsets(UIMetrics.SettingsCell.layoutMargins))
+        .padding(EdgeInsets(UIMetrics.SettingsCell.defaultLayoutMargins))
         .background(
             isSelected
                 ? Color(UIColor.Cell.Background.selected)
-                : Color(UIColor.Cell.Background.indentationLevelOne)
+                : Color(UIColor.Cell.Background.indentationLevelZero)
         )
         .foregroundColor(Color(UIColor.Cell.titleTextColor))
     }
@@ -206,7 +208,7 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
     // Construct a literal row for a specific literal value
     private func literalRow(_ item: Value) -> some View {
         row(
-            isSelected: value.wrappedValue == item && !customValueIsFocused
+            isSelected: value.wrappedValue == item && !customFieldSelected
         ) {
             Text(verbatim: itemDescription(item))
             Spacer()
@@ -215,11 +217,11 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
             value.wrappedValue = item
             customValueIsFocused = false
             customValueInput = ""
+            customFieldSelected = false
         }
     }
 
     // Construct the one row with a custom input field for a custom value
-    // swiftlint:disable function_body_length
     private func customRow(
         label: String,
         prompt: String,
@@ -229,7 +231,7 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
         fromValue: @escaping (Value) -> String?
     ) -> some View {
         row(
-            isSelected: value.wrappedValue == toValue(customValueInput) || customValueIsFocused
+            isSelected: value.wrappedValue == toValue(customValueInput) || customFieldSelected
         ) {
             Text(label)
             Spacer()
@@ -273,7 +275,7 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
                     )
             )
             .focused($customValueIsFocused)
-            .onChange(of: customValueInput) { _ in
+            .onChange(of: customValueInput) {
                 if let maxInputLength {
                     if customValueInput.count > maxInputLength {
                         customValueInput = String(customValueInput.prefix(maxInputLength))
@@ -304,6 +306,7 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
             }
         }
         .onTapGesture {
+            customFieldSelected = true
             if let v = toValue(customValueInput) {
                 value.wrappedValue = v
             } else {
@@ -312,21 +315,18 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
         }
     }
 
-    // swiftlint:enable function_body_length
-
     private func subtitleRow(_ text: String) -> some View {
         HStack {
             Text(text)
-                .font(.callout)
-                .opacity(0.6)
+                .font(.mullvadTiny)
             Spacer()
         }
-        .padding(.horizontal, UIMetrics.SettingsCell.layoutMargins.leading)
-        .padding(.vertical, 4)
+        .padding(.horizontal, UIMetrics.SettingsCell.defaultLayoutMargins.leading)
+        .padding(.vertical, 16)
         .background(
             Color(.secondaryColor)
         )
-        .foregroundColor(Color(UIColor.Cell.titleTextColor))
+        .foregroundColor(Color(UIColor.TableSection.footerTextColor))
     }
 
     var body: some View {
@@ -335,7 +335,7 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
                 Text(title).fontWeight(.semibold)
                 Spacer()
             }
-            .padding(EdgeInsets(UIMetrics.SettingsCell.layoutMargins))
+            .padding(EdgeInsets(UIMetrics.SettingsCell.defaultLayoutMargins))
             .background(Color(UIColor.Cell.Background.normal))
             List {
                 Section {
@@ -343,6 +343,7 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
                         switch opt.value {
                         case let .literal(v):
                             literalRow(v)
+                                .listRowSeparator(.hidden)
                         case let .custom(
                             label,
                             prompt,
@@ -360,13 +361,15 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
                                 toValue: toValue,
                                 fromValue: fromValue
                             )
+                            .listRowSeparator(.hidden)
                             if let legend {
                                 subtitleRow(legend)
+                                    .listRowSeparator(.hidden)
                             }
                         }
                     }
                 }
-                .listRowInsets(.init()) // remove insets
+                .listRowInsets(.init())  // remove insets
             }
             .accessibilityIdentifier(tableAccessibilityIdentifier)
             .listStyle(.plain)
@@ -374,7 +377,7 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
             .environment(\.defaultMinListRowHeight, 0)
             Spacer()
         }
-        .padding(EdgeInsets(top: 24, leading: 0, bottom: 0, trailing: 0))
+        .padding(.top, 8)
         .background(Color(.secondaryColor))
         .foregroundColor(Color(.primaryTextColor))
         .onAppear {
@@ -382,8 +385,6 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
         }
     }
 }
-
-// swiftlint:enable function_parameter_count
 
 #Preview("Static values") {
     StatefulPreviewWrapper(1) { SingleChoiceList(title: "Test", options: [1, 2, 3], value: $0) }
@@ -414,4 +415,4 @@ struct SingleChoiceList<Value>: View where Value: Equatable {
             )
         }
     }
-} // swiftlint:disable:this file_length
+}

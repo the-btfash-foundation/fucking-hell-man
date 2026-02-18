@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-18.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -11,15 +11,10 @@ import Network
 import XCTest
 
 class ConnectivityTests: LoggedOutUITestCase {
-    let firewallAPIClient = FirewallAPIClient()
+    let firewallAPIClient = FirewallClient()
 
     /// Verifies that the app still functions when API has been blocked
     func testAPIConnectionViaBridges() throws {
-        let skipReason = """
-            This test is currently skipped because shadowsocks bridges cannot be reached
-            from the staging environment
-        """
-        try XCTSkipIf(true, skipReason)
         firewallAPIClient.removeRules()
         let hasTimeAccountNumber = getAccountWithTime()
 
@@ -28,35 +23,17 @@ class ConnectivityTests: LoggedOutUITestCase {
             self.firewallAPIClient.removeRules()
         }
 
-        try Networking.verifyCanAccessAPI() // Just to make sure there's no old firewall rule still active
+        try Networking.verifyCanAccessAPI()  // Just to make sure there's no old firewall rule still active
         firewallAPIClient.createRule(try FirewallRule.makeBlockAPIAccessFirewallRule())
         try Networking.verifyCannotAccessAPI()
 
-        LoginPage(app)
-            .tapAccountNumberTextField()
-            .enterText(hasTimeAccountNumber)
-            .tapAccountNumberSubmitButton()
+        login(accountNumber: hasTimeAccountNumber)
 
-        // After creating firewall rule first login attempt might fail. One more attempt is allowed since the app is cycling between two methods.
-        let successIconShown = LoginPage(app)
-            .getSuccessIconShown()
-
-        if successIconShown {
-            HeaderBar(app)
-                .verifyDeviceLabelShown()
-        } else {
-            LoginPage(app)
-                .verifyFailIconShown()
-                .tapAccountNumberSubmitButton()
-                .verifySuccessIconShown()
-
-            HeaderBar(app)
-                .verifyDeviceLabelShown()
-        }
+        HeaderBar(app)
+            .verifyDeviceLabelShown()
     }
 
     /// Get the app into a blocked state by connecting to a relay then applying a filter which don't find this relay, then verify that app can still communicate by logging out and verifying that the device was successfully removed
-    // swiftlint:disable:next function_body_length
     func testAPIReachableWhenBlocked() throws {
         let hasTimeAccountNumber = getAccountWithTime()
         addTeardownBlock {
@@ -89,25 +66,25 @@ class ConnectivityTests: LoggedOutUITestCase {
         // Setup. Enter blocked state by connecting to relay and applying filter which relay isn't part of.
         login(accountNumber: hasTimeAccountNumber)
 
+        disableBridgesAccessMethod()
+
         TunnelControlPage(app)
             .tapSelectLocationButton()
 
         SelectLocationPage(app)
+            .tapMenuButton()
             .tapFilterButton()
 
         SelectLocationFilterPage(app)
-            .tapOwnershipCellExpandButton()
             .tapMullvadOwnershipCell()
             .tapApplyButton()
 
         // Select the first country, its first city and its first relay
         SelectLocationPage(app)
-            .tapCountryLocationCellExpandButton(
-                withName: BaseUITestCase
-                    .testsDefaultCountryName
-            ) // Must be a little specific here in order to avoid using relay services country with experimental relays
-            .tapCityLocationCellExpandButton(withIndex: 0)
-            .tapRelayLocationCell(withIndex: 0)
+            .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultCountryName)
+            // Must be a little specific here in order to avoid using relay services country with experimental relays
+            .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultMullvadOwnedCityName)
+            .tapLocationCell(withName: BaseUITestCase.testsDefaultMullvadOwnedRelayName)
 
         allowAddVPNConfigurationsIfAsked()
 
@@ -115,10 +92,10 @@ class ConnectivityTests: LoggedOutUITestCase {
             .tapSelectLocationButton()
 
         SelectLocationPage(app)
+            .tapMenuButton()
             .tapFilterButton()
 
         SelectLocationFilterPage(app)
-            .tapOwnershipCellExpandButton()
             .tapRentedOwnershipCell()
             .tapApplyButton()
 
@@ -133,23 +110,16 @@ class ConnectivityTests: LoggedOutUITestCase {
 
         AccountPage(app)
             .tapLogOutButton()
-            .waitForLogoutSpinnerToDisappear()
 
         LoginPage(app)
 
         verifyDeviceHasBeenRemoved(deviceName: deviceName, accountNumber: hasTimeAccountNumber)
     }
 
-    // swiftlint:disable function_body_length
     /// Test that the app is functioning when API is down. To simulate API being down we create a dummy access method
     func testAppStillFunctioningWhenAPIDown() throws {
-        let skipReason = """
-            This test is currently skipped due to a bug in iOS 18 where ATS shuts down the
-        connection to the API in the blocked state, despite being explicitly disabled,
-        and after the checks in SSLPinningURLSessionDelegate return no error.
-        """
-        try XCTSkipIf(true, skipReason)
         let hasTimeAccountNumber = getAccountWithTime()
+        let customAccessMethodName = "Disable-access-dummy"
 
         addTeardownBlock {
             HeaderBar(self.app)
@@ -159,14 +129,18 @@ class ConnectivityTests: LoggedOutUITestCase {
                 .tapAPIAccessCell()
 
             self.toggleAllAccessMethodsEnabledSwitchesIfOff()
+
+            APIAccessPage(self.app)
+                .editAccessMethod(customAccessMethodName)
+
+            EditAccessMethodPage(self.app)
+                .tapDeleteButton()
+                .confirmAccessMethodDeletion()
+
             self.deleteTemporaryAccountWithTime(accountNumber: hasTimeAccountNumber)
         }
 
-        // Setup. Create a dummy access method to simulate API being down(unreachable)
-        LoginPage(app)
-            .tapAccountNumberTextField()
-            .enterText(hasTimeAccountNumber)
-            .tapAccountNumberSubmitButton()
+        login(accountNumber: hasTimeAccountNumber)
 
         TunnelControlPage(app)
 
@@ -176,8 +150,6 @@ class ConnectivityTests: LoggedOutUITestCase {
         SettingsPage(app)
             .tapAPIAccessCell()
 
-        toggleAllAccessMethodsEnabledSwitches()
-
         APIAccessPage(app)
             .tapAddButton()
 
@@ -185,7 +157,7 @@ class ConnectivityTests: LoggedOutUITestCase {
 
         AddAccessMethodPage(app)
             .tapNameCell()
-            .enterText("Disable-access-dummy")
+            .enterText(customAccessMethodName)
             .tapTypeCell()
             .tapSOCKS5TypeValueCell()
             .tapServerCell()
@@ -200,17 +172,19 @@ class ConnectivityTests: LoggedOutUITestCase {
         AddAccessMethodAPIUnreachableAlert(app)
             .tapSaveButton()
 
+        disableBuiltinAccessMethods()
+
         SettingsPage(app)
             .swipeDownToDismissModal()
 
         // Actual test. Make sure it is possible to connect to a relay
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapConnectButton()
 
         allowAddVPNConfigurationsIfAsked()
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
 
         HeaderBar(app)
             .tapAccountButton()
@@ -218,7 +192,6 @@ class ConnectivityTests: LoggedOutUITestCase {
         // Log out will take long because API cannot be reached
         AccountPage(app)
             .tapLogOutButton()
-            .waitForLogoutSpinnerToDisappear()
 
         // Verify API cannot be reached by doing a login attempt which should fail
         LoginPage(app)
@@ -226,6 +199,51 @@ class ConnectivityTests: LoggedOutUITestCase {
             .enterText(hasTimeAccountNumber)
             .tapAccountNumberSubmitButton()
             .verifyFailIconShown()
+    }
+
+    func testIfLocalNetworkSharingIsBlocking() throws {
+        let skipReason = """
+                This test is currently skipped since there is no way to allow local network access for UI tests.
+            Since its blocked by the system, there is no way of testing the `Local network sharing` switch.
+            Non of these solutions worked: https://developer.apple.com/forums/thread/668729
+            """
+        try XCTSkipIf(true, skipReason)
+        let hasTimeAccountNumber = getAccountWithTime()
+        addTeardownBlock {
+            self.deleteTemporaryAccountWithTime(accountNumber: hasTimeAccountNumber)
+        }
+        agreeToTermsOfServiceIfShown()
+
+        login(accountNumber: hasTimeAccountNumber)
+
+        TunnelControlPage(app)
+            .tapConnectButton()
+
+        allowAddVPNConfigurationsIfAsked()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+
+        try Networking.verifyCannotAccessLocalNetwork()
+
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .tapVPNSettingsCell()
+            .tapIncludeAllNetworksCell()
+
+        IncludeAllNetworksPage(app)
+            .tapEnableLocalNetworkSharing()
+            .tapBackButton()
+
+        SettingsPage(app)
+            .tapDoneButton()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+
+        try Networking.verifyCanAccessLocalNetwork()
     }
 
     private func verifyDeviceHasBeenRemoved(deviceName: String, accountNumber: String) {
@@ -240,11 +258,15 @@ class ConnectivityTests: LoggedOutUITestCase {
         }
     }
 
-    // swiftlint:enable function_body_length
-
-    /// Toggle enabled switch for all existing access methods. It is a precondition that the app is currently showing API access view.
-    private func toggleAllAccessMethodsEnabledSwitches() {
-        for cell in APIAccessPage(app).getAccessMethodCells() {
+    /// Toggle enabled switch for all existing access methods.
+    /// Preconditions:
+    /// - The app is currently showing API access view.
+    /// - There is one custom access method enabled
+    /// - The extra access method is not disabled
+    private func disableBuiltinAccessMethods() {
+        var accessMethods = APIAccessPage(app).getAccessMethodCells()
+        accessMethods.removeLast()
+        for cell in accessMethods {
             cell.tap()
             EditAccessMethodPage(app)
                 .tapEnableMethodSwitch()

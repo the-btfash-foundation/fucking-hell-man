@@ -5,9 +5,8 @@ pub mod peer_exchange;
 use libc::c_void;
 use peer_exchange::EphemeralPeerExchange;
 
-use std::{ffi::CString, ptr, sync::Once};
+use std::{ffi::CString, ptr};
 use talpid_tunnel_config_client::DaitaSettings;
-static INIT_LOGGING: Once = Once::new();
 
 #[derive(Clone)]
 pub struct PacketTunnelBridge {
@@ -17,7 +16,7 @@ pub struct PacketTunnelBridge {
 
 impl PacketTunnelBridge {
     fn fail_exchange(self) {
-        // # Safety
+        // # Safety:
         // Call is safe as long as the `packet_tunnel` pointer is valid. Since a valid instance of
         // `PacketTunnelBridge` requires the packet tunnel pointer to be valid, it is assumed this
         // call is safe.
@@ -42,7 +41,7 @@ impl PacketTunnelBridge {
             .as_ref()
             .map(|params| params as *const _)
             .unwrap_or(ptr::null());
-        // # Safety
+        // # Safety:
         // The `packet_tunnel` pointer must be valid, much like the call in `fail_exchange`, but
         // since the other arguments here are non-null, these pointers (`preshared_ptr`,
         // `ephmerela_ptr` and `daita_ptr`) have to be valid too. Since they point to local
@@ -53,6 +52,7 @@ impl PacketTunnelBridge {
     }
 }
 
+// SAFETY: See notes for `EphemeralPeerExchange`
 unsafe impl Send for PacketTunnelBridge {}
 
 #[repr(C)]
@@ -73,7 +73,12 @@ pub struct DaitaParameters {
 
 impl DaitaParameters {
     fn new(settings: DaitaSettings) -> Option<Self> {
-        let machines_string = settings.client_machines.join("\n");
+        let machines_string = settings
+            .client_machines
+            .into_iter()
+            .map(|machine| machine.serialize())
+            .collect::<Vec<_>>()
+            .join("\n");
         let machines = CString::new(machines_string).ok()?.into_raw().cast();
         Some(Self {
             machines,
@@ -85,7 +90,7 @@ impl DaitaParameters {
 
 impl Drop for DaitaParameters {
     fn drop(&mut self) {
-        // # Safety
+        // # Safety:
         // `machines` pointer must be a valid pointer to a CString. This can be achieved by
         // ensuring that `DaitaParameters` are constructed via `DaitaParameters::new` and the
         // `machines` pointer is never written to.
@@ -93,7 +98,7 @@ impl Drop for DaitaParameters {
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     /// To be called when ephemeral peer exchange has finished. All parameters except
     /// `raw_packet_tunnel` are optional.
     ///
@@ -118,10 +123,11 @@ extern "C" {
 /// # Safety
 /// `sender` must be pointing to a valid instance of a `EphemeralPeerCancelToken` created by the
 /// `PacketTunnelProvider`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn cancel_ephemeral_peer_exchange(
     sender: *mut peer_exchange::ExchangeCancelToken,
 ) {
+    // SAFETY: See notes above
     let sender = unsafe { Box::from_raw(sender) };
     sender.cancel();
 }
@@ -132,10 +138,11 @@ pub unsafe extern "C" fn cancel_ephemeral_peer_exchange(
 /// # Safety
 /// `sender` must be pointing to a valid instance of a `EphemeralPeerCancelToken` created by the
 /// `PacketTunnelProvider`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn drop_ephemeral_peer_exchange_token(
     sender: *mut peer_exchange::ExchangeCancelToken,
 ) {
+    // SAFETY: See notes above
     // drop the cancel token
     let _sender = unsafe { Box::from_raw(sender) };
 }
@@ -148,7 +155,7 @@ pub unsafe extern "C" fn drop_ephemeral_peer_exchange_token(
 /// function is called, and thus must be copied here. `packet_tunnel` must be valid pointers to a
 /// packet tunnel, the packet tunnel pointer must outlive the ephemeral peer exchange.
 /// `cancel_token` should be owned by the caller of this function.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn request_ephemeral_peer(
     public_key: *const u8,
     ephemeral_key: *const u8,
@@ -156,16 +163,10 @@ pub unsafe extern "C" fn request_ephemeral_peer(
     tunnel_handle: i32,
     peer_parameters: EphemeralPeerParameters,
 ) -> *mut peer_exchange::ExchangeCancelToken {
-    INIT_LOGGING.call_once(|| {
-        let _ = oslog::OsLogger::new("net.mullvad.MullvadVPN.TTCC")
-            .level_filter(log::LevelFilter::Debug)
-            .init();
-    });
-
-    // # Safety
+    // # Safety:
     // `public_key` pointer must be a valid pointer to 32 unsigned bytes.
     let pub_key: [u8; 32] = unsafe { ptr::read(public_key as *const [u8; 32]) };
-    // # Safety
+    // # Safety:
     // `ephemeral_key` pointer must be a valid pointer to 32 unsigned bytes.
     let eph_key: [u8; 32] = unsafe { ptr::read(ephemeral_key as *const [u8; 32]) };
 

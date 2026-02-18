@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by pronebird on 08/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -95,12 +95,12 @@ extension State {
 
     var connectionData: State.ConnectionData? {
         switch self {
-        case
-            let .connecting(connState),
+        case let .connecting(connState),
             let .connected(connState),
             let .reconnecting(connState),
             let .negotiatingEphemeralPeer(connState, _),
-            let .disconnecting(connState): connState
+            let .disconnecting(connState):
+            connState
         default: nil
         }
     }
@@ -137,26 +137,26 @@ extension State {
     /// Apply a mutating function to the connection/error state's associated data if this state has one,
     /// and replace its value. If not, this is a no-op.
     /// - parameter modifier: A function that takes an `inout ConnectionOrBlockedState` and modifies it
-    mutating func mutateAssociatedData(_ modifier: (inout StateAssociatedData) -> Void) {
+    mutating func mutateAssociatedData<T>(_ modifier: (inout StateAssociatedData) -> T) -> T? {
         switch self {
         case let .connecting(connState),
-             let .connected(connState),
-             let .reconnecting(connState),
-             let .negotiatingEphemeralPeer(connState, _),
-             let .disconnecting(connState):
+            let .connected(connState),
+            let .reconnecting(connState),
+            let .negotiatingEphemeralPeer(connState, _),
+            let .disconnecting(connState):
             var associatedData: StateAssociatedData = connState
-            modifier(&associatedData)
-            // swiftlint:disable:next force_cast
+            let returnValue = modifier(&associatedData)
             self = self.replacingConnectionData(with: associatedData as! ConnectionData)
+            return returnValue
 
         case let .error(blockedState):
             var associatedData: StateAssociatedData = blockedState
-            modifier(&associatedData)
-            // swiftlint:disable:next force_cast
+            let returnValue = modifier(&associatedData)
             self = .error(associatedData as! BlockingData)
+            return returnValue
 
         default:
-            break
+            return nil
         }
     }
 
@@ -191,22 +191,22 @@ extension State.KeyPolicy: Equatable {
 extension BlockedStateReason {
     /**
      Returns true if the tunnel should attempt to restart periodically to recover from error that does not require explicit restart to be initiated by user.
-
+    
      Common scenarios when tunnel will attempt to restart itself periodically:
-
+    
      - Keychain and filesystem are locked on boot until user unlocks device in the very first time.
      - App update that requires settings schema migration. Packet tunnel will be automatically restarted after update but it would not be able to read settings until
        user opens the app which performs migration.
-     - Packet tunnel will be automatically restarted when there is a tunnel adapter error.
      */
     var shouldRestartAutomatically: Bool {
         switch self {
-        case .deviceLocked, .tunnelAdapter:
+        case .deviceLocked:
             return true
         case .noRelaysSatisfyingConstraints, .noRelaysSatisfyingFilterConstraints,
-             .multihopEntryEqualsExit, .noRelaysSatisfyingObfuscationSettings,
-             .noRelaysSatisfyingDaitaConstraints, .readSettings, .invalidAccount, .accountExpired, .deviceRevoked,
-             .unknown, .deviceLoggedOut, .outdatedSchema, .invalidRelayPublicKey:
+            .multihopEntryEqualsExit, .noRelaysSatisfyingObfuscationSettings,
+            .noRelaysSatisfyingDaitaConstraints, .readSettings, .invalidAccount, .accountExpired, .deviceRevoked,
+            .unknown, .deviceLoggedOut, .outdatedSchema, .invalidRelayPublicKey,
+            .noRelaysSatisfyingPortConstraints, .tunnelAdapter, .offline:
             return false
         }
     }

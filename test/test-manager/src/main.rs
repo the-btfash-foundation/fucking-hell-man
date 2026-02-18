@@ -11,15 +11,15 @@ mod vm;
 
 #[cfg(target_os = "macos")]
 use std::net::IpAddr;
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-use anyhow::{Context, Result};
-use clap::{builder::PossibleValuesParser, Parser};
+use anyhow::{Context, Ok, Result};
+use clap::{Parser, builder::PossibleValuesParser};
+use config::ConfigFile;
 use package::TargetInfo;
 use tests::{config::TEST_CONFIG, get_filtered_tests};
+use tokio::time::Instant;
 use vm::provision;
-
-use crate::tests::config::OpenVPNCertificate;
 
 /// Test manager for Mullvad VPN app
 #[derive(Parser, Debug)]
@@ -31,28 +31,13 @@ struct Args {
 
 #[derive(clap::Subcommand, Debug)]
 enum Commands {
-    /// Create or edit a VM config
-    Set {
-        /// Name of the VM config
-        vm: String,
-
-        /// VM config
-        #[clap(flatten)]
-        config: config::VmConfig,
-    },
-
-    /// Remove specified VM config
-    Remove {
-        /// Name of the VM config, run `test-manager list` to see available configs
-        vm: String,
-    },
-
-    /// List available VM configurations
-    List,
+    /// Manage configuration for tests and VMs
+    #[clap(subcommand)]
+    Config(ConfigArg),
 
     /// Spawn a runner instance without running any tests
     RunVm {
-        /// Name of the VM config, run `test-manager list` to see available configs
+        /// Name of the VM config, run `test-manager config vm list` to see configured VMs
         vm: String,
 
         /// Run VNC server on a specified port
@@ -69,7 +54,7 @@ enum Commands {
 
     /// Spawn a runner instance and run tests
     RunTests {
-        /// Name of the VM config, run `test-manager list` to see available configs
+        /// Name of the VM config, run `test-manager config vm list` to see configured VMs
         #[arg(long)]
         vm: String,
 
@@ -121,11 +106,9 @@ enum Commands {
         #[arg(long, value_name = "DIR")]
         package_dir: Option<PathBuf>,
 
-        /// OpenVPN CA certificate to use with the app under test. The expected argument is a path
-        /// (absolut or relative) to the desired CA certificate. The default certificate is
-        /// `assets/openvpn.ca.crt`.
+        /// Names of tests to not run. Any tests given here will be skipped.
         #[arg(long)]
-        openvpn_certificate: Option<PathBuf>,
+        skip: Vec<String>,
 
         /// Names of tests to run. The order given will be respected. If not set, all tests will be
         /// run.
@@ -161,54 +144,131 @@ enum Commands {
     },
 }
 
-#[cfg(target_os = "linux")]
-impl Args {
-    fn get_vnc_port(&self) -> Option<u16> {
-        match self.cmd {
-            Commands::RunTests { vnc, .. } | Commands::RunVm { vnc, .. } => vnc,
-            _ => None,
-        }
-    }
+#[derive(clap::Subcommand, Debug)]
+#[expect(clippy::large_enum_variant)]
+enum ConfigArg {
+    /// Print the current config
+    Get,
+    /// Print the path to the current config file
+    Which,
+    /// Manage VM-specific setting
+    #[clap(subcommand)]
+    Vm(VmConfig),
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+#[derive(clap::Subcommand, Debug)]
+#[expect(clippy::large_enum_variant)]
+enum VmConfig {
+    /// Create or edit a VM config
+    Set {
+        /// Name of the VM config
+        vm: String,
+
+        /// VM config
+        #[clap(flatten)]
+        config: config::VmConfig,
+    },
+
+    /// Remove specified VM config
+    Remove {
+        /// Name of the VM config, run `test-manager config vm list` to see configured VMs
+        vm: String,
+    },
+
+    /// List available VM configurations
+    List,
+}
+
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("Failed to create Tokio runtime")?;
+    runtime.block_on(inner_main())?;
+
+    // Give background tasks some time to exit cleanly
+    const WARNING_THRESHOLD: Duration = Duration::from_secs(5);
+    let shutdown_timeout = WARNING_THRESHOLD + Duration::from_secs(5);
+
+    let now = Instant::now();
+    runtime.shutdown_timeout(shutdown_timeout);
+
+    if now.elapsed() >= WARNING_THRESHOLD {
+        log::warn!(
+            "Shut down took {} seconds. Some blocking threads may not have exited cleanly.",
+            now.elapsed().as_secs()
+        );
+    }
+
+    Ok(())
+}
+
+async fn inner_main() -> Result<()> {
     logging::Logger::get_or_init();
 
     let args = Args::parse();
-
-    #[cfg(target_os = "linux")]
-    container::relaunch_with_rootlesskit(args.get_vnc_port()).await;
 
     let mut config = config::ConfigFile::load_or_default()
         .await
         .context("Failed to load config")?;
     match args.cmd {
-        Commands::Set {
-            vm,
-            config: vm_config,
-        } => vm::set_config(&mut config, &vm, vm_config)
-            .await
-            .context("Failed to edit or create VM config"),
-        Commands::Remove { vm } => {
-            if config.get_vm(&vm).is_none() {
-                println!("No such configuration");
-                return Ok(());
+        Commands::Config(config_subcommand) => match config_subcommand {
+            ConfigArg::Get => {
+                println!("{:#?}", *config);
+                Ok(())
             }
-            config
-                .edit(|config| {
-                    config.vms.remove_entry(&vm);
-                })
-                .await
-                .context("Failed to remove config entry")?;
-            println!("Removed configuration \"{vm}\"");
+            ConfigArg::Which => {
+                println!(
+                    "{}",
+                    ConfigFile::get_config_path()
+                        .expect("Get config path")
+                        .display()
+                );
+                Ok(())
+            }
+            ConfigArg::Vm(vm_config) => match vm_config {
+                VmConfig::Set {
+                    vm,
+                    config: vm_config,
+                } => vm::set_config(&mut config, &vm, vm_config)
+                    .await
+                    .context("Failed to edit or create VM config"),
+                VmConfig::Remove { vm } => {
+                    if config.get_vm(&vm).is_none() {
+                        println!("No such configuration");
+                        return Ok(());
+                    }
+                    config
+                        .edit(|config| {
+                            config.vms.remove_entry(&vm);
+                        })
+                        .await
+                        .context("Failed to remove config entry")?;
+                    println!("Removed configuration \"{vm}\"");
+                    Ok(())
+                }
+                VmConfig::List => {
+                    println!("Configured VMs:");
+                    for vm in config.vms.keys() {
+                        println!("{vm}");
+                    }
+                    Ok(())
+                }
+            },
+        },
+        Commands::ListTests => {
+            println!("priority\tname");
+            for test in tests::get_test_descriptions() {
+                println!(
+                    "{priority:8}\t{name}",
+                    name = test.name,
+                    priority = test.priority.unwrap_or(0),
+                );
+            }
             Ok(())
         }
-        Commands::List => {
-            println!("Available configurations:");
-            for (vm, config) in config.vms.iter() {
-                println!("{vm}: {config:#?}");
-            }
+        Commands::FormatTestReports { reports } => {
+            summary::print_summary_table(&reports).await;
             Ok(())
         }
         Commands::RunVm {
@@ -216,6 +276,9 @@ async fn main() -> Result<()> {
             vnc,
             keep_changes,
         } => {
+            #[cfg(target_os = "linux")]
+            container::relaunch_with_rootlesskit(vnc).await;
+
             let mut config = config.clone();
             config.runtime_opts.keep_changes = keep_changes;
             config.runtime_opts.display = if vnc.is_some() {
@@ -230,17 +293,6 @@ async fn main() -> Result<()> {
 
             Ok(())
         }
-        Commands::ListTests => {
-            println!("priority\tname");
-            for test in tests::get_test_descriptions() {
-                println!(
-                    "{priority:8}\t{name}",
-                    name = test.name,
-                    priority = test.priority.unwrap_or(0),
-                );
-            }
-            Ok(())
-        }
         Commands::RunTests {
             vm,
             display,
@@ -251,12 +303,15 @@ async fn main() -> Result<()> {
             app_package_to_upgrade_from,
             gui_package,
             package_dir,
-            openvpn_certificate,
+            skip,
             test_filters,
             verbose,
             test_report,
             runner_dir,
         } => {
+            #[cfg(target_os = "linux")]
+            container::relaunch_with_rootlesskit(vnc).await;
+
             let mut config = config.clone();
             config.runtime_opts.display = match (display, vnc.is_some()) {
                 (false, false) => config::Display::None,
@@ -266,7 +321,12 @@ async fn main() -> Result<()> {
             };
 
             if let Some(mullvad_host) = mullvad_host {
-                log::trace!("Setting Mullvad host using --mullvad-host flag");
+                match config.mullvad_host {
+                    Some(old_host) => {
+                        log::info!("Overriding Mullvad host from {old_host} to {mullvad_host}",)
+                    }
+                    None => log::info!("Setting Mullvad host to {mullvad_host}",),
+                };
                 config.mullvad_host = Some(mullvad_host);
             }
             let mullvad_host = config.get_host();
@@ -283,13 +343,6 @@ async fn main() -> Result<()> {
                 package_dir,
             )
             .context("Could not find the specified app packages")?;
-
-            // Load a new OpenVPN CA certificate if the user provided a path.
-            let openvpn_certificate = openvpn_certificate
-                .map(OpenVPNCertificate::from_file)
-                .transpose()
-                .context("Could not find OpenVPN CA certificate")?
-                .unwrap_or_default();
 
             let mut instance = vm::run(&config, &vm).await.context("Failed to start VM")?;
             let runner_dir = runner_dir.unwrap_or_else(|| vm_config.get_default_runner_dir());
@@ -325,9 +378,12 @@ async fn main() -> Result<()> {
                 bridge_name,
                 bridge_ip,
                 test_rpc::meta::Os::from(vm_config.os_type),
-                openvpn_certificate,
             ));
-            let tests = get_filtered_tests(&test_filters)?;
+
+            let mut tests = get_filtered_tests(&test_filters, &skip)?;
+            for test in tests.iter_mut() {
+                test.location = config.test_locations.lookup(test.name).cloned();
+            }
 
             // For convenience, spawn a SOCKS5 server that is reachable for tests that need it
             let socks = socks_server::spawn(SocketAddr::new(
@@ -361,10 +417,6 @@ async fn main() -> Result<()> {
             socks.close();
             // Propagate any error from the test run if applicable
             result?.anyhow()
-        }
-        Commands::FormatTestReports { reports } => {
-            summary::print_summary_table(&reports).await;
-            Ok(())
         }
         Commands::Update { name } => {
             let vm_config = vm::get_vm_config(&config, &name).context("Cannot get VM config")?;

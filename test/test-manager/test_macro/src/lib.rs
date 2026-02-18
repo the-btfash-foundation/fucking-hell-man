@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::{AttributeArgs, Lit, Meta, NestedMeta, Result};
 use test_rpc::meta::Os;
 
@@ -18,13 +18,15 @@ use test_rpc::meta::Os;
 ///
 /// # Arguments
 ///
-/// The `test_function` macro takes 4 optional arguments
+/// The `test_function` macro takes 3 optional arguments
 ///
 /// * `priority` - The order in which tests will be run where low numbers run before high numbers
 ///   and tests with the same number run in undefined order. `priority` defaults to 0.
 ///
 /// * `target_os` - The test should only run on the specified OS. This can currently be set to
 ///   `linux`, `windows`, or `macos`.
+///
+/// * `skip` - The test should not be run.
 ///
 /// # Examples
 ///
@@ -91,11 +93,9 @@ fn parse_marked_test_function(
     function: &syn::ItemFn,
 ) -> Result<TestFunction> {
     let macro_parameters = get_test_macro_parameters(attributes)?;
-    let function_parameters = get_test_function_parameters(&function.sig.inputs)?;
 
     Ok(TestFunction {
         name: function.sig.ident.clone(),
-        function_parameters,
         macro_parameters,
     })
 }
@@ -103,40 +103,49 @@ fn parse_marked_test_function(
 fn get_test_macro_parameters(attributes: &syn::AttributeArgs) -> Result<MacroParameters> {
     let mut priority = None;
     let mut targets = vec![];
+    let mut skip = false;
 
     for attribute in attributes {
-        // we only use name-value attributes
-        let NestedMeta::Meta(Meta::NameValue(nv)) = attribute else {
-            bail!(attribute, "unknown attribute");
-        };
-        let lit = &nv.lit;
-
-        if nv.path.is_ident("priority") {
-            match lit {
-                Lit::Int(lit_int) => priority = Some(lit_int.base10_parse().unwrap()),
-                _ => bail!(nv, "'priority' should have an integer value"),
+        match attribute {
+            NestedMeta::Meta(Meta::Path(path)) if path.is_ident("skip") => {
+                skip = true;
             }
-        } else if nv.path.is_ident("target_os") {
-            let Lit::Str(lit_str) = lit else {
-                bail!(nv, "'target_os' should have a string value");
-            };
+            NestedMeta::Meta(Meta::NameValue(nv)) => {
+                let lit = &nv.lit;
 
-            let target = match lit_str.value().parse() {
-                Ok(os) => os,
-                Err(e) => bail!(lit_str, "{e}"),
-            };
+                match &nv.path {
+                    path if path.is_ident("priority") => match lit {
+                        Lit::Int(lit_int) => priority = Some(lit_int.base10_parse().unwrap()),
+                        _ => bail!(nv, "'priority' should have an integer value"),
+                    },
+                    path if path.is_ident("target_os") => {
+                        let Lit::Str(lit_str) = lit else {
+                            bail!(nv, "'target_os' should have a string value");
+                        };
 
-            if targets.contains(&target) {
-                bail!(nv, "Duplicate target");
+                        let target = match lit_str.value().parse() {
+                            Ok(os) => os,
+                            Err(e) => bail!(lit_str, "{e}"),
+                        };
+
+                        if targets.contains(&target) {
+                            bail!(nv, "Duplicate target");
+                        }
+
+                        targets.push(target);
+                    }
+                    _ => bail!(nv, "unknown attribute"),
+                }
             }
-
-            targets.push(target);
-        } else {
-            bail!(nv, "unknown attribute");
+            _ => bail!(attribute, "unknown attribute"),
         }
     }
 
-    Ok(MacroParameters { priority, targets })
+    Ok(MacroParameters {
+        priority,
+        targets,
+        skip,
+    })
 }
 
 fn create_test(test_function: TestFunction) -> proc_macro2::TokenStream {
@@ -151,36 +160,18 @@ fn create_test(test_function: TestFunction) -> proc_macro2::TokenStream {
             Os::Windows => quote! { ::test_rpc::meta::Os::Windows, },
         })
         .collect();
+    let skip = test_function.macro_parameters.skip;
 
     let func_name = test_function.name;
-    let function_mullvad_version = test_function.function_parameters.mullvad_client.version();
-    let wrapper_closure = match test_function.function_parameters.mullvad_client {
-        MullvadClient::New { .. } => {
-            quote! {
-                |test_context: crate::tests::TestContext,
-                rpc: test_rpc::ServiceClient,
-                mullvad_client: crate::mullvad_daemon::MullvadClientArgument|
-                {
-                    let mullvad_client = match mullvad_client {
-                        crate::mullvad_daemon::MullvadClientArgument::WithClient(client) => client,
-                        crate::mullvad_daemon::MullvadClientArgument::None => unreachable!("invalid mullvad client")
-                    };
-                    Box::pin(async move {
-                        #func_name(test_context, rpc, mullvad_client).await.map_err(Into::into)
-                    })
-                }
-            }
-        }
-        MullvadClient::None { .. } => {
-            quote! {
-                |test_context: crate::tests::TestContext,
-                rpc: test_rpc::ServiceClient,
-                _mullvad_client: crate::mullvad_daemon::MullvadClientArgument| {
-                    Box::pin(async move {
-                        #func_name(test_context, rpc).await.map_err(Into::into)
-                    })
-                }
-            }
+    let wrapper_closure = quote! {
+        |test_context: crate::tests::TestContext,
+        rpc: test_rpc::ServiceClient,
+        mullvad_client: Option<::mullvad_management_interface::MullvadProxyClient>|
+        {
+            let mullvad_client = mullvad_client.expect("Test functions defined using the macro should be given a mullvad client");
+            Box::pin(async move {
+                #func_name(test_context, rpc, mullvad_client).await.map_err(Into::into)
+            })
         }
     };
 
@@ -188,83 +179,21 @@ fn create_test(test_function: TestFunction) -> proc_macro2::TokenStream {
         inventory::submit!(crate::tests::test_metadata::TestMetadata {
             name: stringify!(#func_name),
             targets: &[#targets],
-            mullvad_client_version: #function_mullvad_version,
             func: #wrapper_closure,
             priority: #test_function_priority,
+            location: None,
+            skip: #skip,
         });
     }
 }
 
 struct TestFunction {
     name: syn::Ident,
-    function_parameters: FunctionParameters,
     macro_parameters: MacroParameters,
 }
 
 struct MacroParameters {
     priority: Option<i32>,
     targets: Vec<Os>,
-}
-
-enum MullvadClient {
-    None {
-        mullvad_client_version: proc_macro2::TokenStream,
-    },
-    New {
-        mullvad_client_version: proc_macro2::TokenStream,
-    },
-}
-
-impl MullvadClient {
-    fn version(&self) -> proc_macro2::TokenStream {
-        match self {
-            MullvadClient::None {
-                mullvad_client_version,
-            } => mullvad_client_version.clone(),
-            MullvadClient::New {
-                mullvad_client_version,
-                ..
-            } => mullvad_client_version.clone(),
-        }
-    }
-}
-
-struct FunctionParameters {
-    mullvad_client: MullvadClient,
-}
-
-fn get_test_function_parameters(
-    args: &syn::punctuated::Punctuated<syn::FnArg, syn::Token![,]>,
-) -> Result<FunctionParameters> {
-    if args.len() <= 2 {
-        return Ok(FunctionParameters {
-            mullvad_client: MullvadClient::None {
-                mullvad_client_version: quote! {
-                    test_rpc::mullvad_daemon::MullvadClientVersion::None
-                },
-            },
-        });
-    }
-
-    let arg = args[2].clone();
-    let syn::FnArg::Typed(pat_type) = arg else {
-        bail!(arg, "unexpected 'mullvad_client' arg");
-    };
-
-    let syn::Type::Path(syn::TypePath { path, .. }) = &*pat_type.ty else {
-        bail!(pat_type, "unexpected 'mullvad_client' type");
-    };
-
-    let mullvad_client = match path.segments[0].ident.to_string().as_str() {
-        "mullvad_management_interface" | "MullvadProxyClient" => {
-            let mullvad_client_version =
-                quote! { test_rpc::mullvad_daemon::MullvadClientVersion::New };
-            MullvadClient::New {
-                mullvad_client_version,
-            }
-        }
-        _ => bail!(pat_type, "cannot infer mullvad client type"),
-    };
-
-    Ok(FunctionParameters { mullvad_client })
+    skip: bool,
 }

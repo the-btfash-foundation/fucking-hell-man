@@ -1,3 +1,16 @@
+import { IChangelog } from './ipc-types';
+
+export type DisconnectSource =
+  | 'gui-disconnect-button'
+  | 'gui-expired-account'
+  | 'gui-login-unblock'
+  | 'gui-device-revoked'
+  | 'gui-quit-button'
+  | 'tray-disconnect'
+  | 'tray-disconnect-quit';
+
+export type LogoutSource = 'gui-logout-button' | 'gui-device-revoked';
+
 export interface IAccountData {
   expiry: string;
 }
@@ -20,7 +33,6 @@ export interface ILocation {
   longitude: number;
   mullvadExitIp: boolean;
   hostname?: string;
-  bridgeHostname?: string;
   entryHostname?: string;
   provider?: string;
 }
@@ -61,8 +73,9 @@ export enum AuthFailedError {
 export enum TunnelParameterError {
   noMatchingRelay,
   noMatchingBridgeRelay,
-  noWireguardKey,
   customTunnelHostResolutionError,
+  ipv4Unavailable,
+  ipv6Unavailable,
 }
 
 export type ErrorStateDetails =
@@ -99,20 +112,8 @@ export type ErrorStateDetails =
 
 export type AfterDisconnect = 'nothing' | 'block' | 'reconnect';
 
-export type TunnelType = 'any' | 'wireguard' | 'openvpn';
-export function tunnelTypeToString(tunnel: TunnelType): string {
-  switch (tunnel) {
-    case 'wireguard':
-      return 'WireGuard';
-    case 'openvpn':
-      return 'OpenVPN';
-    case 'any':
-      return '';
-  }
-}
-
 export type RelayProtocol = 'tcp' | 'udp';
-export type EndpointObfuscationType = 'udp2tcp' | 'shadowsocks';
+export type EndpointObfuscationType = 'udp2tcp' | 'shadowsocks' | 'quic' | 'lwo';
 
 export type Constraint<T> = 'any' | { only: T };
 export type LiftedConstraint<T> = 'any' | T;
@@ -140,9 +141,7 @@ export enum Ownership {
 export interface ITunnelEndpoint {
   address: string;
   protocol: RelayProtocol;
-  tunnelType: TunnelType;
   quantumResistant: boolean;
-  proxy?: IProxyEndpoint;
   obfuscationEndpoint?: IObfuscationEndpoint;
   entryEndpoint?: IEndpoint;
   daita: boolean;
@@ -155,7 +154,6 @@ export interface IEndpoint {
 
 export interface IObfuscationEndpoint {
   address: string;
-  port: number;
   protocol: RelayProtocol;
   obfuscationType: EndpointObfuscationType;
 }
@@ -175,6 +173,45 @@ export type DaemonEvent =
   | { deviceRemoval: Array<IDevice> }
   | { accessMethodSetting: AccessMethodSetting };
 
+export type DaemonAppUpgradeEventStatusDownloadStarted = {
+  type: 'APP_UPGRADE_STATUS_DOWNLOAD_STARTED';
+};
+
+export type DaemonAppUpgradeEventStatusDownloadProgress = {
+  type: 'APP_UPGRADE_STATUS_DOWNLOAD_PROGRESS';
+  progress: number;
+  server: string;
+  timeLeft?: number;
+};
+
+export type DaemonAppUpgradeEventStatusAborted = {
+  type: 'APP_UPGRADE_STATUS_ABORTED';
+};
+
+export type DaemonAppUpgradeEventStatusVerifyingInstaller = {
+  type: 'APP_UPGRADE_STATUS_VERIFYING_INSTALLER';
+};
+
+export type DaemonAppUpgradeEventStatusVerifiedInstaller = {
+  type: 'APP_UPGRADE_STATUS_VERIFIED_INSTALLER';
+};
+
+export type DaemonAppUpgradeError = 'DOWNLOAD_FAILED' | 'GENERAL_ERROR' | 'VERIFICATION_FAILED';
+
+export type DaemonAppUpgradeEventError = {
+  type: 'APP_UPGRADE_ERROR';
+  error: DaemonAppUpgradeError;
+};
+
+export type DaemonAppUpgradeEventStatus =
+  | DaemonAppUpgradeEventStatusDownloadStarted
+  | DaemonAppUpgradeEventStatusDownloadProgress
+  | DaemonAppUpgradeEventStatusAborted
+  | DaemonAppUpgradeEventStatusVerifyingInstaller
+  | DaemonAppUpgradeEventStatusVerifiedInstaller;
+
+export type DaemonAppUpgradeEvent = DaemonAppUpgradeEventStatus | DaemonAppUpgradeEventError;
+
 export interface ITunnelStateRelayInfo {
   endpoint: ITunnelEndpoint;
   location?: ILocation;
@@ -183,22 +220,28 @@ export interface ITunnelStateRelayInfo {
 // The order of the variants match the priority order and can be sorted on.
 export enum FeatureIndicator {
   daita,
+  daitaMultihop,
   quantumResistance,
   multihop,
-  bridgeMode,
   splitTunneling,
   lockdownMode,
   udp2tcp,
   shadowsocks,
+  quic,
+  lwo,
+  wireGuardPort,
   lanSharing,
   dnsContentBlockers,
   customDns,
   serverIpOverride,
   customMtu,
-  customMssFix,
 }
 
-export type DisconnectedState = { state: 'disconnected'; location?: Partial<ILocation> };
+export type DisconnectedState = {
+  state: 'disconnected';
+  location?: Partial<ILocation>;
+  lockedDown: boolean;
+};
 export type ConnectingState = {
   state: 'connecting';
   details?: ITunnelStateRelayInfo;
@@ -246,57 +289,36 @@ export type RelayLocationGeographical =
 
 export type RelayLocation = RelayLocationGeographical | RelayLocationCustomList;
 
-export interface IOpenVpnConstraints {
-  port: Constraint<number>;
-  protocol: Constraint<RelayProtocol>;
-}
-
 export interface IWireguardConstraints {
-  port: Constraint<number>;
   ipVersion: Constraint<IpVersion>;
   useMultihop: boolean;
   entryLocation: Constraint<RelayLocation>;
 }
 
-export type TunnelProtocol = 'wireguard' | 'openvpn';
-
 export type IpVersion = 'ipv4' | 'ipv6';
 
-export interface IRelaySettingsNormal<OpenVpn, Wireguard> {
+export interface IRelaySettingsNormal {
   location: Constraint<RelayLocation>;
-  tunnelProtocol: Constraint<TunnelProtocol>;
   providers: string[];
   ownership: Ownership;
-  openvpnConstraints: OpenVpn;
-  wireguardConstraints: Wireguard;
+  wireguardConstraints: IWireguardConstraints;
 }
 
-export type ConnectionConfig =
-  | {
-      openvpn: {
-        endpoint: {
-          ip: string;
-          port: number;
-          protocol: RelayProtocol;
-        };
-        username: string;
-      };
-    }
-  | {
-      wireguard: {
-        tunnel: {
-          privateKey: string;
-          addresses: string[];
-        };
-        peer: {
-          publicKey: string;
-          addresses: string[];
-          endpoint: string;
-        };
-        ipv4Gateway: string;
-        ipv6Gateway?: string;
-      };
+export type ConnectionConfig = {
+  wireguard: {
+    tunnel: {
+      privateKey: string;
+      addresses: string[];
     };
+    peer: {
+      publicKey: string;
+      addresses: string[];
+      endpoint: string;
+    };
+    ipv4Gateway: string;
+    ipv6Gateway?: string;
+  };
+};
 
 // types describing the structure of RelaySettings
 export interface IRelaySettingsCustom {
@@ -305,7 +327,7 @@ export interface IRelaySettingsCustom {
 }
 export type RelaySettings =
   | {
-      normal: IRelaySettingsNormal<IOpenVpnConstraints, IWireguardConstraints>;
+      normal: IRelaySettingsNormal;
     }
   | {
       customTunnelEndpoint: IRelaySettingsCustom;
@@ -347,24 +369,23 @@ export interface IRelayListHostname {
   active: boolean;
   weight: number;
   owned: boolean;
-  endpointType: RelayEndpointType;
   daita: boolean;
+  // The absence of this value signals that the relay does not deploy QUIC.
+  quic?: Quic;
+  lwo: boolean;
 }
 
-export type RelayEndpointType = 'wireguard' | 'openvpn' | 'bridge';
+export type Quic = {
+  domain: string;
+  token: string;
+  addrIn: string[];
+};
 
 export interface ITunnelOptions {
-  openvpn: {
-    mssfix?: number;
-  };
-  wireguard: {
-    mtu?: number;
-    quantumResistant?: boolean;
-    daita?: IDaitaSettings;
-  };
-  generic: {
-    enableIpv6: boolean;
-  };
+  mtu?: number;
+  quantumResistant: boolean;
+  daita?: IDaitaSettings;
+  enableIpv6: boolean;
   dns: IDnsOptions;
 }
 
@@ -383,9 +404,15 @@ export interface IDnsOptions {
   };
 }
 
+export type AppVersionInfoSuggestedUpgrade = {
+  changelog: IChangelog;
+  verifiedInstallerPath?: string;
+  version: string;
+};
+
 export interface IAppVersionInfo {
   supported: boolean;
-  suggestedUpgrade?: string;
+  suggestedUpgrade?: AppVersionInfoSuggestedUpgrade;
   suggestedIsBeta?: boolean;
 }
 
@@ -422,17 +449,19 @@ export interface ICustomList {
   locations: Array<RelayLocationGeographical>;
 }
 
+export type NewCustomList = Pick<ICustomList, 'name' | 'locations'>;
+
 export type CustomListError = { type: 'name already exists' };
+
+export type AccessMethodExistsError = { type: 'name already exists' };
 
 export interface ISettings {
   allowLan: boolean;
   autoConnect: boolean;
-  blockWhenDisconnected: boolean;
+  lockdownMode: boolean;
   showBetaReleases: boolean;
   relaySettings: RelaySettings;
   tunnelOptions: ITunnelOptions;
-  bridgeSettings: BridgeSettings;
-  bridgeState: BridgeState;
   splitTunnel: SplitTunnelSettings;
   obfuscationSettings: ObfuscationSettings;
   customLists: CustomLists;
@@ -440,11 +469,13 @@ export interface ISettings {
   relayOverrides: Array<RelayOverride>;
 }
 
-export type BridgeState = 'auto' | 'on' | 'off';
-
 export type SplitTunnelSettings = {
   enableExclusions: boolean;
   appsList: string[];
+};
+
+export type WireGuardPortObfuscationSettings = {
+  port: Constraint<number>;
 };
 
 export type Udp2TcpObfuscationSettings = {
@@ -460,27 +491,17 @@ export enum ObfuscationType {
   off,
   udp2tcp,
   shadowsocks,
+  quic,
+  lwo,
+  wireGuardPort,
 }
 
 export type ObfuscationSettings = {
   selectedObfuscation: ObfuscationType;
   udp2tcpSettings: Udp2TcpObfuscationSettings;
   shadowsocksSettings: ShadowsocksSettings;
+  wireGuardPortSettings: WireGuardPortObfuscationSettings;
 };
-
-export interface IBridgeConstraints {
-  location: Constraint<RelayLocation>;
-  providers: string[];
-  ownership: Ownership;
-}
-
-export type BridgeType = 'normal' | 'custom';
-
-export interface BridgeSettings {
-  type: BridgeType;
-  normal: IBridgeConstraints;
-  custom?: CustomProxy;
-}
 
 export interface ISocketAddress {
   host: string;

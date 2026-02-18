@@ -3,13 +3,14 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-01-19.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import MullvadTypes
 import UIKit
 
+@MainActor
 class MethodSettingsCellConfiguration {
     private let subject: CurrentValueSubject<AccessMethodViewModel, Never>
     private let tableView: UITableView
@@ -144,9 +145,15 @@ class MethodSettingsCellConfiguration {
     }
 
     private func configureProtocol(_ cell: UITableViewCell, itemIdentifier: MethodSettingsItemIdentifier) {
-        var contentConfiguration = UIListContentConfiguration.mullvadValueCell(
-            tableStyle: tableView.style,
-            isEnabled: !isTesting
+        var contentConfiguration = ListCellContentConfiguration(
+            textProperties:
+                ListCellContentConfiguration
+                .TextProperties(
+                    color: .Cell.titleTextColor.withAlphaComponent(
+                        !isTesting
+                            ? 1
+                            : 0.8
+                    ))
         )
         contentConfiguration.text = itemIdentifier.text
         contentConfiguration.secondaryText = subject.value.method.localizedDescription
@@ -176,13 +183,9 @@ class MethodSettingsCellConfiguration {
 
         var contentConfiguration = MethodTestingStatusCellContentConfiguration()
         contentConfiguration.status = viewStatus
-        contentConfiguration.detailText = viewStatus == .reachable
-            ? NSLocalizedString(
-                "METHOD_SETTINGS_SAVING_CHANGES",
-                tableName: "APIAccess",
-                value: "Saving changes...",
-                comment: ""
-            )
+        contentConfiguration.detailText =
+            viewStatus == .reachable
+            ? NSLocalizedString("Saving changes...", comment: "")
             : nil
 
         cell.contentConfiguration = contentConfiguration

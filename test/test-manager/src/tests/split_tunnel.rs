@@ -2,11 +2,12 @@ use anyhow::Context;
 use mullvad_management_interface::MullvadProxyClient;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use test_macro::test_function;
-use test_rpc::{meta::OsVersion, ServiceClient};
+use test_rpc::{ServiceClient, meta::OsVersion};
 
 use super::{
+    TestContext,
     helpers::{self, ConnChecker},
-    ui, TestContext,
+    ui,
 };
 
 const LEAK_DESTINATION: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 1337);
@@ -82,19 +83,65 @@ pub async fn test_split_tunnel(
 }
 
 /// Test that split tunneling works by asserting the following:
+/// - Splitting a process with the split tunneling (ST) feature enabled and an active tunnel
+///   allow the split process to leak.
+/// - Disabling ST forces the split program to route its traffic through the active tunnel.
+/// - Enabling ST allows the split program to leak again.
+/// The property we're testing for here is that toggling ST respects the list of split apps, and
+/// vice-versa.
+///
+/// NOTE: This will not work with Linux split tunneling, since there is no persistant list of split
+/// apps(yet!).
+#[test_function(target_os = "macos", target_os = "windows")]
+pub async fn test_split_tunnel_toggle(
+    _ctx: TestContext,
+    rpc: ServiceClient,
+    mut mullvad_client: MullvadProxyClient,
+) -> anyhow::Result<()> {
+    // I'm a gamer, so I want to split steam for maximum performance.
+    let mut steam = ConnChecker::new(rpc.clone(), mullvad_client.clone(), LEAK_DESTINATION);
+    // Enable the split tunneling feature in the daemon.
+    // No apps are split at this point.
+    //
+    // Note: ConnChecker::split already does this, but being explicit with the state the we expect
+    // the daemon to be in at any stage of the test is not harmful.
+    mullvad_client.set_split_tunnel_state(true).await?; // <- Split tunneling: on
+    // Connect.
+    helpers::connect_and_wait(&mut mullvad_client).await?;
+    // Assert that steam does not leak yet. We are yet to add it as a split app.
+    let mut steam = steam.spawn().await?;
+    steam.assert_secure().await?;
+    // Assert that splitting the process does indeed leak.
+    steam.split().await?; // <- SPLIT
+    steam.assert_insecure().await?;
+    // Disabling split-tunneling at the settings-level should force all traffic through the tunnel.
+    // HACK: ConnChecker::split tries to be clever and enables ST at the settings-level.
+    // Therefore we have to explicitly disable it *after* calling split.
+    mullvad_client.set_split_tunnel_state(false).await?; // <- Split tunneling: off
+    // Steam should now be forced to route traffic through the tunnel again.
+    steam.assert_secure().await?;
+    // Re-enabling split-tunneling will once again make the split program leak.
+    mullvad_client.set_split_tunnel_state(true).await?; // <- Split tunneling: on
+    steam.assert_insecure().await?;
+    Ok(())
+}
+
+/// Test that split tunneling works by asserting the following:
 /// - Splitting a process shouldn't do anything if tunnel is not connected.
 /// - A split process should never push traffic through the tunnel.
 /// - Splitting/unsplitting should work regardless if process is running.
-#[test_function(target_os = "macos")]
-pub async fn test_split_tunnel_ui(_ctx: TestContext, rpc: ServiceClient) -> anyhow::Result<()> {
-    // Skip test on macOS 12, since the feature is unsupported
-    if is_macos_12_or_lower(&rpc).await? {
+#[test_function(target_os = "macos", target_os = "windows")]
+pub async fn test_split_tunnel_ui(
+    _ctx: TestContext,
+    rpc: ServiceClient,
+    _: MullvadProxyClient,
+) -> anyhow::Result<()> {
+    // Skip test on macOS 12 and on Linux, since the feature is unsupported
+    if cfg!(target_os = "macos") && is_macos_12_or_lower(&rpc).await? {
         return Ok(());
     }
 
-    let ui_result = ui::run_test(&rpc, &["macos-split-tunneling.spec"])
-        .await
-        .unwrap();
+    let ui_result = ui::run_test(&rpc, &["split-tunneling.spec"]).await.unwrap();
     assert!(ui_result.success());
 
     Ok(())

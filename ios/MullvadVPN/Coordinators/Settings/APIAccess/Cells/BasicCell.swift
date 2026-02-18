@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 09/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -38,10 +38,12 @@ class BasicCell: UITableViewCell, DynamicBackgroundConfiguration, CustomCellDisc
         didSet {
             accessoryType = .none
 
-            guard let image = disclosureType.image?.withTintColor(
-                UIColor.Cell.disclosureIndicatorColor,
-                renderingMode: .alwaysOriginal
-            ) else {
+            guard
+                let image = disclosureType.image?.withTintColor(
+                    UIColor.Cell.disclosureIndicatorColor,
+                    renderingMode: .alwaysOriginal
+                )
+            else {
                 accessoryView = nil
                 return
             }

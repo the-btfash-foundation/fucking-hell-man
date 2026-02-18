@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-11-09.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
@@ -16,7 +16,8 @@ protocol CustomDNSCellEventHandler {
     func showInfo(for button: VPNSettingsInfoButtonItem)
 }
 
-final class CustomDNSCellFactory: CellFactoryProtocol {
+@MainActor
+final class CustomDNSCellFactory: @preconcurrency CellFactoryProtocol {
     let tableView: UITableView
     var viewModel: VPNSettingsViewModel
     var delegate: CustomDNSCellEventHandler?
@@ -55,16 +56,10 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
         }
     }
 
-    // swiftlint:disable:next function_body_length
     func configureCell(_ cell: UITableViewCell, item: CustomDNSDataSource.Item, indexPath: IndexPath) {
         switch item {
         case .blockAll:
-            let localizedString = NSLocalizedString(
-                "BLOCK_ALL_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "All",
-                comment: ""
-            )
+            let localizedString = NSLocalizedString("All", comment: "")
 
             configure(
                 cell,
@@ -74,12 +69,7 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
             )
 
         case .blockAdvertising:
-            let localizedString = NSLocalizedString(
-                "BLOCK_ADS_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Ads",
-                comment: ""
-            )
+            let localizedString = NSLocalizedString("Ads", comment: "")
 
             configure(
                 cell,
@@ -89,12 +79,7 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
             )
 
         case .blockTracking:
-            let localizedString = NSLocalizedString(
-                "BLOCK_TRACKERS_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Trackers",
-                comment: ""
-            )
+            let localizedString = NSLocalizedString("Trackers", comment: "")
             configure(
                 cell,
                 toggleSetting: viewModel.blockTracking,
@@ -105,12 +90,7 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
         case .blockMalware:
             guard let cell = cell as? SettingsSwitchCell else { return }
 
-            let localizedString = NSLocalizedString(
-                "BLOCK_MALWARE_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Malware",
-                comment: ""
-            )
+            let localizedString = NSLocalizedString("Malware", comment: "")
             configure(
                 cell,
                 toggleSetting: viewModel.blockMalware,
@@ -122,12 +102,7 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
             }
 
         case .blockAdultContent:
-            let localizedString = NSLocalizedString(
-                "BLOCK_ADULT_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Adult content",
-                comment: ""
-            )
+            let localizedString = NSLocalizedString("Adult content", comment: "")
             configure(
                 cell,
                 toggleSetting: viewModel.blockAdultContent,
@@ -136,12 +111,7 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
             )
 
         case .blockGambling:
-            let localizedString = NSLocalizedString(
-                "BLOCK_GAMBLING_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Gambling",
-                comment: ""
-            )
+            let localizedString = NSLocalizedString("Gambling", comment: "")
             configure(
                 cell,
                 toggleSetting: viewModel.blockGambling,
@@ -150,12 +120,7 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
             )
 
         case .blockSocialMedia:
-            let localizedString = NSLocalizedString(
-                "BLOCK_SOCIAL_MEDIA_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Social media",
-                comment: ""
-            )
+            let localizedString = NSLocalizedString("Social media", comment: "")
             configure(
                 cell,
                 toggleSetting: viewModel.blockSocialMedia,
@@ -166,12 +131,7 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
         case .useCustomDNS:
             guard let cell = cell as? SettingsSwitchCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "CUSTOM_DNS_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Use custom DNS server",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Use custom DNS server", comment: "")
             cell.setSwitchEnabled(viewModel.customDNSPrecondition == .satisfied)
             cell.setOn(viewModel.effectiveEnableCustomDNS, animated: false)
             cell.accessibilityHint = viewModel.customDNSPrecondition
@@ -180,16 +140,12 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
             cell.action = { [weak self] isOn in
                 self?.delegate?.didChangeState(for: .useCustomDNS, isOn: isOn)
             }
+            cell.backgroundView?.backgroundColor = UIColor.Cell.Background.normal
 
         case .addDNSServer:
             guard let cell = cell as? SettingsAddDNSEntryCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "ADD_CUSTOM_DNS_SERVER_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Add a server",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Add a server", comment: "")
             cell.setAccessibilityIdentifier(.dnsSettingsAddServerCell)
             cell.tapAction = { [weak self] in
                 self?.delegate?.addDNSEntry()
@@ -205,7 +161,8 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
             cell.accessibilityIdentifier = "\(item.accessibilityIdentifier) (\(entryIdentifier))"
 
             cell.onTextChange = { [weak self] cell in
-                cell.isValidInput = self?
+                cell.isValidInput =
+                    self?
                     .dnsEntryIsValid(identifier: entryIdentifier, cell: cell) ?? false
             }
 
@@ -218,7 +175,7 @@ final class CustomDNSCellFactory: CellFactoryProtocol {
 
             cell.titleLabel.attributedText = viewModel.customDNSPrecondition.attributedLocalizedDescription(
                 isEditing: isEditing,
-                preferredFont: .systemFont(ofSize: 14)
+                preferredFont: .mullvadTiny
             )
         }
     }

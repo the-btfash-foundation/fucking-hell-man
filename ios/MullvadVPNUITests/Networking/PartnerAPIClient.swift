@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-04-19.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -65,7 +65,7 @@ class PartnerAPIClient {
         request.httpMethod = method
         request.setValue("Basic \(accessToken)", forHTTPHeaderField: "Authorization")
 
-        var jsonResponse: [String: Any] = [:]
+        nonisolated(unsafe) var jsonResponse: [String: Any] = [:]
 
         do {
             if let jsonObject = jsonObject {
@@ -81,20 +81,21 @@ class PartnerAPIClient {
             description: "Completion handler for the request is invoked"
         )
 
-        var requestError: Error?
+        nonisolated(unsafe) var requestError: Error?
 
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             requestError = error
 
             guard let data = data,
-                  let response = response as? HTTPURLResponse,
-                  error == nil else {
+                let response = response as? HTTPURLResponse,
+                error == nil
+            else {
                 XCTFail("Error: \(error?.localizedDescription ?? "Unknown error")")
                 completionHandlerInvokedExpectation.fulfill()
                 return
             }
 
-            if 200 ... 204 ~= response.statusCode {
+            if 200...204 ~= response.statusCode {
                 print("Request successful")
                 do {
                     if data.isEmpty {

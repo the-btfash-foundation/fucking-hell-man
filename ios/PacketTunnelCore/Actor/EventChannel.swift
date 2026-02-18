@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by pronebird on 27/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //  Formerly known as CommandChannel
 //
 
@@ -166,7 +166,7 @@ extension PacketTunnelActor {
                 // This will rearrange the event buffer but hopefully should have no side effects.
                 if case .reconnect = current {
                     // Walk backwards starting with the preceding element.
-                    for j in (0 ..< i).reversed() {
+                    for j in (0..<i).reversed() {
                         let preceding = buffer[j]
                         // Remove preceding reconnect and adjust the index of the outer loop.
                         if case .reconnect = preceding {

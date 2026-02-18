@@ -3,13 +3,19 @@
 //  TunnelStatusNotificationProvider
 //
 //  Created by pronebird on 20/08/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
+import MullvadTypes
 import PacketTunnelCore
+import UIKit
 
-final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotificationProvider {
+final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotificationProvider, @unchecked Sendable {
+    enum ActionIdentifier: String {
+        case showVPNSettings
+    }
+
     private var isWaitingForConnectivity = false
     private var noNetwork = false
     private var packetTunnelError: BlockedStateReason?
@@ -18,6 +24,10 @@ final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotific
 
     override var identifier: NotificationProviderIdentifier {
         .tunnelStatusNotificationProvider
+    }
+
+    override var priority: NotificationPriority {
+        .critical
     }
 
     var notificationDescriptor: InAppNotificationDescriptor? {
@@ -131,21 +141,41 @@ final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotific
     }
 
     private func notificationDescription(for packetTunnelError: BlockedStateReason) -> InAppNotificationDescriptor {
-        InAppNotificationDescriptor(
+        // Show the same notification for offline error as for the noNetwork state
+        if packetTunnelError == .offline {
+            return connectivityNotificationDescription()
+        }
+
+        let tapAction: InAppNotificationAction? =
+            switch packetTunnelError {
+            case .noRelaysSatisfyingPortConstraints:
+                InAppNotificationAction {
+                    NotificationManager.shared
+                        .notificationProvider(
+                            self,
+                            didReceiveAction: "\(ActionIdentifier.showVPNSettings)"
+                        )
+                }
+            default:
+                nil
+            }
+        return InAppNotificationDescriptor(
             identifier: identifier,
             style: .error,
-            title: NSLocalizedString(
-                "TUNNEL_BLOCKED_INAPP_NOTIFICATION_TITLE",
-                value: "BLOCKING INTERNET",
-                comment: ""
-            ),
-            body: .init(string: String(
-                format: NSLocalizedString(
-                    "TUNNEL_BLOCKED_INAPP_NOTIFICATION_BODY",
-                    value: localizedReasonForBlockedStateError(packetTunnelError),
-                    comment: ""
-                )
-            ))
+            title: NSLocalizedString("BLOCKING INTERNET", comment: ""),
+            body: createNotificationBody(localizedReasonForBlockedStateError(packetTunnelError)),
+            tapAction: tapAction
+        )
+    }
+
+    private func createNotificationBody(_ string: String) -> NSAttributedString {
+        NSAttributedString(
+            markdownString: string,
+            options: MarkdownStylingOptions(font: UIFont.preferredFont(forTextStyle: .body)),
+            applyEffect: { markdownType, _ in
+                guard case .bold = markdownType else { return [:] }
+                return [.foregroundColor: UIColor.InAppNotificationBanner.titleColor]
+            }
         )
     }
 
@@ -154,20 +184,12 @@ final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotific
 
         if let startError = error as? StartTunnelError {
             body = String(
-                format: NSLocalizedString(
-                    "START_TUNNEL_ERROR_INAPP_NOTIFICATION_BODY",
-                    value: "Failed to start the tunnel: %@.",
-                    comment: ""
-                ),
+                format: NSLocalizedString("Failed to start the tunnel: %@.", comment: ""),
                 startError.underlyingError?.localizedDescription ?? ""
             )
         } else if let stopError = error as? StopTunnelError {
             body = String(
-                format: NSLocalizedString(
-                    "STOP_TUNNEL_ERROR_INAPP_NOTIFICATION_BODY",
-                    value: "Failed to stop the tunnel: %@.",
-                    comment: ""
-                ),
+                format: NSLocalizedString("Failed to stop the tunnel: %@.", comment: ""),
                 stopError.underlyingError?.localizedDescription ?? ""
             )
         } else {
@@ -177,11 +199,7 @@ final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotific
         return InAppNotificationDescriptor(
             identifier: identifier,
             style: .error,
-            title: NSLocalizedString(
-                "TUNNEL_MANAGER_ERROR_INAPP_NOTIFICATION_TITLE",
-                value: "TUNNEL ERROR",
-                comment: ""
-            ),
+            title: NSLocalizedString("TUNNEL ERROR", comment: ""),
             body: .init(string: body)
         )
     }
@@ -190,17 +208,11 @@ final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotific
         InAppNotificationDescriptor(
             identifier: identifier,
             style: .warning,
-            title: NSLocalizedString(
-                "TUNNEL_NO_CONNECTIVITY_INAPP_NOTIFICATION_TITLE",
-                value: "NETWORK ISSUES",
-                comment: ""
-            ),
+            title: NSLocalizedString("NETWORK ISSUES", comment: ""),
             body: .init(
                 string: NSLocalizedString(
-                    "TUNNEL_NO_CONNECTIVITY_INAPP_NOTIFICATION_BODY",
-                    value: """
-                    Your device is offline. The tunnel will automatically connect once \
-                    your device is back online.
+                    """
+                    Your device is offline. The tunnel will automatically connect once your device is back online.
                     """,
                     comment: ""
                 )
@@ -212,15 +224,10 @@ final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotific
         InAppNotificationDescriptor(
             identifier: identifier,
             style: .warning,
-            title: NSLocalizedString(
-                "TUNNEL_NO_NETWORK_INAPP_NOTIFICATION_TITLE",
-                value: "NETWORK ISSUES",
-                comment: ""
-            ),
+            title: NSLocalizedString("NETWORK ISSUES", comment: ""),
             body: .init(
                 string: NSLocalizedString(
-                    "TUNNEL_NO_NETWORK_INAPP_NOTIFICATION_BODY",
-                    value: """
+                    """
                     Your device is offline. Try connecting again when the device \
                     has access to Internet.
                     """,
@@ -231,32 +238,45 @@ final class TunnelStatusNotificationProvider: NotificationProvider, InAppNotific
     }
 
     private func localizedReasonForBlockedStateError(_ error: BlockedStateReason) -> String {
-        let errorString: String
-
         switch error {
         case .outdatedSchema:
-            errorString = "Unable to start tunnel connection after update. Please disconnect and reconnect."
+            NSLocalizedString(
+                "Unable to start tunnel connection after update. Please disconnect and reconnect.",
+                comment: ""
+            )
         case .noRelaysSatisfyingFilterConstraints:
-            errorString = "No servers match your location filter. Try changing filter settings."
+            NSLocalizedString("No servers match your location filter. Try changing filter settings.", comment: "")
         case .multihopEntryEqualsExit:
-            errorString = "The entry and exit servers cannot be the same. Try changing one to a new server or location."
+            NSLocalizedString(
+                "The entry and exit servers cannot be the same. Try changing one to a new server or location.",
+                comment: ""
+            )
         case .noRelaysSatisfyingDaitaConstraints:
-            errorString = "No DAITA compatible servers match your location settings. Try changing location."
+            NSLocalizedString(
+                "No DAITA compatible servers match your location settings. Try changing location.",
+                comment: ""
+            )
+        case .noRelaysSatisfyingObfuscationSettings:
+            NSLocalizedString(
+                "No servers match your obfuscation settings. Try changing location or obfuscation method.",
+                comment: ""
+            )
         case .noRelaysSatisfyingConstraints:
-            errorString = "No servers match your settings, try changing server or other settings."
+            NSLocalizedString("No servers match your settings, try changing server or other settings.", comment: "")
+        case .noRelaysSatisfyingPortConstraints:
+            NSLocalizedString(
+                "The selected WireGuard port is not supported, please change it under **VPN settings**.",
+                comment: ""
+            )
         case .invalidAccount:
-            errorString = "You are logged in with an invalid account number. Please log out and try another one."
+            NSLocalizedString(
+                "You are logged in with an invalid account number. Please log out and try another one.",
+                comment: ""
+            )
         case .deviceLoggedOut:
-            errorString = "Unable to authenticate account. Please log out and log back in."
+            NSLocalizedString("Unable to authenticate account. Please log out and log back in.", comment: "")
         default:
-            errorString = "Unable to start tunnel connection. Please send a problem report."
+            NSLocalizedString("Unable to start tunnel connection. Please send a problem report.", comment: "")
         }
-
-        return NSLocalizedString(
-            "BLOCKED_STATE_ERROR_TITLE",
-            tableName: "Main",
-            value: errorString,
-            comment: ""
-        )
     }
 }

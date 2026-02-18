@@ -3,23 +3,25 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 29/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
-import MullvadLogging
+@preconcurrency import MullvadLogging
 import MullvadTypes
 import NetworkExtension
 import PacketTunnelCore
-import WireGuardKit
+@preconcurrency import WireGuardKit
 
-class WgAdapter: TunnelAdapterProtocol {
+class WgAdapter: TunnelAdapterProtocol, @unchecked Sendable {
     let logger = Logger(label: "WgAdapter")
     let adapter: WireGuardAdapter
+    let provider: NEPacketTunnelProvider
 
     init(packetTunnelProvider: NEPacketTunnelProvider) {
         let wgGoLogger = Logger(label: "WireGuard")
 
+        provider = packetTunnelProvider
         adapter = WireGuardAdapter(
             with: packetTunnelProvider,
             shouldHandleReasserting: false,
@@ -36,12 +38,6 @@ class WgAdapter: TunnelAdapterProtocol {
             try await adapter.start(tunnelConfiguration: wgConfig, daita: daita)
         } catch WireGuardAdapterError.invalidState {
             try await adapter.start(tunnelConfiguration: wgConfig, daita: daita)
-        }
-
-        let tunAddresses = wgConfig.interface.addresses.map { $0.address }
-        // TUN addresses can be empty when adapter is configured for blocked state.
-        if !tunAddresses.isEmpty {
-            logIfDeviceHasSameIP(than: tunAddresses)
         }
     }
 
@@ -73,32 +69,15 @@ class WgAdapter: TunnelAdapterProtocol {
                 daita: daita
             )
         }
-
-        let exitTunAddresses = exitConfiguration.interface.addresses.map { $0.address }
-        let entryTunAddresses = entryConfiguration?.interface.addresses.map { $0.address } ?? []
-        let tunAddresses = exitTunAddresses + entryTunAddresses
-
-        // TUN addresses can be empty when adapter is configured for blocked state.
-        if !tunAddresses.isEmpty {
-            logIfDeviceHasSameIP(than: tunAddresses)
-        }
     }
 
     func stop() async throws {
         try await adapter.stop()
     }
 
-    private func logIfDeviceHasSameIP(than addresses: [IPAddress]) {
-        let sameIPv4 = IPv4Address("10.127.255.254")
-        let sameIPv6 = IPv6Address("fc00:bbbb:bbbb:bb01:ffff:ffff:ffff:ffff")
-
-        let hasIPv4SameAddress = addresses.compactMap { $0 as? IPv4Address }
-            .contains { $0 == sameIPv4 }
-        let hasIPv6SameAddress = addresses.compactMap { $0 as? IPv6Address }
-            .contains { $0 == sameIPv6 }
-
-        let isUsingSameIP = (hasIPv4SameAddress || hasIPv6SameAddress) ? "" : "NOT "
-        logger.debug("Same IP is \(isUsingSameIP)being used")
+    func apply(settings: TunnelInterfaceSettings) async throws {
+        try await self.provider
+            .setTunnelNetworkSettings(settings.asTunnelSettings())
     }
 
     public var icmpPingProvider: ICMPPingProvider {

@@ -3,7 +3,7 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2023-11-07.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import XCTest
@@ -20,7 +20,7 @@ class AccountExpiryTests: XCTestCase {
     func testDateNowDuration() {
         let accountExpiry = AccountExpiry(expiryDate: Date())
         XCTAssertNil(accountExpiry.nextTriggerDate(for: .system))
-        XCTAssertNotNil(accountExpiry.nextTriggerDate(for: .inApp)) // In-app expiry triggers on same date as well.
+        XCTAssertNotNil(accountExpiry.nextTriggerDate(for: .inApp))  // In-app expiry triggers on same date as well.
     }
 
     func testDateInPastDuration() {

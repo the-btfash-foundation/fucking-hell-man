@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-11-13.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import SwiftUI
@@ -15,100 +15,183 @@ struct SettingsInfoViewModel {
 struct SettingsInfoViewModelPage: Hashable {
     let body: String
     let image: ImageResource
+    let customView: AnyView?
+
+    init(body: String, image: ImageResource, customView: AnyView? = nil) {
+        self.body = body
+        self.image = image
+        self.customView = customView
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(body)
+        hasher.combine(image)
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.body == rhs.body && lhs.image == rhs.image
+    }
 }
 
 struct SettingsInfoView: View {
-    let viewModel: SettingsInfoViewModel
-    @State var height: CGFloat = 0
+    @State var viewModel: SettingsInfoViewModel
 
     // Extra spacing to allow for some room around the page indicators.
     var pageIndicatorSpacing: CGFloat {
-        viewModel.pages.count > 1 ? 72 : 24
+        viewModel.pages.count > 1 ? 48 : 24
     }
 
     var body: some View {
-        TabView {
-            ForEach(viewModel.pages, id: \.self) { page in
-                VStack {
-                    contentView(for: page)
-                    Spacer()
-                }
-                .padding(UIMetrics.SettingsInfoView.layoutMargins)
-            }
-        }
-        .frame(
-            height: height + pageIndicatorSpacing
-        )
-        .tabViewStyle(.page)
-        .foregroundColor(Color(.primaryTextColor))
-        .background {
-            Color(.secondaryColor)
-            preRenderViewSize()
-        }
-    }
-
-    private func contentView(for page: SettingsInfoViewModelPage) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Image(page.image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-            Text(page.body)
-                .font(.subheadline)
-                .opacity(0.6)
-        }
-    }
-
-    // Renders the content of each page, determining the maximum height between them
-    // when laid out on screen. Since we only want this to update the real view
-    // this function should be called from a .background() and its contents hidden.
-    private func preRenderViewSize() -> some View {
         ZStack {
-            ForEach(viewModel.pages, id: \.self) { page in
-                contentView(for: page)
+            TabView {
+                contentView()
             }
+            .tabViewStyle(.page)
+            .foregroundColor(Color(.primaryTextColor))
+            .background {
+                Color(.secondaryColor)
+            }
+            hiddenViewToStretchHeightInsideScrollView()
         }
+    }
+
+    // A TabView inside a Scrollview has no height. This hidden view stretches the TabView to have the size
+    // of the heighest page.
+    private func hiddenViewToStretchHeightInsideScrollView() -> some View {
+        return ZStack {
+            contentView()
+        }
+        .padding(.bottom, 1)
         .hidden()
-        .sizeOfView { size in
-            if size.height > height {
-                height = size.height
+    }
+
+    private func bodyText(_ page: SettingsInfoViewModelPage) -> some View {
+        let message = page.body
+        return
+            (try? AttributedString(
+                markdown: message,
+                options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            )).map(Text.init) ?? Text(message)
+    }
+
+    private func contentView() -> some View {
+        ForEach(viewModel.pages, id: \.self) { page in
+            VStack {
+                VStack(alignment: .leading, spacing: 16) {
+                    Image(page.image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                    bodyText(page)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .font(.mullvadTiny)
+                        .opacity(0.6)
+                    if let customView = page.customView {
+                        customView
+                    }
+                }
+                Spacer()
             }
+            .padding(.bottom, pageIndicatorSpacing)
+            .padding(UIMetrics.SettingsInfoView.layoutMargins)
         }
     }
 }
 
 #Preview("Single page") {
-    SettingsInfoView(viewModel: SettingsInfoViewModel(
-        pages: [
-            SettingsInfoViewModelPage(
-                body: """
-                Multihop routes your traffic into one WireGuard server and out another, making it \
-                harder to trace. This results in increased latency but increases anonymity online.
-                """,
-                image: .multihopIllustration
-            ),
-        ]
-    ))
+    SettingsInfoView(
+        viewModel: SettingsInfoViewModel(
+            pages: [
+                SettingsInfoViewModelPage(
+                    body: """
+                        Multihop routes your traffic into one WireGuard server and out another, making it \
+                        harder to trace. This results in increased latency but increases anonymity online.
+                        """,
+                    image: .multihopIllustration
+                )
+            ]
+        ))
 }
 
 #Preview("Multiple pages") {
-    SettingsInfoView(viewModel: SettingsInfoViewModel(
-        pages: [
-            SettingsInfoViewModelPage(
-                body: """
-                Multihop routes your traffic into one WireGuard server and out another, making it \
-                harder to trace. This results in increased latency but increases anonymity online.
-                """,
-                image: .multihopIllustration
-            ),
-            SettingsInfoViewModelPage(
-                body: """
-                Multihop routes your traffic into one WireGuard server and out another, making it \
-                harder to trace. This results in increased latency but increases anonymity online.
-                Multihop routes your traffic into one WireGuard server and out another, making it \
-                harder to trace. This results in increased latency but increases anonymity online.
-                """,
-                image: .multihopIllustration
-            ),
-        ]
-    ))
+    SettingsInfoView(
+        viewModel: SettingsInfoViewModel(
+            pages: [
+                SettingsInfoViewModelPage(
+                    body: """
+                        Multihop routes your traffic into one WireGuard server and out another, making it \
+                        harder to trace. This results in increased latency but increases anonymity online.
+                        """,
+                    image: .multihopIllustration
+                ),
+                SettingsInfoViewModelPage(
+                    body: """
+                        Multihop routes your traffic into one WireGuard server and out another, making it \
+                        harder to trace. This results in increased latency but increases anonymity online.
+                        Multihop routes your traffic into one WireGuard server and out another, making it \
+                        harder to trace. This results in increased latency but increases anonymity online.
+                        """,
+                    image: .multihopIllustration
+                ),
+            ]
+        ))
+}
+
+#Preview("Single inside Scrollview") {
+    ScrollView {
+        SettingsInfoView(
+            viewModel: SettingsInfoViewModel(
+                pages: [
+                    SettingsInfoViewModelPage(
+                        body: """
+                            Multihop routes your traffic into one WireGuard server and out another, making it \
+                            harder to trace. This results in increased latency but increases anonymity online.
+                            """,
+                        image: .multihopIllustration
+                    )
+                ]
+            ))
+    }
+}
+
+#Preview("Multiple inside Scrollview") {
+    ScrollView {
+        SettingsInfoView(
+            viewModel: SettingsInfoViewModel(
+                pages: [
+                    SettingsInfoViewModelPage(
+                        body: NSLocalizedString(
+                            """
+                            **Attention: This increases network traffic and will also  negatively affect speed, latency, \
+                            and battery usage. Use with caution on limited plans.**
+
+                            DAITA (Defense against AI-guided Traffic Analysis) hides patterns in \
+                            your encrypted VPN traffic.
+
+                            By using sophisticated AI it’s possible to analyze the traffic of data \
+                            packets going in and out of your device (even if the traffic is encrypted).
+                            """,
+                            comment: ""
+                        ),
+                        image: .daitaOffIllustration
+                    ),
+                    SettingsInfoViewModelPage(
+                        body: NSLocalizedString(
+                            """
+                            If an observer monitors these data packets, DAITA makes it significantly \
+                            harder for them to identify which websites you are visiting or with whom \
+                            you are communicating.
+
+                            DAITA does this by carefully adding network noise and making all network \
+                            packets the same size.
+
+                            Not all our servers are DAITA-enabled. Therefore, we use multihop \
+                            automatically to enable DAITA with any server.
+                            """,
+                            comment: ""
+                        ),
+                        image: .daitaOnIllustration
+                    ),
+                ]
+            ))
+    }
 }

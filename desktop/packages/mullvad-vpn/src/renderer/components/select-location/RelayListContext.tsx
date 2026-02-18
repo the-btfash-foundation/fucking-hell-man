@@ -1,19 +1,19 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-import { compareRelayLocation, RelayLocation } from '../../../shared/daemon-rpc-types';
 import {
-  EndpointType,
+  compareRelayLocation,
+  ObfuscationType,
+  RelayLocation,
+} from '../../../shared/daemon-rpc-types';
+import {
   filterLocations,
   filterLocationsByDaita,
-  filterLocationsByEndPointType,
+  filterLocationsByLwo,
+  filterLocationsByQuic,
   getLocationsExpandedBySearch,
   searchForLocations,
 } from '../../lib/filter-locations';
-import {
-  useNormalBridgeSettings,
-  useNormalRelaySettings,
-  useTunnelProtocol,
-} from '../../lib/relay-settings-hooks';
+import { useNormalRelaySettings } from '../../lib/relay-settings-hooks';
 import { useEffectEvent } from '../../lib/utility-hooks';
 import { IRelayLocationCountryRedux } from '../../redux/settings/reducers';
 import { useSelector } from '../../redux/store';
@@ -68,47 +68,36 @@ export function RelayListContextProvider(props: RelayListContextProviderProps) {
   const { locationType, searchTerm } = useSelectLocationContext();
   const daita = useSelector((state) => state.settings.wireguard.daita?.enabled ?? false);
   const directOnly = useSelector((state) => state.settings.wireguard.daita?.directOnly ?? false);
+  const quic = useSelector(
+    (state) => state.settings.obfuscationSettings.selectedObfuscation === ObfuscationType.quic,
+  );
+  const lwo = useSelector(
+    (state) => state.settings.obfuscationSettings.selectedObfuscation === ObfuscationType.lwo,
+  );
 
   const fullRelayList = useSelector((state) => state.settings.relayLocations);
   const relaySettings = useNormalRelaySettings();
-  const tunnelProtocol = useTunnelProtocol();
-
-  // Filters the relays to only keep the ones of the desired endpoint type, e.g. "wireguard",
-  // "openvpn" or "bridge"
-  const relayListForEndpointType = useMemo(() => {
-    const endpointType =
-      locationType === LocationType.entry ? EndpointType.entry : EndpointType.exit;
-    return filterLocationsByEndPointType(
-      fullRelayList,
-      endpointType,
-      tunnelProtocol,
-      relaySettings,
-    );
-  }, [fullRelayList, locationType, relaySettings, tunnelProtocol]);
+  const multihop = relaySettings?.wireguard.useMultihop ?? false;
+  const ipVersion = relaySettings?.wireguard.ipVersion ?? 'any';
 
   const relayListForDaita = useMemo(() => {
-    return filterLocationsByDaita(
-      relayListForEndpointType,
-      daita,
-      directOnly,
-      locationType,
-      relaySettings?.tunnelProtocol ?? 'any',
-      relaySettings?.wireguard.useMultihop ?? false,
-    );
-  }, [
-    daita,
-    directOnly,
-    locationType,
-    relayListForEndpointType,
-    relaySettings?.tunnelProtocol,
-    relaySettings?.wireguard.useMultihop,
-  ]);
+    return filterLocationsByDaita(fullRelayList, daita, directOnly, locationType, multihop);
+  }, [fullRelayList, daita, directOnly, locationType, multihop]);
+
+  // Only show relays that have QUIC endpoints when QUIC obfuscation is enabled.
+  const relayListForQuic = useMemo(() => {
+    return filterLocationsByQuic(relayListForDaita, quic, locationType, multihop, ipVersion);
+  }, [quic, relayListForDaita, locationType, multihop, ipVersion]);
+  // Only show relays that have LWO endpoints when LWO is enabled.
+  const relayListForLwo = useMemo(() => {
+    return filterLocationsByLwo(relayListForQuic, lwo, locationType, multihop);
+  }, [lwo, relayListForQuic, locationType, multihop]);
 
   // Filters the relays to only keep the relays matching the currently selected filters, e.g.
   // ownership and providers
   const relayListForFilters = useMemo(() => {
-    return filterLocations(relayListForDaita, relaySettings?.ownership, relaySettings?.providers);
-  }, [relaySettings?.ownership, relaySettings?.providers, relayListForDaita]);
+    return filterLocations(relayListForLwo, relaySettings?.ownership, relaySettings?.providers);
+  }, [relaySettings?.ownership, relaySettings?.providers, relayListForLwo]);
 
   // Filters the relays based on the provided search term
   const relayListForSearch = useMemo(() => {
@@ -164,13 +153,11 @@ function useRelayList(
   const selectedLocation = useSelectedLocation();
   const disabledLocation = useDisabledLocation();
 
-  const preventDueToCustomBridgeSelected = usePreventDueToCustomBridgeSelected();
-
   const isLocationSelected = useCallback(
     (location: RelayLocation) => {
-      return preventDueToCustomBridgeSelected ? false : isSelected(location, selectedLocation);
+      return isSelected(location, selectedLocation);
     },
-    [preventDueToCustomBridgeSelected, selectedLocation],
+    [selectedLocation],
   );
 
   return useMemo(() => {
@@ -234,27 +221,16 @@ function useRelayList(
   }, [locale, expandedLocations, relayList, disabledLocation, isLocationSelected]);
 }
 
-export function usePreventDueToCustomBridgeSelected(): boolean {
-  const relaySettings = useNormalRelaySettings();
-  const { locationType } = useSelectLocationContext();
-  const bridgeSettings = useSelector((state) => state.settings.bridgeSettings);
-  const isBridgeSelection =
-    relaySettings?.tunnelProtocol === 'openvpn' && locationType === LocationType.entry;
-
-  return isBridgeSelection && bridgeSettings.type === 'custom';
-}
-
 // Return all RelayLocations that should be expanded
 function useExpandedLocations(filteredLocations: Array<IRelayLocationCountryRedux>) {
   const { locationType, searchTerm } = useSelectLocationContext();
   const { spacePreAllocationViewRef, scrollIntoView } = useScrollPositionContext();
   const relaySettings = useNormalRelaySettings();
-  const bridgeSettings = useNormalBridgeSettings();
 
   // Keeps the state of which locations are expanded for which locationType. This is used to restore
   // the state when switching back and forth between entry and exit.
   const [expandedLocationsMap, setExpandedLocations] = useState<ExpandedLocations>(() =>
-    defaultExpandedLocations(relaySettings, bridgeSettings),
+    defaultExpandedLocations(relaySettings),
   );
 
   const expandLocation = useCallback(
@@ -295,7 +271,7 @@ function useExpandedLocations(filteredLocations: Array<IRelayLocationCountryRedu
   const expandSearchResults = useCallback(
     (searchTerm: string) => {
       if (searchTerm === '') {
-        setExpandedLocations(defaultExpandedLocations(relaySettings, bridgeSettings));
+        setExpandedLocations(defaultExpandedLocations(relaySettings));
       } else {
         setExpandedLocations((expandedLocations) => ({
           ...expandedLocations,
@@ -303,7 +279,7 @@ function useExpandedLocations(filteredLocations: Array<IRelayLocationCountryRedu
         }));
       }
     },
-    [relaySettings, bridgeSettings, locationType, filteredLocations],
+    [relaySettings, locationType, filteredLocations],
   );
 
   const expandLocationsForSearch = useEffectEvent(
@@ -318,6 +294,11 @@ function useExpandedLocations(filteredLocations: Array<IRelayLocationCountryRedu
   );
 
   // Expand locations when filters are changed
+  // These lint rules are disabled for now because the react plugin for eslint does
+  // not understand that useEffectEvent should not be added to the dependency array.
+  // Enable these rules again when eslint can lint useEffectEvent properly.
+  // eslint-disable-next-line react-compiler/react-compiler
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => expandLocationsForSearch(filteredLocations), [filteredLocations]);
 
   return {
@@ -336,7 +317,7 @@ export function useDisabledLocation() {
   const relaySettings = useNormalRelaySettings();
 
   return useMemo(() => {
-    if (relaySettings?.tunnelProtocol !== 'openvpn' && relaySettings?.wireguard.useMultihop) {
+    if (relaySettings?.wireguard.useMultihop) {
       if (locationType === LocationType.exit && relaySettings?.wireguard.entryLocation !== 'any') {
         return {
           location: relaySettings?.wireguard.entryLocation,
@@ -350,7 +331,6 @@ export function useDisabledLocation() {
     return undefined;
   }, [
     locationType,
-    relaySettings?.tunnelProtocol,
     relaySettings?.wireguard.useMultihop,
     relaySettings?.wireguard.entryLocation,
     relaySettings?.location,
@@ -361,23 +341,14 @@ export function useDisabledLocation() {
 export function useSelectedLocation(): RelayLocation | undefined {
   const { locationType } = useSelectLocationContext();
   const relaySettings = useNormalRelaySettings();
-  const bridgeSettings = useNormalBridgeSettings();
 
   return useMemo(() => {
     if (locationType === LocationType.exit) {
       return relaySettings?.location === 'any' ? undefined : relaySettings?.location;
-    } else if (relaySettings?.tunnelProtocol !== 'openvpn') {
+    } else {
       return relaySettings?.wireguard.entryLocation === 'any'
         ? undefined
         : relaySettings?.wireguard.entryLocation;
-    } else {
-      return bridgeSettings?.location === 'any' ? undefined : bridgeSettings?.location;
     }
-  }, [
-    locationType,
-    relaySettings?.location,
-    relaySettings?.tunnelProtocol,
-    relaySettings?.wireguard.entryLocation,
-    bridgeSettings?.location,
-  ]);
+  }, [locationType, relaySettings?.location, relaySettings?.wireguard.entryLocation]);
 }

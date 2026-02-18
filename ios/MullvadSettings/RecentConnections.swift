@@ -1,0 +1,24 @@
+//
+//  RecentConnections.swift
+//  MullvadVPN
+//
+//  Created by Mojgan on 2025-10-15.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
+//
+import MullvadTypes
+
+public struct RecentConnections: Codable, Sendable, Equatable {
+    public let isEnabled: Bool
+    public let entryLocations: [UserSelectedRelays]
+    public let exitLocations: [UserSelectedRelays]
+
+    public init(
+        isEnabled: Bool = true,
+        entryLocations: [UserSelectedRelays] = [],
+        exitLocations: [UserSelectedRelays] = []
+    ) {
+        self.isEnabled = isEnabled
+        self.entryLocations = entryLocations
+        self.exitLocations = exitLocations
+    }
+}

@@ -1,23 +1,22 @@
 //! Definition of relay selector errors
 #![allow(dead_code)]
 
-use mullvad_types::{relay_constraints::MissingCustomBridgeSettings, relay_list::Relay};
-
-use crate::{detailer, relay_selector::relays::WireguardConfig};
+use crate::{detailer, query::RelayQuery, relay_selector::relays::WireguardConfig};
+use talpid_types::net::IpVersion;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed to open relay cache file")]
-    OpenRelayCache(#[source] std::io::Error),
-
-    #[error("Failed to write relay cache file to disk")]
-    WriteRelayCache(#[source] std::io::Error),
-
     #[error("The combination of relay constraints is invalid")]
     InvalidConstraints,
 
-    #[error("No relays matching current constraints")]
-    NoRelay,
+    #[error("No relays matching current entry constraints: {0:?}")]
+    NoRelayEntry(Box<RelayQuery>),
+
+    #[error("No relays matching current exit constraints: {0:?}")]
+    NoRelayExit(Box<RelayQuery>),
+
+    #[error("No relays matching current constraints: {0:?}")]
+    NoRelay(Box<RelayQuery>),
 
     #[error("No bridges matching current constraints")]
     NoBridge,
@@ -31,40 +30,23 @@ pub enum Error {
         relay: EndpointErrorDetails,
     },
 
-    #[error("Failure in serialization of the relay list")]
-    Serialize(#[from] serde_json::Error),
-
-    #[error("Invalid bridge settings")]
-    InvalidBridgeSettings(#[from] MissingCustomBridgeSettings),
+    #[error("The requested IP version ({family}) does not match ip availability")]
+    IpVersionUnavailable { family: IpVersion },
 }
 
 /// Special type which only shows up in [`Error`]. This error variant signals that no valid
-/// endpoint could be constructed from the selected relay.
+/// endpoint could be constructed from this [`WireguardConfig`].
+///
+/// # Note
+/// The inner value is boxed to not bloat the size of [`Error`] due to the size of
+/// [`WireguardConfig`].
 #[derive(Debug)]
-pub enum EndpointErrorDetails {
-    /// No valid Wireguard endpoint could be constructed from this [`WireguardConfig`].
-    ///
-    /// # Note
-    /// The inner value is boxed to not bloat the size of [`Error`] due to the size of
-    /// [`WireguardConfig`].
-    Wireguard(Box<WireguardConfig>),
-    /// No valid OpenVPN endpoint could be constructed from this [`Relay`]
-    ///
-    /// # Note
-    /// The inner value is boxed to not bloat the size of [`Error`] due to the size of [`Relay`].
-    OpenVpn(Box<Relay>),
-}
+pub struct EndpointErrorDetails(Box<WireguardConfig>);
 
 impl EndpointErrorDetails {
     /// Helper function for constructing an [`Error::NoEndpoint`] from `relay`.
     /// Takes care of boxing the [`WireguardConfig`] for you!
-    pub(crate) fn from_wireguard(relay: WireguardConfig) -> Self {
-        EndpointErrorDetails::Wireguard(Box::new(relay))
-    }
-
-    /// Helper function for constructing an [`Error::NoEndpoint`] from `relay`.
-    /// Takes care of boxing the [`Relay`] for you!
-    pub(crate) fn from_openvpn(relay: Relay) -> Self {
-        EndpointErrorDetails::OpenVpn(Box::new(relay))
+    pub(crate) fn from_wireguard(config: WireguardConfig) -> Self {
+        EndpointErrorDetails(Box::new(config))
     }
 }

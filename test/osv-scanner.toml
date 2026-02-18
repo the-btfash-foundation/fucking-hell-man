@@ -2,13 +2,8 @@
 #
 # Keep this file in sync with test/deny.toml
 
-# `instant` is unmaintained.
+# Logging user input may result in poisoning logs with ANSI escape sequences
 [[IgnoredVulns]]
-id = "RUSTSEC-2024-0384"
-ignoreUntil = 2025-02-11
-reason = """
-There is no reported vulnerability in the `instant` crate, but it is unmaintained and the author suggest switching to
-a fork instead of depending on `instant`. In our tree it is `ssh2` that currently depend on `instant` through an old
-version of `parking_lot`, preventing us from upgrading to a fixed version. This ignore can be removed when
-https://github.com/alexcrichton/ssh2-rs/issues/338 is resolved.
-"""
+id = "RUSTSEC-2025-0055"  # CVE-2025-58160
+ignoreUntil = 2026-12-08
+reason = "test-rpc does not deal with random user input"

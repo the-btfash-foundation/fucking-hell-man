@@ -3,12 +3,17 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 26/10/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 
-final class RevokedDeviceInteractor {
+protocol RevokedDeviceInteractorProtocol {
+    var didUpdateTunnelStatus: ((TunnelStatus) -> Void)? { get set }
+    var tunnelStatus: TunnelStatus { get }
+}
+
+final class RevokedDeviceInteractor: RevokedDeviceInteractorProtocol {
     private let tunnelManager: TunnelManager
     private var tunnelObserver: TunnelObserver?
 
@@ -29,5 +34,14 @@ final class RevokedDeviceInteractor {
         tunnelManager.addObserver(tunnelObserver)
 
         self.tunnelObserver = tunnelObserver
+    }
+}
+
+class MockRevokedDeviceInteractor: RevokedDeviceInteractorProtocol {
+    var tunnelStatus: TunnelStatus
+    var didUpdateTunnelStatus: ((TunnelStatus) -> Void)?
+
+    init(tunnelStatus: TunnelStatus) {
+        self.tunnelStatus = tunnelStatus
     }
 }

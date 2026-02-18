@@ -45,7 +45,12 @@ impl ServiceClient {
         self.client
             .install_app(ctx, package_path)
             .await
-            .map_err(Error::Tarpc)?
+            .map_err(Error::Tarpc)??;
+
+        self.mullvad_daemon_wait_for_state(|state| state == ServiceStatus::Running)
+            .await?;
+
+        Ok(())
     }
 
     /// Remove app package.
@@ -114,7 +119,7 @@ impl ServiceClient {
     }
 
     /// Wait for the Mullvad service to enter a specified state. The state is inferred from the
-    /// presence of a named pipe or UDS, not the actual system service state.
+    /// presence of a named pipe or UDS, and sometimes the system service state.
     pub async fn mullvad_daemon_wait_for_state(
         &self,
         accept_state_fn: impl Fn(ServiceStatus) -> bool,
@@ -298,6 +303,41 @@ impl ServiceClient {
         Ok(())
     }
 
+    /// Enable the daemon system service.
+    ///
+    /// Does *not* start a stopped app. See [start_mullvad_daemon].
+    pub async fn enable_mullvad_daemon(&self) -> Result<(), Error> {
+        let mut ctx = tarpc::context::current();
+        ctx.deadline = SystemTime::now()
+            .checked_add(DAEMON_RESTART_TIMEOUT)
+            .unwrap();
+        self.client
+            .enable_mullvad_daemon(ctx)
+            .await
+            .map_err(Error::Tarpc)??;
+        Ok(())
+    }
+
+    /// Disable the daemon system service. *Current only works on Windows*.
+    ///
+    /// This will not stop the daemon system service, but it will prevent it from starting
+    /// automatically on system boot.
+    ///
+    /// Note that if the daemon is also stopped, using [stop_mullvad_daemon], it will
+    /// not be possible to start it again until it is enabled again using
+    /// [enable_mullvad_daemon].
+    pub async fn disable_mullvad_daemon(&self) -> Result<(), Error> {
+        let mut ctx = tarpc::context::current();
+        ctx.deadline = SystemTime::now()
+            .checked_add(DAEMON_RESTART_TIMEOUT)
+            .unwrap();
+        self.client
+            .disable_mullvad_daemon(ctx)
+            .await
+            .map_err(Error::Tarpc)??;
+        Ok(())
+    }
+
     pub async fn set_daemon_log_level(
         &self,
         verbosity_level: mullvad_daemon::Verbosity,
@@ -307,9 +347,6 @@ impl ServiceClient {
         self.client
             .set_daemon_log_level(ctx, verbosity_level)
             .await??;
-
-        self.mullvad_daemon_wait_for_state(|state| state == ServiceStatus::Running)
-            .await?;
 
         Ok(())
     }
@@ -372,6 +409,8 @@ impl ServiceClient {
             .await?
     }
 
+    /// Reboot the testing VM. The VM should be completely rebooted and responsive when this
+    /// future completes.
     pub async fn reboot(&mut self) -> Result<(), Error> {
         log::debug!("Rebooting server");
 
@@ -418,6 +457,26 @@ impl ServiceClient {
     pub async fn get_os_version(&self) -> Result<meta::OsVersion, Error> {
         self.client
             .get_os_version(tarpc::context::current())
+            .await?
+    }
+
+    pub async fn ifconfig_alias_add(
+        &self,
+        interface: impl Into<String>,
+        alias: impl Into<IpAddr>,
+    ) -> Result<(), Error> {
+        self.client
+            .ifconfig_alias_add(tarpc::context::current(), interface.into(), alias.into())
+            .await?
+    }
+
+    pub async fn ifconfig_alias_remove(
+        &self,
+        interface: impl Into<String>,
+        alias: impl Into<IpAddr>,
+    ) -> Result<(), Error> {
+        self.client
+            .ifconfig_alias_remove(tarpc::context::current(), interface.into(), alias.into())
             .await?
     }
 }

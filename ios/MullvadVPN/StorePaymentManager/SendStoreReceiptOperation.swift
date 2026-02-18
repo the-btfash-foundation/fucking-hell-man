@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 29/03/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -13,7 +13,9 @@ import MullvadTypes
 import Operations
 import StoreKit
 
-class SendStoreReceiptOperation: ResultOperation<REST.CreateApplePaymentResponse>, SKRequestDelegate {
+class SendStoreReceiptOperation: ResultOperation<REST.CreateApplePaymentResponse>, SKRequestDelegate,
+    @unchecked Sendable
+{
     private let apiProxy: APIQuerying
     private let accountNumber: String
 
@@ -53,26 +55,26 @@ class SendStoreReceiptOperation: ResultOperation<REST.CreateApplePaymentResponse
     }
 
     override func main() {
-        // Pull receipt from AppStore if requested.
+        // Pull receipt from App Store if requested.
         guard !forceRefresh else {
             startRefreshRequest()
             return
         }
 
-        // Read AppStore receipt from disk.
+        // Read App Store receipt from disk.
         do {
             let data = try readReceiptFromDisk()
 
             sendReceipt(data)
         } catch is StoreReceiptNotFound {
-            // Pull receipt from AppStore if it's not cached locally.
+            // Pull receipt from App Store if it's not cached locally.
             startRefreshRequest()
         } catch {
             logger.error(
                 error: error,
-                message: "Failed to read the AppStore receipt."
+                message: "Failed to read the App Store receipt."
             )
-            finish(result: .failure(StorePaymentManagerError.readReceipt(error)))
+            finish(result: .failure(LegacyStorePaymentManagerError.readReceipt(error)))
         }
     }
 
@@ -87,9 +89,9 @@ class SendStoreReceiptOperation: ResultOperation<REST.CreateApplePaymentResponse
             } catch {
                 self.logger.error(
                     error: error,
-                    message: "Failed to read the AppStore receipt after refresh."
+                    message: "Failed to read the App Store receipt after refresh."
                 )
-                self.finish(result: .failure(StorePaymentManagerError.readReceipt(error)))
+                self.finish(result: .failure(LegacyStorePaymentManagerError.readReceipt(error)))
             }
         }
     }
@@ -98,9 +100,9 @@ class SendStoreReceiptOperation: ResultOperation<REST.CreateApplePaymentResponse
         dispatchQueue.async {
             self.logger.error(
                 error: error,
-                message: "Failed to refresh the AppStore receipt."
+                message: "Failed to refresh the App Store receipt."
             )
-            self.finish(result: .failure(StorePaymentManagerError.readReceipt(error)))
+            self.finish(result: .failure(LegacyStorePaymentManagerError.readReceipt(error)))
         }
     }
 
@@ -122,7 +124,8 @@ class SendStoreReceiptOperation: ResultOperation<REST.CreateApplePaymentResponse
         do {
             return try Data(contentsOf: appStoreReceiptURL)
         } catch let error as CocoaError
-            where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile
+        {
             throw StoreReceiptNotFound()
         } catch {
             throw error
@@ -130,39 +133,41 @@ class SendStoreReceiptOperation: ResultOperation<REST.CreateApplePaymentResponse
     }
 
     private func sendReceipt(_ receiptData: Data) {
-        submitReceiptTask = apiProxy.createApplePayment(
+        submitReceiptTask = apiProxy.legacyStoreKitPayment(
             accountNumber: accountNumber,
-            receiptString: receiptData
-        ).execute(retryStrategy: .noRetry) { result in
-            switch result {
-            case let .success(response):
-                self.logger.info(
-                    """
-                    AppStore receipt was processed. \
-                    Time added: \(response.timeAdded), \
-                    New expiry: \(response.newExpiry.logFormatted)
-                    """
-                )
-                self.finish(result: .success(response))
-
-            case let .failure(error):
-                if error.isOperationCancellationError {
-                    self.logger.debug("Receipt submission cancelled.")
-                    self.finish(result: .failure(error))
-                } else {
-                    self.logger.error(
-                        error: error,
-                        message: "Failed to send the AppStore receipt."
+            request: LegacyStoreKitRequest(receiptString: receiptData),
+            retryStrategy: .default,
+            completionHandler: { result in
+                switch result {
+                case let .success(response):
+                    self.logger.info(
+                        """
+                        App Store receipt was processed. \
+                        Time added: \(response.timeAdded), \
+                        New expiry: \(response.newExpiry.logFormatted)
+                        """
                     )
-                    self.finish(result: .failure(StorePaymentManagerError.sendReceipt(error)))
+                    self.finish(result: .success(response))
+
+                case let .failure(error):
+                    if error.isOperationCancellationError {
+                        self.logger.debug("Receipt submission cancelled.")
+                        self.finish(result: .failure(error))
+                    } else {
+                        self.logger.error(
+                            error: error,
+                            message: "Failed to send the App Store receipt."
+                        )
+                        self.finish(result: .failure(LegacyStorePaymentManagerError.sendReceipt(error)))
+                    }
                 }
             }
-        }
+        )
     }
 }
 
 struct StoreReceiptNotFound: LocalizedError {
     var errorDescription: String? {
-        "AppStore receipt file does not exist on disk."
+        "App Store receipt file does not exist on disk."
     }
 }

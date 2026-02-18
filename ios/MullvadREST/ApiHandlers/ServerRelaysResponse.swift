@@ -3,7 +3,7 @@
 //  MullvadREST
 //
 //  Created by pronebird on 27/07/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -11,7 +11,7 @@ import MullvadTypes
 import Network
 
 extension REST {
-    public struct ServerLocation: Codable, Equatable {
+    public struct ServerLocation: Codable, Equatable, Sendable {
         public let country: String
         public let city: String
         public let latitude: Double
@@ -25,11 +25,11 @@ extension REST {
         }
     }
 
-    public struct BridgeRelay: Codable, Equatable {
+    public struct BridgeRelay: Codable, Equatable, Sendable {
         public let hostname: String
         public let active: Bool
         public let owned: Bool
-        public let location: String
+        public let location: LocationIdentifier
         public let provider: String
         public let ipv4AddrIn: IPv4Address
         public let weight: UInt64
@@ -50,11 +50,26 @@ extension REST {
         }
     }
 
-    public struct ServerRelay: Codable, Equatable {
+    public struct ServerRelay: Codable, Equatable, Sendable {
+        public struct Features: Codable, Equatable, Sendable {
+            public struct DAITA: Codable, Equatable, Sendable {
+                // this structure intentionally left blank
+            }
+
+            public struct QUIC: Codable, Equatable, Sendable {
+                public let addrIn: [String]
+                public let domain: String
+                public let token: String
+            }
+
+            public let daita: DAITA?
+            public let quic: QUIC?
+        }
+
         public let hostname: String
         public let active: Bool
         public let owned: Bool
-        public let location: String
+        public let location: LocationIdentifier
         public let provider: String
         public let weight: UInt64
         public let ipv4AddrIn: IPv4Address
@@ -63,6 +78,11 @@ extension REST {
         public let includeInCountry: Bool
         public let daita: Bool?
         public let shadowsocksExtraAddrIn: [String]?
+        public let features: Features?
+
+        public var supportsQuic: Bool {
+            !(features?.quic?.addrIn.isEmpty ?? true)
+        }
 
         public func override(ipv4AddrIn: IPv4Address?, ipv6AddrIn: IPv6Address?) -> Self {
             ServerRelay(
@@ -77,11 +97,12 @@ extension REST {
                 publicKey: publicKey,
                 includeInCountry: includeInCountry,
                 daita: daita,
-                shadowsocksExtraAddrIn: shadowsocksExtraAddrIn
+                shadowsocksExtraAddrIn: shadowsocksExtraAddrIn,
+                features: features
             )
         }
 
-        public func override(daita: Bool) -> Self {
+        public func override(features: ServerRelay.Features?) -> Self {
             ServerRelay(
                 hostname: hostname,
                 active: active,
@@ -94,12 +115,17 @@ extension REST {
                 publicKey: publicKey,
                 includeInCountry: includeInCountry,
                 daita: daita,
-                shadowsocksExtraAddrIn: shadowsocksExtraAddrIn
+                shadowsocksExtraAddrIn: shadowsocksExtraAddrIn,
+                features: features
             )
+        }
+
+        public var hasDaita: Bool {
+            (features?.daita != nil) || daita == true
         }
     }
 
-    public struct ServerWireguardTunnels: Codable, Equatable {
+    public struct ServerWireguardTunnels: Codable, Equatable, Sendable {
         public let ipv4Gateway: IPv4Address
         public let ipv6Gateway: IPv6Address
         public let portRanges: [[UInt16]]
@@ -121,27 +147,49 @@ extension REST {
         }
     }
 
-    public struct ServerShadowsocks: Codable, Equatable {
+    public struct ServerShadowsocks: Codable, Equatable, Sendable {
         public let `protocol`: String
         public let port: UInt16
         public let cipher: String
         public let password: String
     }
 
-    public struct ServerBridges: Codable, Equatable {
+    public struct ServerBridges: Codable, Equatable, Sendable {
         public let shadowsocks: [ServerShadowsocks]
         public let relays: [BridgeRelay]
     }
 
-    public struct ServerRelaysResponse: Codable, Equatable {
+    public struct ServerRelaysResponse: Codable, Equatable, Sendable {
         public let locations: [String: ServerLocation]
         public let wireguard: ServerWireguardTunnels
         public let bridge: ServerBridges
 
-        public init(locations: [String: ServerLocation], wireguard: ServerWireguardTunnels, bridge: ServerBridges) {
+        public init(
+            locations: [String: ServerLocation],
+            wireguard: ServerWireguardTunnels,
+            bridge: ServerBridges
+        ) {
             self.locations = locations
             self.wireguard = wireguard
             self.bridge = bridge
         }
+
+        /// Returns true if the relay list contains no usable relays
+        public var isEmpty: Bool {
+            wireguard.relays.isEmpty && bridge.relays.isEmpty
+        }
+
+        /// Empty relay list used when prebundled file is empty (Debug/Staging builds)
+        public static let empty = ServerRelaysResponse(
+            locations: [:],
+            wireguard: ServerWireguardTunnels(
+                ipv4Gateway: .loopback,
+                ipv6Gateway: .loopback,
+                portRanges: [],
+                relays: [],
+                shadowsocksPortRanges: []
+            ),
+            bridge: ServerBridges(shadowsocks: [], relays: [])
+        )
     }
 }

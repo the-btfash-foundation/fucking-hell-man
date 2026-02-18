@@ -1,12 +1,7 @@
 //! The core components of the talpidaemon VPN client.
 
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 #![recursion_limit = "1024"]
-
-/// Misc FFI utilities.
-#[cfg(windows)]
-#[macro_use]
-mod ffi;
 
 /// Window API wrappers and utilities
 #[cfg(target_os = "windows")]
@@ -17,9 +12,6 @@ mod offline;
 /// Split tunneling
 pub mod split_tunnel;
 
-/// Abstracts over different VPN tunnel technologies
-pub mod tunnel;
-
 /// Helper function to preserve previous log files.
 pub mod logging;
 
@@ -28,9 +20,6 @@ pub mod mpsc;
 
 /// Abstractions over operating system firewalls.
 pub mod firewall;
-
-/// Abstractions over operating system DNS settings.
-pub mod dns;
 
 /// State machine to handle tunnel configuration.
 pub mod tunnel_state_machine;

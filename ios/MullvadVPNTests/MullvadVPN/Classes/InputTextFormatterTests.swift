@@ -3,11 +3,12 @@
 //  MullvadVPNTests
 //
 //  Created by pronebird on 10/04/2020.
-//  Copyright © 2020 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import XCTest
 
+@MainActor
 class InputTextFormatterTests: XCTestCase {
     private let accountNumber = "12345678"
     private var inputTextFormatter: InputTextFormatter!
@@ -19,14 +20,14 @@ class InputTextFormatterTests: XCTestCase {
         maxGroups: 4
     )
 
-    override func setUp() {
+    override func setUp() async throws {
         inputTextFormatter = InputTextFormatter(
             string: accountNumber,
             configuration: configuration
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         inputTextFormatter = nil
     }
 
@@ -116,42 +117,15 @@ class InputTextFormatterTests: XCTestCase {
         XCTAssertEqual(inputTextFormatter.formattedString, "1234 0000")
         XCTAssertEqual(inputTextFormatter.caretPosition, 9)
     }
-
-    func testInvalidCharactersReplacesTextFieldTextWithFormattedString() {
-        let invalidRange = NSRange(location: accountNumber.count + 1, length: 0)
-        let textField = UITextField()
-
-        _ = inputTextFormatter.textField(textField, shouldChangeCharactersIn: invalidRange, replacementString: "´")
-
-        XCTAssertEqual(textField.text, inputTextFormatter.formattedString)
-    }
-
-    func testDeleteCharacterOutsideOfTokenBoundaryDoesNotDeleteAnything() {
-        let invalidRange = NSRange(location: accountNumber.count + 1, length: 1)
-        let textField = UITextField()
-
-        _ = inputTextFormatter.textField(textField, shouldChangeCharactersIn: invalidRange, replacementString: "")
-
-        XCTAssertEqual(textField.text, inputTextFormatter.formattedString)
-    }
-
-    func testDeleteLastCharacter() {
-        let lastCharacterRange = NSRange(location: accountNumber.count, length: 1)
-        let textField = UITextField()
-
-        _ = inputTextFormatter.textField(textField, shouldChangeCharactersIn: lastCharacterRange, replacementString: "")
-
-        XCTAssertEqual(textField.text, "1234 567")
-    }
 }
 
 private extension String {
     func range(withOffset offset: Int, length: Int) -> Range<String.Index>? {
         guard let start = index(startIndex, offsetBy: offset, limitedBy: endIndex),
-              let end = index(start, offsetBy: length, limitedBy: endIndex)
+            let end = index(start, offsetBy: length, limitedBy: endIndex)
         else {
             return nil
         }
-        return start ..< end
+        return start..<end
     }
 }

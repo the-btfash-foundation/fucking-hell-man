@@ -1,13 +1,18 @@
-use fern::{
-    colors::{Color, ColoredLevelConfig},
-    Output,
-};
+use mullvad_logging::{EnvFilter, LevelFilter, silence_crates};
 use std::{
-    fmt, io,
+    io,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
 };
 use talpid_core::logging::rotate_log;
+use tracing_appender::non_blocking;
+use tracing_subscriber::{
+    Registry,
+    fmt::{MakeWriter, format::FmtSpan, writer::OptionalWriter},
+    layer::SubscriberExt,
+    reload::Handle,
+    util::SubscriberInitExt,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -21,49 +26,77 @@ pub enum Error {
 
     #[error("Unable to rotate daemon log file")]
     RotateLog(#[from] talpid_core::logging::RotateLogError),
-
-    #[error("Unable to set logger")]
-    SetLoggerError(#[from] log::SetLoggerError),
 }
 
-pub const WARNING_SILENCED_CRATES: &[&str] = &["netlink_proto"];
-pub const SILENCED_CRATES: &[&str] = &[
-    "h2",
-    "tokio_core",
-    "tokio_io",
-    "tokio_proto",
-    "tokio_reactor",
-    "tokio_threadpool",
-    "tokio_util",
-    "tower",
-    "want",
-    "ws",
-    "mio",
-    "hyper",
-    "rtnetlink",
-    "rustls",
-    "netlink_sys",
-    "tracing",
-    "hickory_proto",
-    "hickory_server",
-    "hickory_resolver",
-    "shadowsocks::relay::udprelay",
-];
-const SLIGHTLY_SILENCED_CRATES: &[&str] = &["mnl", "nftnl", "udp_over_tcp"];
+/// A [`MakeWriter`] that wraps an [`OptionalWriter`].
+#[derive(Clone)]
+pub struct LogFileWriter(Option<non_blocking::NonBlocking>);
 
-const COLORS: ColoredLevelConfig = ColoredLevelConfig {
-    error: Color::Red,
-    warn: Color::Yellow,
-    info: Color::Green,
-    debug: Color::Blue,
-    trace: Color::Black,
-};
+impl LogFileWriter {
+    /// Creates a [`MakeWriter`] that writes logs to the given file.
+    ///
+    /// If a valid path is passed, the logs are rotated and a writer for the
+    /// new file are returned. If `None` is passed, the writer will be a noop.
+    ///
+    /// The writer will flush remaining logs when the tokio runtime is shut down.
+    /// NOTE: calling e.g. `std::process::exit` will prevent flushing and might
+    /// result in lost logs.
+    ///
+    /// On Android, the logs will not flush automatically on shutdown, instead
+    /// one should call `LogFileWriter::get_flusher` to receive channel for
+    /// manually flushing.
+    fn new(log_location: Option<LogLocation>) -> Result<Self, Error> {
+        // Disable logging if log_location is None
+        let Some(log_location) = log_location else {
+            return Ok(Self(None));
+        };
 
-#[cfg(not(windows))]
-const LINE_SEPARATOR: &str = "\n";
+        // NOTE: Make sure to rotate log file *before* initializing any kind of logger.
+        rotate_log(&log_location.log_path()).map_err(Error::RotateLog)?;
+        let file_appender =
+            tracing_appender::rolling::never(&log_location.directory, &log_location.filename);
+        let (file_writer, guard) = non_blocking(file_appender);
 
-#[cfg(windows)]
-const LINE_SEPARATOR: &str = "\r\n";
+        // When the guard is dropped, logs will no longer be written to the file, so we need to keep it
+        // alive until the program exits.
+        // On desktop, the Tokio runtime lives from the entire program, so we can keep the guard alive
+        // using a task.
+        // On Android, the runtime is not running at this point, and will be restarted multiple times
+        // during the application's lifecycle. Instead, we simply call `mem::forget` to never drop the guard.
+        // Instead, one should call `LogFileWriter::get_flusher`, to receive channel for manually flushing
+        if cfg!(target_os = "android") {
+            core::mem::forget(guard);
+        } else {
+            tokio::spawn(async {
+                std::future::pending::<()>().await;
+                drop(guard);
+            });
+        }
+        Ok(Self(Some(file_writer)))
+    }
+
+    /// Flush any buffered logs to file
+    #[cfg(target_os = "android")]
+    pub fn flush(&mut self) -> io::Result<()> {
+        use std::io::Write;
+        if let Some(writer) = &mut self.0 {
+            writer.flush()
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<'a> MakeWriter<'a> for LogFileWriter {
+    type Writer = OptionalWriter<non_blocking::NonBlocking>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        match &self.0 {
+            Some(writer) => OptionalWriter::some(writer.clone()),
+            None => OptionalWriter::none(),
+        }
+    }
+}
 
 const DATE_TIME_FORMAT_STR: &str = "[%Y-%m-%d %H:%M:%S%.3f]";
 
@@ -76,120 +109,169 @@ pub fn is_enabled() -> bool {
     LOG_ENABLED.load(Ordering::SeqCst)
 }
 
+/// Handle to interact with the logs. Use it to change the log level at runtime or
+/// to receive a stream of logs.
+#[derive(Clone)]
+pub struct LogHandle {
+    env_filter: Handle<EnvFilter, Registry>,
+    log_stream: LogStreamer,
+    /// A copy of the logfile writer used to manual flushing of buffered logs
+    #[cfg(target_os = "android")]
+    pub logfile_writer: LogFileWriter,
+}
+
+impl LogHandle {
+    /// Adjust the log level.
+    ///
+    /// - `level_filter`: A `RUST_LOG` string. See `env_logger` for more information:
+    ///   https://docs.rs/env_logger/latest/env_logger/
+    pub fn set_log_filter(
+        &self,
+        level_filter: impl AsRef<str>,
+    ) -> Result<(), tracing_subscriber::reload::Error> {
+        let new = silence_crates(EnvFilter::new(level_filter));
+        self.env_filter.modify(|env_filter| *env_filter = new)
+    }
+
+    /// Subscribe to new log events.
+    pub fn get_log_stream(&self) -> tokio::sync::broadcast::Receiver<String> {
+        self.log_stream.tx.subscribe()
+    }
+}
+
+/// A location to put logs.
+///
+/// It is necessary to logically separate the directory from the absolute path of the log file due
+/// to the API of [`tracing_appender::rolling`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct LogLocation {
+    /// The directory where the logs will be recorded.
+    pub directory: PathBuf,
+    /// The filename where the logs will be recorded (relative to [Self::directory]).
+    pub filename: PathBuf,
+}
+
+impl LogLocation {
+    /// Construct the final path of the log file made up by the components of this [`LogLocation`].
+    ///
+    /// `self.directory/self.filename`
+    pub fn log_path(&self) -> PathBuf {
+        self.directory.join(&self.filename)
+    }
+}
+
+/// A simple, asynchronous log sink.
+///
+/// To read from a [`LogStreamer`] sink, check out the associated [`LogHandle`] and [`LogHandle::get_log_stream`].
+#[derive(Clone)]
+struct LogStreamer {
+    tx: tokio::sync::broadcast::Sender<String>,
+}
+
+impl io::Write for LogStreamer {
+    /// Will always write the entire `buf` or nothing (`0` bytes) in case there are no subscribers.
+    ///
+    /// See [`std::io::Write`].
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self.tx.send(String::from_utf8(buf.to_vec()).unwrap()) {
+            Ok(_n_subscribers) => Ok(buf.len()),
+            // From the docs of `std::io::Write`:
+            // "A return value of Ok(0) typically means that the underlying object is no longer able to accept bytes
+            // and will likely not be able to in the future as well, or that the buffer provided is empty."
+            // =>
+            // Thus, returning `Ok(0)` is correct if no-one is subscribed and can received the `buf` message.
+            Err(_e) => Ok(0),
+        }
+    }
+
+    /// There is no intermediately buffered content, so `flush` will always succeed and is always
+    /// a NOOP.
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Initialize a global logger.
+///
+/// * log_level: Base log level, used if `RUST_LOG` is not set.
+/// * log_location: Path to the log file, see [`LogLocation`].
+/// * std_output_timestamp: Whether timestamps should be included in the stdout log output.
 pub fn init_logger(
     log_level: log::LevelFilter,
-    log_file: Option<&PathBuf>,
-    output_timestamp: bool,
-) -> Result<(), Error> {
-    let mut top_dispatcher = fern::Dispatch::new().level(log_level);
-    for silenced_crate in WARNING_SILENCED_CRATES {
-        top_dispatcher = top_dispatcher.level_for(*silenced_crate, log::LevelFilter::Error);
-    }
-    for silenced_crate in SILENCED_CRATES {
-        top_dispatcher = top_dispatcher.level_for(*silenced_crate, log::LevelFilter::Warn);
-    }
-    for silenced_crate in SLIGHTLY_SILENCED_CRATES {
-        top_dispatcher = top_dispatcher.level_for(*silenced_crate, one_level_quieter(log_level));
-    }
-
-    let stdout_formatter = Formatter {
-        output_timestamp,
-        output_color: true,
+    log_location: Option<LogLocation>,
+    std_output_timestamp: bool,
+) -> Result<LogHandle, Error> {
+    let level_filter = match log_level {
+        log::LevelFilter::Off => LevelFilter::OFF,
+        log::LevelFilter::Error => LevelFilter::ERROR,
+        log::LevelFilter::Warn => LevelFilter::WARN,
+        log::LevelFilter::Info => LevelFilter::INFO,
+        log::LevelFilter::Debug => LevelFilter::DEBUG,
+        log::LevelFilter::Trace => LevelFilter::TRACE,
     };
-    let stdout_dispatcher = fern::Dispatch::new()
-        .format(move |out, message, record| stdout_formatter.output_msg(out, message, record))
-        .chain(io::stdout());
-    top_dispatcher = top_dispatcher.chain(stdout_dispatcher);
 
-    if let Some(ref log_file) = log_file {
-        rotate_log(log_file).map_err(Error::RotateLog)?;
-        let file_formatter = Formatter {
-            output_timestamp: true,
-            output_color: false,
-        };
-        let f = fern::log_file(log_file).map_err(|source| Error::WriteFile {
-            path: log_file.display().to_string(),
-            source,
-        })?;
-        let file_dispatcher = fern::Dispatch::new()
-            .format(move |out, message, record| file_formatter.output_msg(out, message, record))
-            .chain(Output::file(f, LINE_SEPARATOR));
-        top_dispatcher = top_dispatcher.chain(file_dispatcher);
-    }
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(level_filter.to_string()));
+
+    let default_filter = silence_crates(env_filter);
+
+    // TODO: Switch this to a rolling appender, likely daily or hourly
+    let file_writer = LogFileWriter::new(log_location)?;
+
+    let (tx, _) = tokio::sync::broadcast::channel(128);
+    let log_stream = LogStreamer { tx };
+
+    let (user_filter, reload_handle) = tracing_subscriber::reload::Layer::new(default_filter);
+    let reload_handle = LogHandle {
+        env_filter: reload_handle,
+        log_stream: log_stream.clone(),
+        #[cfg(target_os = "android")]
+        logfile_writer: file_writer.clone(),
+    };
+
+    let reg = tracing_subscriber::registry().with(user_filter);
+    let stdout_formatter = tracing_subscriber::fmt::layer()
+        .with_ansi(true)
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE);
+
     #[cfg(all(target_os = "android", debug_assertions))]
-    {
-        use android_logger::{AndroidLogger, Config};
-        let logger: Box<dyn log::Log> = Box::new(AndroidLogger::new(
-            Config::default().with_tag("mullvad-daemon"),
-        ));
-        top_dispatcher = top_dispatcher.chain(logger);
+    let reg = {
+        let android_layer = paranoid_android::layer("mullvad-daemon").with_ansi(false);
+        reg.with(android_layer)
+    };
+
+    let grpc_formatter = tracing_subscriber::fmt::layer()
+        .with_ansi(true)
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_writer(std::sync::Mutex::new(log_stream));
+
+    let file_formatter = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(file_writer);
+
+    let reg = reg
+        .with(
+            grpc_formatter.with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                DATE_TIME_FORMAT_STR.to_string(),
+            )),
+        )
+        .with(
+            file_formatter.with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                DATE_TIME_FORMAT_STR.to_string(),
+            )),
+        );
+    if std_output_timestamp {
+        reg.with(
+            stdout_formatter.with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                DATE_TIME_FORMAT_STR.to_string(),
+            )),
+        )
+        .init();
+    } else {
+        reg.with(stdout_formatter.without_time()).init();
     }
-    top_dispatcher.apply().map_err(Error::SetLoggerError)?;
 
     LOG_ENABLED.store(true, Ordering::SeqCst);
 
-    Ok(())
-}
-
-fn one_level_quieter(level: log::LevelFilter) -> log::LevelFilter {
-    use log::LevelFilter::*;
-    match level {
-        Off => Off,
-        Error => Off,
-        Warn => Error,
-        Info => Warn,
-        Debug => Info,
-        Trace => Debug,
-    }
-}
-
-#[derive(Default, Debug)]
-struct Formatter {
-    pub output_timestamp: bool,
-    pub output_color: bool,
-}
-
-impl Formatter {
-    fn get_timetsamp_fmt(&self) -> &str {
-        if self.output_timestamp {
-            DATE_TIME_FORMAT_STR
-        } else {
-            ""
-        }
-    }
-
-    fn get_record_level(&self, level: log::Level) -> Box<dyn fmt::Display> {
-        if self.output_color && cfg!(not(windows)) {
-            Box::new(COLORS.color(level))
-        } else {
-            Box::new(level)
-        }
-    }
-
-    pub fn output_msg(
-        &self,
-        out: fern::FormatCallback<'_>,
-        message: &fmt::Arguments<'_>,
-        record: &log::Record<'_>,
-    ) {
-        let message = escape_newlines(format!("{message}"));
-
-        out.finish(format_args!(
-            "{}[{}][{}] {}",
-            chrono::Local::now().format(self.get_timetsamp_fmt()),
-            record.target(),
-            self.get_record_level(record.level()),
-            message,
-        ))
-    }
-}
-
-#[cfg(not(windows))]
-fn escape_newlines(text: String) -> String {
-    text
-}
-
-#[cfg(windows)]
-fn escape_newlines(text: String) -> String {
-    text.replace('\n', LINE_SEPARATOR)
+    Ok(reload_handle)
 }

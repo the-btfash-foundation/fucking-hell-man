@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 14/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -28,19 +28,9 @@ extension TextCellContentConfiguration {
         var localizedDescription: String {
             switch self {
             case .required:
-                NSLocalizedString(
-                    "REQUIRED_PLACEHOLDER",
-                    tableName: "APIAccess",
-                    value: "Required",
-                    comment: ""
-                )
+                NSLocalizedString("Required", comment: "")
             case .optional:
-                NSLocalizedString(
-                    "OPTIONAL_PLACEHOLDER",
-                    tableName: "APIAccess",
-                    value: "Optional",
-                    comment: ""
-                )
+                NSLocalizedString("Optional", comment: "")
             }
         }
     }

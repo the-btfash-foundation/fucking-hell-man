@@ -2,16 +2,16 @@ use clap::builder::{PossibleValuesParser, TypedValueParser, ValueParser};
 use std::{io::stdin, ops::Deref};
 
 pub mod account;
+pub mod anti_censorship;
 pub mod api_access;
 pub mod auto_connect;
 pub mod beta_program;
-pub mod bridge;
 pub mod custom_list;
 pub mod debug;
 pub mod dns;
 pub mod lan;
 pub mod lockdown;
-pub mod obfuscation;
+pub mod log;
 pub mod patch;
 pub mod proxies;
 pub mod relay;
@@ -92,17 +92,19 @@ async fn receive_confirmation(msg: &'static str, default: bool) -> bool {
 
     println!("{msg} {helper_str}");
 
-    tokio::task::spawn_blocking(move || loop {
-        let mut buf = String::new();
-        if let Err(e) = stdin().read_line(&mut buf) {
-            eprintln!("Couldn't read from STDIN: {e}");
-            return false;
-        }
-        match buf.trim().to_ascii_lowercase().as_str() {
-            "" => return default,
-            "y" | "ye" | "yes" => return true,
-            "n" | "no" => return false,
-            _ => eprintln!("Unexpected response. Please enter \"y\" or \"n\""),
+    tokio::task::spawn_blocking(move || {
+        loop {
+            let mut buf = String::new();
+            if let Err(e) = stdin().read_line(&mut buf) {
+                eprintln!("Couldn't read from STDIN: {e}");
+                return false;
+            }
+            match buf.trim().to_ascii_lowercase().as_str() {
+                "" => return default,
+                "y" | "ye" | "yes" => return true,
+                "n" | "no" => return false,
+                _ => eprintln!("Unexpected response. Please enter \"y\" or \"n\""),
+            }
         }
     })
     .await

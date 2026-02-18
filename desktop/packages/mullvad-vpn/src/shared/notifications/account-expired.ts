@@ -1,5 +1,5 @@
-import { links } from '../../config.json';
 import { hasExpired } from '../account-expiry';
+import { urls } from '../constants';
 import { TunnelState } from '../daemon-rpc-types';
 import { messages } from '../gettext';
 import {
@@ -32,10 +32,12 @@ export class AccountExpiredNotificationProvider implements SystemNotificationPro
       severity: SystemNotificationSeverityType.high,
       presentOnce: { value: true, name: this.constructor.name },
       action: {
-        type: 'open-url',
-        url: links.purchase,
-        withAuth: true,
-        text: messages.pgettext('notifications', 'Buy more'),
+        type: 'navigate-external',
+        link: {
+          text: messages.pgettext('notifications', 'Buy more'),
+          to: urls.purchase,
+          withAuth: true,
+        },
       },
     };
   }

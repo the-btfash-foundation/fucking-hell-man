@@ -1,11 +1,8 @@
 import React, { useContext } from 'react';
 import styled from 'styled-components';
 
-import { Center } from '../../lib/components';
-import { Colors, Spacings } from '../../lib/foundations';
-import { IImageViewProps } from '../ImageView';
+import { colors, spacings } from '../../lib/foundations';
 import { CellDisabledContext } from './Container';
-import { Icon } from './Label';
 import { Row } from './Row';
 import { CellSectionContext } from './Section';
 
@@ -16,15 +13,15 @@ interface IStyledCellButtonProps extends React.HTMLAttributes<HTMLButtonElement>
 
 const StyledCellButton = styled(Row)<IStyledCellButtonProps>((props) => {
   const backgroundColor = props.$selected
-    ? Colors.green
+    ? colors.green
     : props.$containedInSection
-      ? Colors.blue40
-      : Colors.blue;
-  const backgroundColorHover = props.$selected ? Colors.green : Colors.blue80;
+      ? colors.blue40
+      : colors.blue;
+  const backgroundColorHover = props.$selected ? colors.green : colors.blue80;
 
   return {
-    paddingRight: Spacings.spacing5,
-    paddingLeft: Spacings.spacing5,
+    paddingRight: spacings.medium,
+    paddingLeft: spacings.medium,
     flex: 1,
     alignContent: 'center',
     cursor: 'default',
@@ -57,25 +54,3 @@ export const CellButton = styled(
     );
   }),
 )({});
-
-interface ICellNavigationButtonProps extends ICellButtonProps {
-  isAriaDescription?: boolean;
-  icon?: IImageViewProps;
-}
-
-export function CellNavigationButton({
-  children,
-  icon = {
-    source: 'icon-chevron',
-  },
-  ...props
-}: ICellNavigationButtonProps) {
-  return (
-    <CellButton {...props}>
-      {children}
-      <Center $height="24px" $width="24px">
-        <Icon {...icon} />
-      </Center>
-    </CellButton>
-  );
-}

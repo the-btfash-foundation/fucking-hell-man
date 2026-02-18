@@ -1,23 +1,24 @@
 pub mod client;
 pub mod types;
 
-use parity_tokio_ipc::Endpoint as IpcEndpoint;
 #[cfg(unix)]
 use std::{env, fs, os::unix::fs::PermissionsExt};
 use std::{
     future::Future,
     io,
+    path::PathBuf,
     pin::Pin,
     task::{Context, Poll},
 };
+use tipsy::Endpoint as IpcEndpoint;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tonic::transport::{server::Connected, Server};
 #[cfg(not(target_os = "android"))]
 use tonic::transport::{Endpoint, Uri};
+use tonic::transport::{Server, server::Connected};
 #[cfg(not(target_os = "android"))]
 use tower::service_fn;
 
-pub use tonic::{async_trait, transport::Channel, Code, Request, Response, Status};
+pub use tonic::{Code, Request, Response, Status, async_trait, transport::Channel};
 
 pub type ManagementServiceClient =
     types::management_service_client::ManagementServiceClient<Channel>;
@@ -29,6 +30,7 @@ use std::sync::LazyLock;
 static MULLVAD_MANAGEMENT_SOCKET_GROUP: LazyLock<Option<String>> =
     LazyLock::new(|| env::var("MULLVAD_MANAGEMENT_SOCKET_GROUP").ok());
 
+pub const API_ACCESS_METHOD_EXISTS_DETAILS: &[u8] = b"api_access_method_exists";
 pub const CUSTOM_LIST_LIST_NOT_FOUND_DETAILS: &[u8] = b"custom_list_list_not_found";
 pub const CUSTOM_LIST_LIST_EXISTS_DETAILS: &[u8] = b"custom_list_list_exists";
 pub const CUSTOM_LIST_LIST_NAME_TOO_LONG_DETAILS: &[u8] = b"custom_list_list_name_too_long";
@@ -59,8 +61,10 @@ pub enum Error {
     #[error("Failed to set group ID")]
     SetGidError(#[source] nix::Error),
 
+    // TODO: Remove box when upgrading tonic to a version with
+    // https://github.com/hyperium/tonic/pull/2282
     #[error("gRPC call returned error")]
-    Rpc(#[source] tonic::Status),
+    Rpc(#[source] Box<tonic::Status>),
 
     #[error("Failed to parse gRPC response")]
     InvalidResponse(#[source] types::FromProtobufTypeError),
@@ -112,6 +116,18 @@ pub enum Error {
 
     #[error("An access method with that id does not exist")]
     ApiAccessMethodNotFound,
+
+    #[error("An access method with that name already exists")]
+    ApiAccessMethodExists,
+
+    #[error("Failed to parse IP Address")]
+    IpAddr(#[from] std::net::AddrParseError),
+}
+
+impl From<tonic::Status> for Error {
+    fn from(value: tonic::Status) -> Self {
+        Error::Rpc(Box::new(value))
+    }
 }
 
 #[cfg(not(target_os = "android"))]
@@ -140,18 +156,19 @@ pub type ServerJoinHandle = tokio::task::JoinHandle<()>;
 pub fn spawn_rpc_server<T: ManagementService, F: Future<Output = ()> + Send + 'static>(
     service: T,
     abort_rx: F,
-    rpc_socket_path: impl AsRef<std::path::Path>,
+    rpc_socket_path: PathBuf,
 ) -> std::result::Result<ServerJoinHandle, Error> {
     use futures::stream::TryStreamExt;
-    use parity_tokio_ipc::SecurityAttributes;
+    use tipsy::SecurityAttributes;
 
-    let mut endpoint = IpcEndpoint::new(rpc_socket_path.as_ref().to_string_lossy().to_string());
-    endpoint.set_security_attributes(
-        SecurityAttributes::allow_everyone_create()
-            .map_err(Error::SecurityAttributes)?
-            .set_mode(0o766)
-            .map_err(Error::SecurityAttributes)?,
-    );
+    let endpoint = IpcEndpoint::new(rpc_socket_path.clone(), tipsy::OnConflict::Error)
+        .map_err(Error::StartServerError)?
+        .security_attributes(
+            SecurityAttributes::allow_everyone_create()
+                .map_err(Error::SecurityAttributes)?
+                .mode(0o766)
+                .map_err(Error::SecurityAttributes)?,
+        );
     let incoming = endpoint.incoming().map_err(Error::StartServerError)?;
 
     #[cfg(unix)]
@@ -159,8 +176,7 @@ pub fn spawn_rpc_server<T: ManagementService, F: Future<Output = ()> + Send + 's
         let group = nix::unistd::Group::from_name(group_name)
             .map_err(Error::ObtainGidError)?
             .ok_or(Error::NoGidError)?;
-        nix::unistd::chown(rpc_socket_path.as_ref(), None, Some(group.gid))
-            .map_err(Error::SetGidError)?;
+        nix::unistd::chown(&rpc_socket_path, None, Some(group.gid)).map_err(Error::SetGidError)?;
         fs::set_permissions(rpc_socket_path, PermissionsExt::from_mode(0o760))
             .map_err(Error::PermissionsError)?;
     }

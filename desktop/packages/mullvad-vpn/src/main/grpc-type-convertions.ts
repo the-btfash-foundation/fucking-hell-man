@@ -1,17 +1,18 @@
+import { types as grpcTypes } from 'management-interface';
+
 import {
   AccessMethod,
   AccessMethodSetting,
   AfterDisconnect,
   ApiAccessMethodSettings,
   AuthFailedError,
-  BridgeSettings,
   BridgesMethod,
-  BridgeState,
-  BridgeType,
   ConnectionConfig,
   Constraint,
   CustomLists,
   CustomProxy,
+  DaemonAppUpgradeError,
+  DaemonAppUpgradeEvent,
   DaemonEvent,
   DeviceEvent,
   DeviceState,
@@ -23,12 +24,10 @@ import {
   FeatureIndicator,
   FirewallPolicyError,
   FirewallPolicyErrorType,
-  IBridgeConstraints,
+  IAppVersionInfo,
   ICustomList,
   IDevice,
   IObfuscationEndpoint,
-  IOpenVpnConstraints,
-  IProxyEndpoint,
   IRelayListCity,
   IRelayListCountry,
   IRelayListHostname,
@@ -42,23 +41,21 @@ import {
   LoggedInDeviceState,
   LoggedOutDeviceState,
   NewAccessMethodSetting,
+  NewCustomList,
   ObfuscationSettings,
   ObfuscationType,
   Ownership,
-  ProxyType,
-  RelayEndpointType,
+  Quic,
   RelayLocation,
   RelayLocationGeographical,
   RelayProtocol,
   RelaySettings,
   SocksAuth,
   TunnelParameterError,
-  TunnelProtocol,
   TunnelState,
-  TunnelType,
   wrapConstraint,
 } from '../shared/daemon-rpc-types';
-import * as grpcTypes from './management_interface/management_interface_pb';
+import { parseChangelog } from './changelog';
 
 export class ResponseParseError extends Error {
   constructor(message: string) {
@@ -80,7 +77,7 @@ export function convertFromRelayList(relayList: grpcTypes.RelayList): IRelayList
         .getCountriesList()
         .map((country: grpcTypes.RelayListCountry) => convertFromRelayListCountry(country)),
     },
-    wireguardEndpointData: convertWireguardEndpointData(relayList.getWireguard()!),
+    wireguardEndpointData: convertWireguardEndpointData(relayList.getEndpointData()!),
   };
 }
 
@@ -112,28 +109,26 @@ function convertFromRelayListCity(city: grpcTypes.RelayListCity): IRelayListCity
 function convertFromRelayListRelay(relay: grpcTypes.Relay): IRelayListHostname {
   const relayObject = relay.toObject();
 
-  let daita = false;
-  if (relayObject.endpointType === grpcTypes.Relay.RelayType.WIREGUARD) {
-    const endpointDataU8 = relay.getEndpointData()?.getValue_asU8();
-    if (endpointDataU8) {
-      daita = grpcTypes.WireguardRelayEndpointData.deserializeBinary(endpointDataU8).getDaita();
-    }
-  }
+  const endpointData = relayObject.endpointData;
+
+  const daita = endpointData ? endpointData.daita : false;
+  const quic = endpointData?.quic ? quicFromRelayType(endpointData.quic) : undefined;
+  const lwo = endpointData ? endpointData.lwo : false;
 
   return {
     ...relayObject,
-    endpointType: convertFromRelayType(relayObject.endpointType),
     daita,
+    quic,
+    lwo,
   };
 }
 
-function convertFromRelayType(relayType: grpcTypes.Relay.RelayType): RelayEndpointType {
-  const protocolMap: Record<grpcTypes.Relay.RelayType, RelayEndpointType> = {
-    [grpcTypes.Relay.RelayType.OPENVPN]: 'openvpn',
-    [grpcTypes.Relay.RelayType.BRIDGE]: 'bridge',
-    [grpcTypes.Relay.RelayType.WIREGUARD]: 'wireguard',
+function quicFromRelayType(quic: grpcTypes.Relay.WireguardEndpoint.Quic.AsObject): Quic {
+  return {
+    domain: quic.domain,
+    token: quic.token,
+    addrIn: quic.addrInList,
   };
-  return protocolMap[relayType];
 }
 
 function convertFromWireguardKey(publicKey: Uint8Array | string): string {
@@ -162,6 +157,7 @@ export function convertFromTunnelState(
       return {
         state: 'disconnected',
         location: tunnelStateObject.disconnected!.disconnectedLocation,
+        lockedDown: tunnelStateObject.disconnected!.lockedDown,
       };
     case grpcTypes.TunnelState.StateCase.DISCONNECTING: {
       const detailsMap: Record<grpcTypes.AfterDisconnect, AfterDisconnect> = {
@@ -312,13 +308,17 @@ function convertFromParameterError(
 ): TunnelParameterError {
   switch (error) {
     case grpcTypes.ErrorState.GenerationError.NO_MATCHING_RELAY:
+    case grpcTypes.ErrorState.GenerationError.NO_MATCHING_RELAY_ENTRY:
+    case grpcTypes.ErrorState.GenerationError.NO_MATCHING_RELAY_EXIT:
       return TunnelParameterError.noMatchingRelay;
     case grpcTypes.ErrorState.GenerationError.NO_MATCHING_BRIDGE_RELAY:
       return TunnelParameterError.noMatchingBridgeRelay;
-    case grpcTypes.ErrorState.GenerationError.NO_WIREGUARD_KEY:
-      return TunnelParameterError.noWireguardKey;
     case grpcTypes.ErrorState.GenerationError.CUSTOM_TUNNEL_HOST_RESOLUTION_ERROR:
       return TunnelParameterError.customTunnelHostResolutionError;
+    case grpcTypes.ErrorState.GenerationError.NETWORK_IPV4_UNAVAILABLE:
+      return TunnelParameterError.ipv4Unavailable;
+    case grpcTypes.ErrorState.GenerationError.NETWORK_IPV6_UNAVAILABLE:
+      return TunnelParameterError.ipv6Unavailable;
   }
 }
 
@@ -330,12 +330,16 @@ function convertFromTunnelStateRelayInfo(
       ...state,
       endpoint: {
         ...state.tunnelEndpoint,
-        tunnelType: convertFromTunnelType(state.tunnelEndpoint.tunnelType),
         protocol: convertFromTransportProtocol(state.tunnelEndpoint.protocol),
-        proxy: state.tunnelEndpoint.proxy && convertFromProxyEndpoint(state.tunnelEndpoint.proxy),
         obfuscationEndpoint:
           state.tunnelEndpoint.obfuscation &&
-          convertFromObfuscationEndpoint(state.tunnelEndpoint.obfuscation),
+          state.tunnelEndpoint.obfuscation.single &&
+          state.tunnelEndpoint.obfuscation.single.endpoint &&
+          // TODO: Handle multiplexer?
+          convertFromObfuscationEndpoint(
+            state.tunnelEndpoint.obfuscation.single.obfuscationType,
+            state.tunnelEndpoint.obfuscation.single.endpoint,
+          ),
         entryEndpoint:
           state.tunnelEndpoint.entryEndpoint &&
           convertFromEntryEndpoint(state.tunnelEndpoint.entryEndpoint),
@@ -359,8 +363,6 @@ function convertFromFeatureIndicator(
       return FeatureIndicator.quantumResistance;
     case grpcTypes.FeatureIndicator.MULTIHOP:
       return FeatureIndicator.multihop;
-    case grpcTypes.FeatureIndicator.BRIDGE_MODE:
-      return FeatureIndicator.bridgeMode;
     case grpcTypes.FeatureIndicator.SPLIT_TUNNELING:
       return FeatureIndicator.splitTunneling;
     case grpcTypes.FeatureIndicator.LOCKDOWN_MODE:
@@ -377,56 +379,47 @@ function convertFromFeatureIndicator(
       return FeatureIndicator.serverIpOverride;
     case grpcTypes.FeatureIndicator.CUSTOM_MTU:
       return FeatureIndicator.customMtu;
-    case grpcTypes.FeatureIndicator.CUSTOM_MSS_FIX:
-      return FeatureIndicator.customMssFix;
     case grpcTypes.FeatureIndicator.DAITA:
       return FeatureIndicator.daita;
+    case grpcTypes.FeatureIndicator.DAITA_MULTIHOP:
+      return FeatureIndicator.daitaMultihop;
     case grpcTypes.FeatureIndicator.SHADOWSOCKS:
       return FeatureIndicator.shadowsocks;
+    case grpcTypes.FeatureIndicator.QUIC:
+      return FeatureIndicator.quic;
+    case grpcTypes.FeatureIndicator.LWO:
+      return FeatureIndicator.lwo;
+    case grpcTypes.FeatureIndicator.WIREGUARD_PORT:
+      return FeatureIndicator.wireGuardPort;
   }
 }
 
-function convertFromTunnelType(tunnelType: grpcTypes.TunnelType): TunnelType {
-  const tunnelTypeMap: Record<grpcTypes.TunnelType, TunnelType> = {
-    [grpcTypes.TunnelType.WIREGUARD]: 'wireguard',
-    [grpcTypes.TunnelType.OPENVPN]: 'openvpn',
-  };
-
-  return tunnelTypeMap[tunnelType];
-}
-
-function convertFromProxyEndpoint(proxyEndpoint: grpcTypes.ProxyEndpoint.AsObject): IProxyEndpoint {
-  const proxyTypeMap: Record<grpcTypes.ProxyEndpoint.ProxyType, ProxyType> = {
-    [grpcTypes.ProxyEndpoint.ProxyType.CUSTOM]: 'custom',
-    [grpcTypes.ProxyEndpoint.ProxyType.SHADOWSOCKS]: 'shadowsocks',
-  };
-
-  return {
-    ...proxyEndpoint,
-    protocol: convertFromTransportProtocol(proxyEndpoint.protocol),
-    proxyType: proxyTypeMap[proxyEndpoint.proxyType],
-  };
-}
-
 function convertFromObfuscationEndpoint(
-  obfuscationEndpoint: grpcTypes.ObfuscationEndpoint.AsObject,
+  obfuscationType: grpcTypes.ObfuscationEndpoint.ObfuscationType,
+  obfuscationEndpoint: grpcTypes.Endpoint.AsObject,
 ): IObfuscationEndpoint {
-  let obfuscationType: EndpointObfuscationType;
-  switch (obfuscationEndpoint.obfuscationType) {
+  let translatedType: EndpointObfuscationType;
+  switch (obfuscationType) {
     case grpcTypes.ObfuscationEndpoint.ObfuscationType.UDP2TCP:
-      obfuscationType = 'udp2tcp';
+      translatedType = 'udp2tcp';
       break;
     case grpcTypes.ObfuscationEndpoint.ObfuscationType.SHADOWSOCKS:
-      obfuscationType = 'shadowsocks';
+      translatedType = 'shadowsocks';
+      break;
+    case grpcTypes.ObfuscationEndpoint.ObfuscationType.QUIC:
+      translatedType = 'quic';
+      break;
+    case grpcTypes.ObfuscationEndpoint.ObfuscationType.LWO:
+      translatedType = 'lwo';
       break;
     default:
       throw new Error('unsupported obfuscation protocol');
   }
 
   return {
-    ...obfuscationEndpoint,
+    address: obfuscationEndpoint.address,
     protocol: convertFromTransportProtocol(obfuscationEndpoint.protocol),
-    obfuscationType: obfuscationType,
+    obfuscationType: translatedType,
   };
 }
 
@@ -439,9 +432,7 @@ function convertFromEntryEndpoint(entryEndpoint: grpcTypes.Endpoint.AsObject) {
 
 export function convertFromSettings(settings: grpcTypes.Settings): ISettings | undefined {
   const settingsObject = settings.toObject();
-  const bridgeState = convertFromBridgeState(settingsObject.bridgeState!.state!);
   const relaySettings = convertFromRelaySettings(settings.getRelaySettings())!;
-  const bridgeSettings = convertFromBridgeSettings(settings.getBridgeSettings()!);
   const tunnelOptions = convertFromTunnelOptions(settingsObject.tunnelOptions!);
   const splitTunnel = settingsObject.splitTunnel ?? { enableExclusions: false, appsList: [] };
   const obfuscationSettings = convertFromObfuscationSettings(settingsObject.obfuscationSettings);
@@ -450,9 +441,7 @@ export function convertFromSettings(settings: grpcTypes.Settings): ISettings | u
   const relayOverrides = settingsObject.relayOverridesList;
   return {
     ...settings.toObject(),
-    bridgeState,
     relaySettings,
-    bridgeSettings,
     tunnelOptions,
     splitTunnel,
     obfuscationSettings,
@@ -460,16 +449,6 @@ export function convertFromSettings(settings: grpcTypes.Settings): ISettings | u
     apiAccessMethods,
     relayOverrides,
   };
-}
-
-function convertFromBridgeState(bridgeState: grpcTypes.BridgeState.State): BridgeState {
-  const bridgeStateMap: Record<grpcTypes.BridgeState.State, BridgeState> = {
-    [grpcTypes.BridgeState.State.AUTO]: 'auto',
-    [grpcTypes.BridgeState.State.ON]: 'on',
-    [grpcTypes.BridgeState.State.OFF]: 'off',
-  };
-
-  return bridgeStateMap[bridgeState];
 }
 
 function convertFromRelaySettings(
@@ -497,13 +476,8 @@ function convertFromRelaySettings(
         const normal = relaySettings.getNormal()!;
         const locationConstraint = convertFromLocationConstraint(normal.getLocation());
         const location = wrapConstraint(locationConstraint);
-        // `getTunnelType()` is not falsy if type is 'any'
-        const tunnelProtocol = convertFromTunnelTypeConstraint(
-          normal.hasTunnelType() ? normal.getTunnelType() : undefined,
-        );
         const providers = normal.getProvidersList();
         const ownership = convertFromOwnership(normal.getOwnership());
-        const openvpnConstraints = convertFromOpenVpnConstraints(normal.getOpenvpnConstraints()!);
         const wireguardConstraints = convertFromWireguardConstraints(
           normal.getWireguardConstraints()!,
         );
@@ -511,11 +485,9 @@ function convertFromRelaySettings(
         return {
           normal: {
             location,
-            tunnelProtocol,
             providers,
             ownership,
             wireguardConstraints,
-            openvpnConstraints,
           },
         };
       }
@@ -525,77 +497,27 @@ function convertFromRelaySettings(
   }
 }
 
-function convertFromBridgeSettings(bridgeSettings: grpcTypes.BridgeSettings): BridgeSettings {
-  const bridgeSettingsObject = bridgeSettings.toObject();
-
-  const detailsMap: Record<grpcTypes.BridgeSettings.BridgeType, BridgeType> = {
-    [grpcTypes.BridgeSettings.BridgeType.NORMAL]: 'normal',
-    [grpcTypes.BridgeSettings.BridgeType.CUSTOM]: 'custom',
-  };
-  const type = detailsMap[bridgeSettingsObject.bridgeType];
-
-  const normalSettings = bridgeSettingsObject.normal;
-  const locationConstraint = convertFromLocationConstraint(
-    bridgeSettings.getNormal()?.getLocation(),
-  );
-  const location = wrapConstraint(locationConstraint);
-  const providers = normalSettings!.providersList;
-  const ownership = convertFromOwnership(normalSettings!.ownership);
-
-  const normal = {
-    location,
-    providers,
-    ownership,
-  };
-
-  const grpcCustom = bridgeSettings.getCustom();
-  const custom = grpcCustom ? convertFromCustomProxy(grpcCustom) : undefined;
-
-  return { type, normal, custom };
-}
-
 function convertFromConnectionConfig(
-  connectionConfig: grpcTypes.ConnectionConfig,
+  connectionConfig: grpcTypes.WireguardConfig,
 ): ConnectionConfig | undefined {
   const connectionConfigObject = connectionConfig.toObject();
-  switch (connectionConfig.getConfigCase()) {
-    case grpcTypes.ConnectionConfig.ConfigCase.CONFIG_NOT_SET:
-      return undefined;
-    case grpcTypes.ConnectionConfig.ConfigCase.WIREGUARD:
-      return (
-        connectionConfigObject.wireguard &&
-        connectionConfigObject.wireguard.tunnel &&
-        connectionConfigObject.wireguard.peer && {
-          wireguard: {
-            ...connectionConfigObject.wireguard,
-            tunnel: {
-              privateKey: convertFromWireguardKey(
-                connectionConfigObject.wireguard.tunnel.privateKey,
-              ),
-              addresses: connectionConfigObject.wireguard.tunnel.addressesList,
-            },
-            peer: {
-              ...connectionConfigObject.wireguard.peer,
-              addresses: connectionConfigObject.wireguard.peer.allowedIpsList,
-              publicKey: convertFromWireguardKey(connectionConfigObject.wireguard.peer.publicKey),
-            },
-          },
-        }
-      );
-    case grpcTypes.ConnectionConfig.ConfigCase.OPENVPN: {
-      const [ip, port] = connectionConfigObject.openvpn!.address.split(':');
-      return {
-        openvpn: {
-          ...connectionConfigObject.openvpn!,
-          endpoint: {
-            ip,
-            port: parseInt(port, 10),
-            protocol: convertFromTransportProtocol(connectionConfigObject.openvpn!.protocol),
-          },
+  return (
+    connectionConfigObject.tunnel &&
+    connectionConfigObject.peer && {
+      wireguard: {
+        ...connectionConfigObject,
+        tunnel: {
+          privateKey: convertFromWireguardKey(connectionConfigObject.tunnel.privateKey),
+          addresses: connectionConfigObject.tunnel.addressesList,
         },
-      };
+        peer: {
+          ...connectionConfigObject.peer,
+          addresses: connectionConfigObject.peer.allowedIpsList,
+          publicKey: convertFromWireguardKey(connectionConfigObject.peer.publicKey),
+        },
+      },
     }
-  }
+  );
 }
 
 function convertFromLocationConstraint(
@@ -630,19 +552,10 @@ function convertFromGeographicConstraint(
 
 function convertFromTunnelOptions(tunnelOptions: grpcTypes.TunnelOptions.AsObject): ITunnelOptions {
   return {
-    openvpn: {
-      mssfix: tunnelOptions.openvpn!.mssfix,
-    },
-    wireguard: {
-      mtu: tunnelOptions.wireguard!.mtu,
-      quantumResistant: convertFromQuantumResistantState(
-        tunnelOptions.wireguard?.quantumResistant?.state,
-      ),
-      daita: tunnelOptions.wireguard!.daita,
-    },
-    generic: {
-      enableIpv6: tunnelOptions.generic!.enableIpv6,
-    },
+    mtu: tunnelOptions.mtu,
+    quantumResistant: convertFromQuantumResistantState(tunnelOptions.quantumResistant?.state),
+    daita: tunnelOptions.daita,
+    enableIpv6: tunnelOptions.enableIpv6,
     dns: {
       state:
         tunnelOptions.dnsOptions?.state === grpcTypes.DnsOptions.DnsState.CUSTOM
@@ -663,15 +576,12 @@ function convertFromTunnelOptions(tunnelOptions: grpcTypes.TunnelOptions.AsObjec
   };
 }
 
-function convertFromQuantumResistantState(
-  state?: grpcTypes.QuantumResistantState.State,
-): boolean | undefined {
+function convertFromQuantumResistantState(state?: grpcTypes.QuantumResistantState.State): boolean {
   return state === undefined
-    ? undefined
+    ? true // default value
     : {
         [grpcTypes.QuantumResistantState.State.ON]: true,
         [grpcTypes.QuantumResistantState.State.OFF]: false,
-        [grpcTypes.QuantumResistantState.State.AUTO]: undefined,
       }[state];
 }
 
@@ -689,6 +599,15 @@ function convertFromObfuscationSettings(
     case grpcTypes.ObfuscationSettings.SelectedObfuscation.SHADOWSOCKS:
       selectedObfuscationType = ObfuscationType.shadowsocks;
       break;
+    case grpcTypes.ObfuscationSettings.SelectedObfuscation.QUIC:
+      selectedObfuscationType = ObfuscationType.quic;
+      break;
+    case grpcTypes.ObfuscationSettings.SelectedObfuscation.LWO:
+      selectedObfuscationType = ObfuscationType.lwo;
+      break;
+    case grpcTypes.ObfuscationSettings.SelectedObfuscation.WIREGUARD_PORT:
+      selectedObfuscationType = ObfuscationType.wireGuardPort;
+      break;
   }
 
   return {
@@ -699,7 +618,86 @@ function convertFromObfuscationSettings(
     shadowsocksSettings: obfuscationSettings?.shadowsocks
       ? { port: convertFromConstraint(obfuscationSettings.shadowsocks.port) }
       : { port: 'any' },
+    wireGuardPortSettings: obfuscationSettings?.wireguardPort
+      ? { port: convertFromConstraint(obfuscationSettings.wireguardPort.port) }
+      : { port: 'any' },
   };
+}
+
+function convertFromAppUpgradeError(error: grpcTypes.AppUpgradeError.Error): DaemonAppUpgradeError {
+  switch (error) {
+    case grpcTypes.AppUpgradeError.Error.DOWNLOAD_FAILED:
+      return 'DOWNLOAD_FAILED';
+    case grpcTypes.AppUpgradeError.Error.VERIFICATION_FAILED:
+      return 'VERIFICATION_FAILED';
+    default:
+      return 'GENERAL_ERROR';
+  }
+}
+
+export function convertFromAppUpgradeEvent(data: grpcTypes.AppUpgradeEvent): DaemonAppUpgradeEvent {
+  const downloadStartingData = data.getDownloadStarting();
+  if (downloadStartingData !== undefined) {
+    return { type: 'APP_UPGRADE_STATUS_DOWNLOAD_STARTED' };
+  }
+
+  const downloadProgressData = data.getDownloadProgress();
+  if (downloadProgressData !== undefined) {
+    const [server, progress, timeLeftDuration] = [
+      downloadProgressData.getServer(),
+      downloadProgressData.getProgress(),
+      downloadProgressData.getTimeLeft(),
+    ];
+
+    const timeLeft = timeLeftDuration?.getSeconds();
+
+    return { type: 'APP_UPGRADE_STATUS_DOWNLOAD_PROGRESS', server, progress, timeLeft };
+  }
+
+  if (data.hasUpgradeAborted()) {
+    return { type: 'APP_UPGRADE_STATUS_ABORTED' };
+  }
+
+  if (data.hasVerifyingInstaller()) {
+    return { type: 'APP_UPGRADE_STATUS_VERIFYING_INSTALLER' };
+  }
+
+  if (data.hasVerifiedInstaller()) {
+    return { type: 'APP_UPGRADE_STATUS_VERIFIED_INSTALLER' };
+  }
+
+  const errorData = data.getError();
+  if (errorData !== undefined) {
+    const error = errorData.getError();
+
+    return {
+      type: 'APP_UPGRADE_ERROR',
+      error: convertFromAppUpgradeError(error),
+    };
+  }
+
+  // Handle unknown AppUpgradeEvent messages
+  const keys = Object.entries(data.toObject())
+    .filter(([, value]) => value !== undefined)
+    .map(([key]) => key);
+  throw new Error(`Unknown app upgrade event received containing ${keys}`);
+}
+
+export function convertFromAppVersionInfo(data: grpcTypes.AppVersionInfo): IAppVersionInfo {
+  const { suggestedUpgrade, ...appVersionInfo } = data.toObject();
+  const changelog = suggestedUpgrade?.changelog ? parseChangelog(suggestedUpgrade?.changelog) : [];
+
+  if (suggestedUpgrade) {
+    return {
+      ...appVersionInfo,
+      suggestedUpgrade: {
+        ...suggestedUpgrade,
+        changelog,
+      },
+    };
+  }
+
+  return appVersionInfo;
 }
 
 export function convertFromDaemonEvent(data: grpcTypes.DaemonEvent): DaemonEvent {
@@ -730,7 +728,7 @@ export function convertFromDaemonEvent(data: grpcTypes.DaemonEvent): DaemonEvent
 
   const versionInfo = data.getVersionInfo();
   if (versionInfo !== undefined) {
-    return { appVersionInfo: versionInfo.toObject() };
+    return { appVersionInfo: convertFromAppVersionInfo(versionInfo) };
   }
 
   const newAccessMethod = data.getNewAccessMethod();
@@ -767,40 +765,14 @@ function convertToOwnership(ownership: Ownership): grpcTypes.Ownership {
   }
 }
 
-function convertFromOpenVpnConstraints(
-  constraints: grpcTypes.OpenvpnConstraints,
-): IOpenVpnConstraints {
-  const transportPort = convertFromConstraint(constraints.getPort());
-  if (transportPort !== 'any' && 'only' in transportPort) {
-    const port = convertFromConstraint(transportPort.only.getPort());
-    let protocol: Constraint<RelayProtocol> = 'any';
-    switch (transportPort.only.getProtocol()) {
-      case grpcTypes.TransportProtocol.TCP:
-        protocol = { only: 'tcp' };
-        break;
-      case grpcTypes.TransportProtocol.UDP:
-        protocol = { only: 'udp' };
-        break;
-    }
-    return { port, protocol };
-  }
-  return { port: 'any', protocol: 'any' };
-}
-
 function convertFromWireguardConstraints(
   constraints: grpcTypes.WireguardConstraints,
 ): IWireguardConstraints {
   const result: IWireguardConstraints = {
-    port: 'any',
     ipVersion: 'any',
     useMultihop: constraints.getUseMultihop(),
     entryLocation: 'any',
   };
-
-  const port = constraints.getPort();
-  if (port) {
-    result.port = { only: port };
-  }
 
   // `getIpVersion()` is not falsy if type is 'any'
   if (constraints.hasIpVersion()) {
@@ -823,22 +795,6 @@ function convertFromWireguardConstraints(
   return result;
 }
 
-function convertFromTunnelTypeConstraint(
-  constraint: grpcTypes.TunnelType | undefined,
-): Constraint<TunnelProtocol> {
-  switch (constraint) {
-    case grpcTypes.TunnelType.WIREGUARD: {
-      return { only: 'wireguard' };
-    }
-    case grpcTypes.TunnelType.OPENVPN: {
-      return { only: 'openvpn' };
-    }
-    default: {
-      return 'any';
-    }
-  }
-}
-
 function convertFromConstraint<T>(value: T | undefined): Constraint<T> {
   if (value) {
     return { only: value };
@@ -848,34 +804,18 @@ function convertFromConstraint<T>(value: T | undefined): Constraint<T> {
 }
 
 export function convertToRelayConstraints(
-  constraints: IRelaySettingsNormal<IOpenVpnConstraints, IWireguardConstraints>,
+  constraints: IRelaySettingsNormal,
 ): grpcTypes.NormalRelaySettings {
   const relayConstraints = new grpcTypes.NormalRelaySettings();
 
-  if (constraints.tunnelProtocol !== 'any') {
-    relayConstraints.setTunnelType(convertToTunnelType(constraints.tunnelProtocol.only));
-  }
   relayConstraints.setLocation(convertToLocation(unwrapConstraint(constraints.location)));
   relayConstraints.setWireguardConstraints(
     convertToWireguardConstraints(constraints.wireguardConstraints),
-  );
-  relayConstraints.setOpenvpnConstraints(
-    convertToOpenVpnConstraints(constraints.openvpnConstraints),
   );
   relayConstraints.setProvidersList(constraints.providers);
   relayConstraints.setOwnership(convertToOwnership(constraints.ownership));
 
   return relayConstraints;
-}
-
-export function convertToNormalBridgeSettings(
-  constraints: IBridgeConstraints,
-): grpcTypes.BridgeSettings.BridgeConstraints {
-  const normalBridgeSettings = new grpcTypes.BridgeSettings.BridgeConstraints();
-  normalBridgeSettings.setLocation(convertToLocation(unwrapConstraint(constraints.location)));
-  normalBridgeSettings.setProvidersList(constraints.providers);
-
-  return normalBridgeSettings;
 }
 
 function convertToLocation(
@@ -910,46 +850,11 @@ function convertToGeographicConstraint(
   return relayLocation;
 }
 
-function convertToTunnelType(tunnelProtocol: TunnelProtocol): grpcTypes.TunnelType {
-  switch (tunnelProtocol) {
-    case 'wireguard':
-      return grpcTypes.TunnelType.WIREGUARD;
-    case 'openvpn':
-      return grpcTypes.TunnelType.OPENVPN;
-  }
-}
-
-function convertToOpenVpnConstraints(
-  constraints: Partial<IOpenVpnConstraints> | undefined,
-): grpcTypes.OpenvpnConstraints | undefined {
-  const openvpnConstraints = new grpcTypes.OpenvpnConstraints();
-  if (constraints) {
-    const protocol = unwrapConstraint(constraints.protocol);
-    if (protocol) {
-      const portConstraints = new grpcTypes.TransportPort();
-      const port = unwrapConstraint(constraints.port);
-      if (port) {
-        portConstraints.setPort(port);
-      }
-      portConstraints.setProtocol(convertToTransportProtocol(protocol));
-      openvpnConstraints.setPort(portConstraints);
-    }
-    return openvpnConstraints;
-  }
-
-  return undefined;
-}
-
 function convertToWireguardConstraints(
   constraint: Partial<IWireguardConstraints> | undefined,
 ): grpcTypes.WireguardConstraints | undefined {
   if (constraint) {
     const wireguardConstraints = new grpcTypes.WireguardConstraints();
-
-    const port = unwrapConstraint(constraint.port);
-    if (port) {
-      wireguardConstraints.setPort(port);
-    }
 
     const ipVersion = unwrapConstraint(constraint.ipVersion);
     if (ipVersion) {
@@ -1270,6 +1175,14 @@ function convertFromSocksAuth(auth: grpcTypes.SocksAuth): SocksAuth {
     username: auth.getUsername(),
     password: auth.getPassword(),
   };
+}
+
+export function convertToNewCustomList(customList: NewCustomList): grpcTypes.NewCustomList {
+  const newCustomList = new grpcTypes.NewCustomList();
+  newCustomList.setName(customList.name);
+  const locations = customList.locations.map(convertToGeographicConstraint);
+  newCustomList.setLocationsList(locations);
+  return newCustomList;
 }
 
 export function ensureExists<T>(value: T | undefined, errorMessage: string): T {

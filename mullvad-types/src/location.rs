@@ -55,6 +55,21 @@ impl From<Location> for Coordinates {
     }
 }
 
+impl From<&GeoIpLocation> for Coordinates {
+    fn from(location: &GeoIpLocation) -> Self {
+        Self {
+            latitude: location.latitude,
+            longitude: location.longitude,
+        }
+    }
+}
+
+impl From<GeoIpLocation> for Coordinates {
+    fn from(location: GeoIpLocation) -> Self {
+        Coordinates::from(&location)
+    }
+}
+
 impl Coordinates {
     /// Computes the approximate midpoint of a set of locations.
     ///
@@ -144,7 +159,6 @@ pub struct GeoIpLocation {
     pub longitude: f64,
     pub mullvad_exit_ip: bool,
     pub hostname: Option<String>,
-    pub bridge_hostname: Option<String>,
     pub entry_hostname: Option<String>,
     pub obfuscator_hostname: Option<String>,
 }
@@ -165,7 +179,6 @@ impl From<AmIMullvad> for GeoIpLocation {
             longitude: location.longitude,
             mullvad_exit_ip: location.mullvad_exit_ip,
             hostname: None,
-            bridge_hostname: None,
             entry_hostname: None,
             obfuscator_hostname: None,
         }
@@ -213,40 +226,44 @@ mod tests {
 
     #[test]
     fn test_midpoint() {
-        assert!(Coordinates::midpoint_inner(
-            [
-                Coordinates {
-                    latitude: 0.0,
-                    longitude: 90.0,
-                },
-                Coordinates {
-                    latitude: 90.0,
-                    longitude: 0.0,
-                },
-            ]
-            .into_iter()
-        )
-        .equal(Coordinates {
-            latitude: 45.0,
-            longitude: 90.0,
-        }));
+        assert!(
+            Coordinates::midpoint_inner(
+                [
+                    Coordinates {
+                        latitude: 0.0,
+                        longitude: 90.0,
+                    },
+                    Coordinates {
+                        latitude: 90.0,
+                        longitude: 0.0,
+                    },
+                ]
+                .into_iter()
+            )
+            .equal(Coordinates {
+                latitude: 45.0,
+                longitude: 90.0,
+            })
+        );
 
-        assert!(Coordinates::midpoint_inner(
-            [
-                Coordinates {
-                    latitude: -20.0,
-                    longitude: 90.0,
-                },
-                Coordinates {
-                    latitude: -20.0,
-                    longitude: -90.0,
-                },
-            ]
-            .into_iter()
-        )
-        .equal(Coordinates {
-            latitude: -90.0,
-            longitude: 0.0,
-        }));
+        assert!(
+            Coordinates::midpoint_inner(
+                [
+                    Coordinates {
+                        latitude: -20.0,
+                        longitude: 90.0,
+                    },
+                    Coordinates {
+                        latitude: -20.0,
+                        longitude: -90.0,
+                    },
+                ]
+                .into_iter()
+            )
+            .equal(Coordinates {
+                latitude: -90.0,
+                longitude: 0.0,
+            })
+        );
     }
 }

@@ -2,9 +2,9 @@ use super::{Error, Result};
 use std::{net::SocketAddr, slice};
 use talpid_types::win32_err;
 use talpid_windows::net::{
-    get_ip_interface_entry, try_socketaddr_from_inet_sockaddr, AddressFamily,
+    AddressFamily, get_ip_interface_entry, try_socketaddr_from_inet_sockaddr,
 };
-use widestring::{widecstr, WideCStr};
+use widestring::{WideCStr, widecstr};
 use windows_sys::Win32::NetworkManagement::{
     IpHelper::{
         FreeMibTable, GetIfEntry2, GetIpForwardTable2, IF_TYPE_SOFTWARE_LOOPBACK, IF_TYPE_TUNNEL,
@@ -26,7 +26,7 @@ fn get_ip_forward_table(family: AddressFamily) -> Result<Vec<MIB_IPFORWARD_ROW2>
 
     // SAFETY: GetIpForwardTable2 does not have clear safety specifications however what it does is
     // heap allocate a IpForwardTable2 and then change table_ptr to point to that allocation.
-    win32_err!(unsafe { GetIpForwardTable2(family, &mut table_ptr) })
+    win32_err!(unsafe { GetIpForwardTable2(family, &raw mut table_ptr) })
         .map_err(Error::GetIpForwardTableFailed)?;
 
     // SAFETY: table_ptr is valid since GetIpForwardTable2 did not return an error
@@ -114,8 +114,7 @@ fn is_route_on_physical_interface(route: &MIB_IPFORWARD_ROW2) -> Result<bool> {
         return Ok(false);
     }
 
-    // OpenVPN uses interface type IF_TYPE_PROP_VIRTUAL,
-    // but tethering etc. may rely on virtual adapters too,
+    // Tethering etc. may rely on virtual adapters,
     // so we have to filter out the TAP adapter specifically.
 
     // SAFETY: We are allowed to initialize MIB_IF_ROW2 with zeroed because it is made up entirely
@@ -127,7 +126,7 @@ fn is_route_on_physical_interface(route: &MIB_IPFORWARD_ROW2) -> Result<bool> {
     // SAFETY: GetIfEntry2 does not have clear safety rules however it will read the
     // row.InterfaceLuid or row.InterfaceIndex and use that information to populate the struct.
     // We guarantee here that these fields are valid since they are set.
-    win32_err!(unsafe { GetIfEntry2(&mut row) }).map_err(Error::GetIfEntryFailed)?;
+    win32_err!(unsafe { GetIfEntry2(&raw mut row) }).map_err(Error::GetIfEntryFailed)?;
 
     let row_description = WideCStr::from_slice_truncate(&row.Description)
         .expect("Windows provided incorrectly formatted utf16 string");
@@ -153,20 +152,18 @@ struct AnnotatedRoute<'a> {
 }
 
 fn annotate_route(route: &MIB_IPFORWARD_ROW2) -> Option<AnnotatedRoute<'_>> {
-    // SAFETY: `si_family` is valid in both `Ipv4` and `Ipv6` so we can safely access `si_family`.
     let iface = get_ip_interface_entry(
-        AddressFamily::try_from_af_family(unsafe { route.DestinationPrefix.Prefix.si_family })
-            .ok()?,
+        AddressFamily::try_from_af_family(
+            // SAFETY: `si_family` is valid in both `Ipv4` and `Ipv6` so we can safely access `si_family`.
+            unsafe { route.DestinationPrefix.Prefix.si_family },
+        )
+        .ok()?,
         &route.InterfaceLuid,
     )
     .ok()?;
 
-    if iface.Connected == 0 {
-        None
-    } else {
-        Some(AnnotatedRoute {
-            route,
-            effective_metric: route.Metric + iface.Metric,
-        })
-    }
+    iface.Connected.then(|| AnnotatedRoute {
+        route,
+        effective_metric: route.Metric + iface.Metric,
+    })
 }

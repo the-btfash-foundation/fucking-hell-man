@@ -1,5 +1,6 @@
+import { MotionConfig } from 'motion/react';
 import { StrictMode } from 'react';
-import { batch, Provider } from 'react-redux';
+import { Provider } from 'react-redux';
 import { Router } from 'react-router';
 import { bindActionCreators } from 'redux';
 import { StyleSheetManager } from 'styled-components';
@@ -9,14 +10,13 @@ import {
   ILinuxSplitTunnelingApplication,
   ISplitTunnelingApplication,
 } from '../shared/application-types';
+import { Url } from '../shared/constants';
 import {
   AccessMethodSetting,
   AccountNumber,
-  BridgeSettings,
-  BridgeState,
   CustomProxy,
   DeviceEvent,
-  DeviceState,
+  DisconnectSource,
   IAccountData,
   IAppVersionInfo,
   ICustomList,
@@ -27,30 +27,39 @@ import {
   IRelayListWithEndpointData,
   ISettings,
   liftConstraint,
+  LogoutSource,
   NewAccessMethodSetting,
+  NewCustomList,
   ObfuscationSettings,
   RelaySettings,
   TunnelState,
 } from '../shared/daemon-rpc-types';
 import { messages, relayLocations } from '../shared/gettext';
 import { IGuiSettingsState, SYSTEM_PREFERRED_LOCALE_KEY } from '../shared/gui-settings-state';
-import { IChangelog, ICurrentAppVersionInfo, IHistoryObject } from '../shared/ipc-types';
+import {
+  DaemonStatus,
+  IChangelog,
+  ICurrentAppVersionInfo,
+  IHistoryObject,
+} from '../shared/ipc-types';
 import log, { ConsoleOutput } from '../shared/logging';
 import { LogLevel } from '../shared/logging-types';
+import { RoutePath } from '../shared/routes';
 import { Scheduler } from '../shared/scheduler';
 import AppRouter from './components/AppRouter';
 import ErrorBoundary from './components/ErrorBoundary';
-import KeyboardNavigation from './components/KeyboardNavigation';
+import { KeyboardNavigation } from './components/keyboard-navigation';
 import Lang from './components/Lang';
 import MacOsScrollbarDetection from './components/MacOsScrollbarDetection';
 import { ModalContainer } from './components/Modal';
 import { AppContext } from './context';
 import { Theme } from './lib/components';
-import History, { ITransitionSpecification, transitions } from './lib/history';
+import { getNavigationBase } from './lib/functions/navigation-base';
+import History from './lib/history';
 import { loadTranslations } from './lib/load-translations';
 import IpcOutput from './lib/logging';
-import { RoutePath } from './lib/routes';
 import accountActions from './redux/account/actions';
+import { appUpgradeActions } from './redux/app-upgrade/actions';
 import connectionActions from './redux/connection/actions';
 import settingsActions from './redux/settings/actions';
 import configureStore from './redux/store';
@@ -89,11 +98,16 @@ const SUPPORTED_LOCALE_LIST = [
   { name: '繁體中文', code: 'zh-TW' },
 ];
 
+if (window.env.development) {
+  SUPPORTED_LOCALE_LIST.push({ name: 'Rövarspråket', code: 'sv-rö' });
+}
+
 export default class AppRenderer {
   private history: History;
   private reduxStore = configureStore();
   private reduxActions = {
     account: bindActionCreators(accountActions, this.reduxStore.dispatch),
+    appUpgrade: bindActionCreators(appUpgradeActions, this.reduxStore.dispatch),
     connection: bindActionCreators(connectionActions, this.reduxStore.dispatch),
     settings: bindActionCreators(settingsActions, this.reduxStore.dispatch),
     version: bindActionCreators(versionActions, this.reduxStore.dispatch),
@@ -104,9 +118,7 @@ export default class AppRenderer {
   private relayList?: IRelayListWithEndpointData;
   private tunnelState!: TunnelState;
   private settings!: ISettings;
-  private deviceState?: DeviceState;
   private loginState: LoginState = 'none';
-  private previousLoginState: LoginState = 'none';
   private connectedToDaemon = false;
 
   private loginScheduler = new Scheduler();
@@ -156,12 +168,12 @@ export default class AppRenderer {
 
     IpcRendererEventChannel.tunnel.listen((newState: TunnelState) => {
       this.setTunnelState(newState);
-      this.updateBlockedState(newState, this.settings.blockWhenDisconnected);
+      this.updateBlockedState(newState);
     });
 
     IpcRendererEventChannel.settings.listen((newSettings: ISettings) => {
       this.setSettings(newSettings);
-      this.updateBlockedState(this.tunnelState, newSettings.blockWhenDisconnected);
+      this.updateBlockedState(this.tunnelState);
     });
 
     IpcRendererEventChannel.settings.listenApiAccessMethodSettingChange((setting) => {
@@ -172,12 +184,81 @@ export default class AppRenderer {
       this.setRelayListPair(relayListPair);
     });
 
+    IpcRendererEventChannel.daemon.listenTryStartEvent((status: DaemonStatus) => {
+      this.reduxActions.userInterface.setDaemonStatus(status);
+    });
+
+    IpcRendererEventChannel.app.listenUpgradeEvent((appUpgradeEvent) => {
+      this.reduxActions.appUpgrade.setAppUpgradeEvent(appUpgradeEvent);
+
+      if (appUpgradeEvent.type === 'APP_UPGRADE_STATUS_DOWNLOAD_PROGRESS') {
+        this.reduxActions.appUpgrade.setLastProgress(appUpgradeEvent.progress);
+      }
+
+      // Ensure progress is updated to 100%, since the daemon doesn't send the last event
+      if (
+        appUpgradeEvent.type === 'APP_UPGRADE_STATUS_VERIFYING_INSTALLER' ||
+        appUpgradeEvent.type === 'APP_UPGRADE_STATUS_VERIFIED_INSTALLER'
+      ) {
+        this.reduxActions.appUpgrade.setLastProgress(100);
+      }
+
+      // Check if the installer should be started automatically
+      this.appUpgradeMaybeStartInstaller();
+    });
+
+    IpcRendererEventChannel.app.listenUpgradeError((appUpgradeError) => {
+      this.reduxActions.appUpgrade.setAppUpgradeError(appUpgradeError);
+    });
+
     IpcRendererEventChannel.currentVersion.listen((currentVersion: ICurrentAppVersionInfo) => {
       this.setCurrentVersion(currentVersion);
     });
 
     IpcRendererEventChannel.upgradeVersion.listen((upgradeVersion: IAppVersionInfo) => {
+      const reduxStore = this.reduxStore.getState();
+      const currentSuggestedUpgrade = reduxStore.version.suggestedUpgrade;
+      const newSuggestedUpgrade = upgradeVersion.suggestedUpgrade;
+
+      if (currentSuggestedUpgrade && newSuggestedUpgrade) {
+        if (currentSuggestedUpgrade.version !== newSuggestedUpgrade.version) {
+          log.info('Resetting app upgrade state as suggested upgrade version changed.');
+          this.reduxActions.appUpgrade.resetAppUpgrade();
+        } else if (
+          currentSuggestedUpgrade.verifiedInstallerPath &&
+          !newSuggestedUpgrade.verifiedInstallerPath
+        ) {
+          log.info(
+            'Resetting app upgrade state as verified installer path was cleared in new suggested upgrade.',
+          );
+          this.reduxActions.appUpgrade.resetAppUpgrade();
+        } else if (
+          !currentSuggestedUpgrade.verifiedInstallerPath &&
+          newSuggestedUpgrade.verifiedInstallerPath
+        ) {
+          const { verifiedInstallerPath, version } = newSuggestedUpgrade;
+          log.info(
+            `Received updated suggested upgrade ${version} with verified installer path: ${verifiedInstallerPath}`,
+          );
+        }
+      } else if (currentSuggestedUpgrade && !newSuggestedUpgrade) {
+        log.info('Resetting app upgrade state as suggested upgrade was cleared.');
+        this.reduxActions.appUpgrade.resetAppUpgrade();
+      } else if (!currentSuggestedUpgrade && newSuggestedUpgrade) {
+        const { verifiedInstallerPath, version } = newSuggestedUpgrade;
+        if (verifiedInstallerPath) {
+          log.info(
+            `Received new suggested upgrade ${version} with verified installer path: ${verifiedInstallerPath}`,
+          );
+        } else if (!currentSuggestedUpgrade) {
+          log.info(`Received new suggested upgrade: ${version}`);
+        }
+      }
+
       this.setUpgradeVersion(upgradeVersion);
+
+      // Check if the installer should be started automatically
+      this.appUpgradeMaybeStartInstaller();
     });
 
     IpcRendererEventChannel.guiSettings.listen((guiSettings: IGuiSettingsState) => {
@@ -192,6 +273,10 @@ export default class AppRenderer {
       this.reduxActions.settings.setSplitTunnelingApplications(applications);
     });
 
+    IpcRendererEventChannel.splitTunneling.listenIsSupported((supported: boolean) => {
+      this.reduxActions.settings.setSplitTunnelingSupported(supported);
+    });
+
     IpcRendererEventChannel.window.listenFocus((focus: boolean) => {
       this.reduxActions.userInterface.setWindowFocused(focus);
     });
@@ -201,6 +286,12 @@ export default class AppRenderer {
     });
 
     IpcRendererEventChannel.navigation.listenReset(() => this.history.pop(true));
+
+    IpcRendererEventChannel.app.listenOpenRoute((route: RoutePath) => {
+      this.history.push({
+        routePath: route,
+      });
+    });
 
     // Request the initial state from the main process
     const initialState = IpcRendererEventChannel.state.get();
@@ -226,17 +317,14 @@ export default class AppRenderer {
 
     if (initialState.deviceState) {
       const deviceState = initialState.deviceState;
-      this.handleDeviceEvent(
-        { type: deviceState.type, deviceState } as DeviceEvent,
-        initialState.navigationHistory !== undefined,
-      );
+      this.handleDeviceEvent({ type: deviceState.type, deviceState } as DeviceEvent);
     }
     // Login state and account needs to be set before expiry.
     this.setAccountExpiry(initialState.accountData?.expiry);
 
     this.setAccountHistory(initialState.accountHistory);
     this.setTunnelState(initialState.tunnelState);
-    this.updateBlockedState(initialState.tunnelState, initialState.settings.blockWhenDisconnected);
+    this.updateBlockedState(initialState.tunnelState);
 
     this.setRelayListPair(initialState.relayList);
     this.setCurrentVersion(initialState.currentVersion);
@@ -275,7 +363,8 @@ export default class AppRenderer {
       initialState.navigationHistory.lastAction = 'POP';
       this.history = History.fromSavedHistory(initialState.navigationHistory);
     } else {
-      const navigationBase = this.getNavigationBase();
+      const loginState = this.reduxStore.getState().account.status;
+      const navigationBase = getNavigationBase(this.connectedToDaemon, loginState);
       this.history = new History(navigationBase);
     }
 
@@ -293,16 +382,18 @@ export default class AppRenderer {
             <StyleSheetManager enableVendorPrefixes>
               <Lang>
                 <Router history={this.history.asHistory}>
-                  <ErrorBoundary>
-                    <ModalContainer>
-                      <KeyboardNavigation>
-                        <Theme>
-                          <AppRouter />
-                        </Theme>
-                      </KeyboardNavigation>
-                      {window.env.platform === 'darwin' && <MacOsScrollbarDetection />}
-                    </ModalContainer>
-                  </ErrorBoundary>
+                  <Theme>
+                    <ErrorBoundary>
+                      <ModalContainer>
+                        <KeyboardNavigation>
+                          <MotionConfig reducedMotion="user">
+                            <AppRouter />
+                          </MotionConfig>
+                        </KeyboardNavigation>
+                        {window.env.platform === 'darwin' && <MacOsScrollbarDetection />}
+                      </ModalContainer>
+                    </ErrorBoundary>
+                  </Theme>
                 </Router>
               </Lang>
             </StyleSheetManager>
@@ -317,12 +408,11 @@ export default class AppRenderer {
   public removeDevice = (device: IDeviceRemoval) =>
     IpcRendererEventChannel.account.removeDevice(device);
   public connectTunnel = () => IpcRendererEventChannel.tunnel.connect();
-  public disconnectTunnel = () => IpcRendererEventChannel.tunnel.disconnect();
+  public disconnectTunnel = (source: DisconnectSource) =>
+    IpcRendererEventChannel.tunnel.disconnect(source);
   public reconnectTunnel = () => IpcRendererEventChannel.tunnel.reconnect();
   public setRelaySettings = (relaySettings: RelaySettings) =>
     IpcRendererEventChannel.settings.setRelaySettings(relaySettings);
-  public updateBridgeSettings = (bridgeSettings: BridgeSettings) =>
-    IpcRendererEventChannel.settings.updateBridgeSettings(bridgeSettings);
   public setDnsOptions = (dnsOptions: IDnsOptions) =>
     IpcRendererEventChannel.settings.setDnsOptions(dnsOptions);
   public clearAccountHistory = () => IpcRendererEventChannel.accountHistory.clear();
@@ -357,13 +447,13 @@ export default class AppRenderer {
   public collectProblemReport = (toRedact: string | undefined) =>
     IpcRendererEventChannel.problemReport.collectLogs(toRedact);
   public viewLog = (path: string) => IpcRendererEventChannel.problemReport.viewLog(path);
-  public quit = () => IpcRendererEventChannel.app.quit();
-  public openUrl = (url: string) => IpcRendererEventChannel.app.openUrl(url);
+  public quit = (source: DisconnectSource) => IpcRendererEventChannel.app.quit(source);
+  public openUrl = (url: Url) => IpcRendererEventChannel.app.openUrl(url);
   public getPathBaseName = (path: string) => IpcRendererEventChannel.app.getPathBaseName(path);
   public showOpenDialog = (options: Electron.OpenDialogOptions) =>
     IpcRendererEventChannel.app.showOpenDialog(options);
-  public createCustomList = (name: string) =>
-    IpcRendererEventChannel.customLists.createCustomList(name);
+  public createCustomList = (newCustomList: NewCustomList) =>
+    IpcRendererEventChannel.customLists.createCustomList(newCustomList);
   public deleteCustomList = (id: string) =>
     IpcRendererEventChannel.customLists.deleteCustomList(id);
   public updateCustomList = (customList: ICustomList) =>
@@ -389,6 +479,49 @@ export default class AppRenderer {
   public daemonPrepareRestart = (shutdown: boolean): void => {
     IpcRendererEventChannel.daemon.prepareRestart(shutdown);
   };
+  public getSplitTunnelingSupported = () => {
+    return IpcRendererEventChannel.splitTunneling.getSupported();
+  };
+  public getAppUpgradeCacheDir = () => IpcRendererEventChannel.app.getUpgradeCacheDir();
+
+  public tryStartDaemon = () => {
+    if (window.env.platform === 'win32') IpcRendererEventChannel.daemon.tryStart();
+  };
+
+  public appUpgrade = () => {
+    const reduxState = this.reduxStore.getState();
+    const appUpgradeError = reduxState.appUpgrade.error;
+
+    if (appUpgradeError) {
+      this.reduxActions.appUpgrade.resetAppUpgradeError();
+    }
+
+    this.reduxActions.appUpgrade.setAppUpgradeEvent({
+      type: 'APP_UPGRADE_STATUS_DOWNLOAD_INITIATED',
+    });
+
+    IpcRendererEventChannel.app.upgrade();
+  };
+  public appUpgradeAbort = () => IpcRendererEventChannel.app.upgradeAbort();
+  public appUpgradeInstallerStart = () => {
+    const reduxState = this.reduxStore.getState();
+    const verifiedInstallerPath = reduxState.version.suggestedUpgrade?.verifiedInstallerPath;
+    const hasVerifiedInstallerPath =
+      typeof verifiedInstallerPath === 'string' && verifiedInstallerPath.length > 0;
+
+    // Ensure we have a the path to the verified installer and that we are not already trying
+    // to start the installer.
+    if (hasVerifiedInstallerPath) {
+      this.reduxActions.appUpgrade.setAppUpgradeEvent({
+        type: 'APP_UPGRADE_STATUS_MANUAL_STARTING_INSTALLER',
+      });
+      this.reduxActions.appUpgrade.resetAppUpgradeError();
+
+      IpcRendererEventChannel.app.upgradeInstallerStart(verifiedInstallerPath);
+    } else {
+      log.error('App upgrade was invoked without a valid verified installer path.');
+    }
+  };
 
   public login = async (accountNumber: AccountNumber) => {
     const actions = this.reduxActions;
@@ -396,7 +529,6 @@ export default class AppRenderer {
 
     log.info('Logging in');
 
-    this.previousLoginState = this.loginState;
     this.loginState = 'logging in';
 
     const response = await IpcRendererEventChannel.account.login(accountNumber);
@@ -407,8 +539,6 @@ export default class AppRenderer {
 
           actions.account.loginTooManyDevices();
           this.loginState = 'too many devices';
-
-          this.history.reset(RoutePath.tooManyDevices, { transition: transitions.push });
         } catch {
           log.error('Failed to fetch device list');
           actions.account.loginFailed('list-devices');
@@ -425,10 +555,9 @@ export default class AppRenderer {
     this.loginState = 'none';
   };
 
-  public logout = async (transition = transitions.dismiss) => {
+  public logout = async (source: LogoutSource) => {
     try {
-      this.history.reset(RoutePath.login, { transition });
-      await IpcRendererEventChannel.account.logout();
+      await IpcRendererEventChannel.account.logout(source);
     } catch (e) {
       const error = e as Error;
       log.info('Failed to logout: ', error.message);
@@ -436,8 +565,8 @@ export default class AppRenderer {
   };
 
   public leaveRevokedDevice = async () => {
-    await this.logout(transitions.pop);
-    await this.disconnectTunnel();
+    await this.logout('gui-device-revoked');
+    await this.disconnectTunnel('gui-device-revoked');
   };
 
   public createNewAccount = async () => {
@@ -449,7 +578,6 @@ export default class AppRenderer {
 
     try {
       await IpcRendererEventChannel.account.create();
-      this.redirectToConnect();
     } catch (e) {
       const error = e as Error;
       actions.account.createAccountFailed(error);
@@ -462,7 +590,7 @@ export default class AppRenderer {
     return devices;
   };
 
-  public openLinkWithAuth = async (link: string): Promise<void> => {
+  public openUrlWithAuth = async (url: Url): Promise<void> => {
     let token = '';
     try {
       token = await IpcRendererEventChannel.account.getWwwAuthToken();
@@ -470,7 +598,7 @@ export default class AppRenderer {
       const error = e as Error;
       log.error(`Failed to get the WWW auth token: ${error.message}`);
     }
-    void this.openUrl(`${link}?token=${token}`);
+    void this.openUrl(`${url}?token=${token}`);
   };
 
   public setAllowLan = async (allowLan: boolean) => {
@@ -491,22 +619,10 @@ export default class AppRenderer {
     actions.settings.updateEnableIpv6(enableIpv6);
   };
 
-  public setBridgeState = async (bridgeState: BridgeState) => {
+  public setLockdownMode = async (lockdownMode: boolean) => {
     const actions = this.reduxActions;
-    await IpcRendererEventChannel.settings.setBridgeState(bridgeState);
-    actions.settings.updateBridgeState(bridgeState);
-  };
-
-  public setBlockWhenDisconnected = async (blockWhenDisconnected: boolean) => {
-    const actions = this.reduxActions;
-    await IpcRendererEventChannel.settings.setBlockWhenDisconnected(blockWhenDisconnected);
-    actions.settings.updateBlockWhenDisconnected(blockWhenDisconnected);
-  };
-
-  public setOpenVpnMssfix = async (mssfix?: number) => {
-    const actions = this.reduxActions;
-    actions.settings.updateOpenVpnMssfix(mssfix);
-    await IpcRendererEventChannel.settings.setOpenVpnMssfix(mssfix);
+    await IpcRendererEventChannel.settings.setLockdownMode(lockdownMode);
+    actions.settings.updateLockdownMode(lockdownMode);
   };
 
   public setWireguardMtu = async (mtu?: number) => {
@@ -515,7 +631,7 @@ export default class AppRenderer {
     await IpcRendererEventChannel.settings.setWireguardMtu(mtu);
   };
 
-  public setWireguardQuantumResistant = async (quantumResistant?: boolean) => {
+  public setWireguardQuantumResistant = async (quantumResistant: boolean) => {
     const actions = this.reduxActions;
     actions.settings.updateWireguardQuantumResistant(quantumResistant);
     await IpcRendererEventChannel.settings.setWireguardQuantumResistant(quantumResistant);
@@ -585,16 +701,45 @@ export default class AppRenderer {
     IpcRendererEventChannel.currentVersion.displayedChangelog();
   };
 
+  public setDismissedUpgrade = (): void => {
+    IpcRendererEventChannel.upgradeVersion.dismissedUpgrade(
+      this.reduxStore.getState().version.suggestedUpgrade?.version ?? '',
+    );
+  };
+
   public setNavigationHistory(history: IHistoryObject) {
     IpcRendererEventChannel.navigation.setHistory(history);
-
-    if (window.env.e2e) {
-      window.e2e.location = history.entries[history.index].pathname;
-    }
   }
 
-  private isLoggedIn(): boolean {
-    return this.deviceState?.type === 'logged in';
+  // If the installer has just been downloaded and verified we want to automatically
+  // start the installer if the window is focused.
+  private appUpgradeMaybeStartInstaller() {
+    const reduxState = this.reduxStore.getState();
+
+    const appUpgradeEvent = reduxState.appUpgrade.event;
+    const verifiedInstallerPath = reduxState.version.suggestedUpgrade?.verifiedInstallerPath;
+    const windowFocused = reduxState.userInterface.windowFocused;
+
+    const hasVerifiedInstallerPath =
+      typeof verifiedInstallerPath === 'string' && verifiedInstallerPath.length > 0;
+
+    if (
+      hasVerifiedInstallerPath &&
+      appUpgradeEvent?.type === 'APP_UPGRADE_STATUS_VERIFIED_INSTALLER'
+    ) {
+      // Only trigger the installer if the window is focused
+      if (windowFocused) {
+        this.reduxActions.appUpgrade.setAppUpgradeEvent({
+          type: 'APP_UPGRADE_STATUS_AUTOMATIC_STARTING_INSTALLER',
+        });
+        IpcRendererEventChannel.app.upgradeInstallerStart(verifiedInstallerPath);
+      } else {
+        // Otherwise, flag this as requiring manual start
+        this.reduxActions.appUpgrade.setAppUpgradeEvent({
+          type: 'APP_UPGRADE_STATUS_MANUAL_START_INSTALLER',
+        });
+      }
+    }
   }
 
   // Make sure that the content height is correct and log if it isn't. This is mostly for debugging
@@ -612,11 +757,6 @@ export default class AppRenderer {
     }
   }
 
-  private redirectToConnect() {
-    // Redirect the user after some time to allow for the 'Logged in' screen to be visible
-    this.loginScheduler.schedule(() => this.resetNavigation(), 1000);
-  }
-
   private setLocale(locale: string) {
     this.reduxActions.userInterface.updateLocale(locale);
   }
@@ -625,158 +765,36 @@ export default class AppRenderer {
     const actions = this.reduxActions;
 
     if ('normal' in relaySettings) {
-      const {
-        location,
-        openvpnConstraints,
-        wireguardConstraints,
-        tunnelProtocol,
-        providers,
-        ownership,
-      } = relaySettings.normal;
+      const { location, wireguardConstraints, providers, ownership } = relaySettings.normal;
 
       actions.settings.updateRelay({
         normal: {
           location: liftConstraint(location),
           providers,
           ownership,
-          openvpn: {
-            port: liftConstraint(openvpnConstraints.port),
-            protocol: liftConstraint(openvpnConstraints.protocol),
-          },
           wireguard: {
-            port: liftConstraint(wireguardConstraints.port),
             ipVersion: liftConstraint(wireguardConstraints.ipVersion),
             useMultihop: wireguardConstraints.useMultihop,
             entryLocation: liftConstraint(wireguardConstraints.entryLocation),
           },
-          tunnelProtocol: liftConstraint(tunnelProtocol),
         },
       });
-    } else if ('customTunnelEndpoint' in relaySettings) {
-      const customTunnelEndpoint = relaySettings.customTunnelEndpoint;
-      const config = customTunnelEndpoint.config;
-
-      if ('openvpn' in config) {
-        actions.settings.updateRelay({
-          customTunnelEndpoint: {
-            host: customTunnelEndpoint.host,
-            port: config.openvpn.endpoint.port,
-            protocol: config.openvpn.endpoint.protocol,
-          },
-        });
-      } else if ('wireguard' in config) {
-        // TODO: handle wireguard
-      }
     }
-  }
-
-  private setBridgeSettings(bridgeSettings: BridgeSettings) {
-    const actions = this.reduxActions;
-
-    actions.settings.updateBridgeSettings({
-      type: bridgeSettings.type,
-      normal: {
-        location: liftConstraint(bridgeSettings.normal.location),
-        providers: bridgeSettings.normal.providers,
-        ownership: bridgeSettings.normal.ownership,
-      },
-      custom: bridgeSettings.custom,
-    });
   }
 
   private onDaemonConnected() {
     this.connectedToDaemon = true;
     this.reduxActions.userInterface.setConnectedToDaemon(true);
     this.reduxActions.userInterface.setDaemonAllowed(true);
-    this.resetNavigation();
+    this.reduxActions.userInterface.setDaemonStatus('running');
   }
 
   private onDaemonDisconnected() {
     this.connectedToDaemon = false;
     this.reduxActions.userInterface.setConnectedToDaemon(false);
-    this.resetNavigation();
-  }
-
-  private resetNavigation(replaceRoot?: boolean) {
-    if (this.history) {
-      const pathname = this.history.location.pathname as RoutePath;
-      const nextPath = this.getNavigationBase() as RoutePath;
-
-      if (pathname !== nextPath) {
-        const transition = this.getNavigationTransition(pathname, nextPath);
-        if (replaceRoot) {
-          this.history.replaceRoot(nextPath, { transition });
-        } else {
-          this.history.reset(nextPath, { transition });
-        }
-      }
-    }
-  }
-
-  private getNavigationTransition(prevPath: RoutePath, nextPath: RoutePath) {
-    // First level contains the possible next locations and the second level contains the
-    // possible current locations.
-    const navigationTransitions: Partial<
-      Record<RoutePath, Partial<Record<RoutePath | '*', ITransitionSpecification>>>
-    > = {
-      [RoutePath.launch]: {
-        [RoutePath.login]: transitions.pop,
-        [RoutePath.main]: transitions.pop,
-        '*': transitions.dismiss,
-      },
-      [RoutePath.login]: {
-        [RoutePath.launch]: transitions.push,
-        [RoutePath.main]: transitions.pop,
-        [RoutePath.deviceRevoked]: transitions.pop,
-        '*': transitions.dismiss,
-      },
-      [RoutePath.main]: {
-        [RoutePath.launch]: transitions.push,
-        [RoutePath.login]: transitions.push,
-        [RoutePath.tooManyDevices]: transitions.push,
-        '*': transitions.dismiss,
-      },
-      [RoutePath.expired]: {
-        [RoutePath.launch]: transitions.push,
-        [RoutePath.login]: transitions.push,
-        [RoutePath.tooManyDevices]: transitions.push,
-        '*': transitions.dismiss,
-      },
-      [RoutePath.timeAdded]: {
-        [RoutePath.expired]: transitions.push,
-        [RoutePath.redeemVoucher]: transitions.push,
-        '*': transitions.dismiss,
-      },
-      [RoutePath.deviceRevoked]: {
-        '*': transitions.pop,
-      },
-    };
-
-    return navigationTransitions[nextPath]?.[prevPath] ?? navigationTransitions[nextPath]?.['*'];
-  }
-
-  private getNavigationBase(): RoutePath {
-    if (this.connectedToDaemon && this.deviceState !== undefined) {
-      const loginState = this.reduxStore.getState().account.status;
-      const deviceRevoked = loginState.type === 'none' && loginState.deviceRevoked;
-
-      if (deviceRevoked) {
-        return RoutePath.deviceRevoked;
-      } else if (!this.isLoggedIn()) {
-        return RoutePath.login;
-      } else if (
-        loginState.type === 'ok' &&
-        (loginState.expiredState === 'expired' || loginState.method === 'new_account')
-      ) {
-        return RoutePath.expired;
-      } else if (loginState.type === 'ok' && loginState.expiredState === 'time_added') {
-        return RoutePath.timeAdded;
-      } else {
-        return RoutePath.main;
-      }
-    } else {
-      return RoutePath.launch;
-    }
+    this.reduxActions.userInterface.setDaemonStatus('stopped');
+    log.info('Daemon is disconnected. Resetting UI state.');
+    this.reduxActions.appUpgrade.resetAppUpgrade();
   }
 
   private setAccountHistory(accountHistory?: AccountNumber) {
@@ -790,32 +808,30 @@ export default class AppRenderer {
 
     this.tunnelState = tunnelState;
 
-    batch(() => {
-      switch (tunnelState.state) {
-        case 'connecting':
-          actions.connection.connecting(tunnelState.details, tunnelState.featureIndicators);
-          break;
+    switch (tunnelState.state) {
+      case 'connecting':
+        actions.connection.connecting(tunnelState.details, tunnelState.featureIndicators);
+        break;
 
-        case 'connected':
-          actions.connection.connected(tunnelState.details, tunnelState.featureIndicators);
-          break;
+      case 'connected':
+        actions.connection.connected(tunnelState.details, tunnelState.featureIndicators);
+        break;
 
-        case 'disconnecting':
-          actions.connection.disconnecting(tunnelState.details);
-          break;
+      case 'disconnecting':
+        actions.connection.disconnecting(tunnelState.details);
+        break;
 
-        case 'disconnected':
-          actions.connection.disconnected();
-          break;
+      case 'disconnected':
+        actions.connection.disconnected(tunnelState.lockedDown);
+        break;
 
-        case 'error':
-          actions.connection.blocked(tunnelState.details);
-          break;
-      }
+      case 'error':
+        actions.connection.blocked(tunnelState.details);
+        break;
+    }
 
-      // Update the location when entering a new tunnel state since it's likely changed.
-      this.updateLocation();
-    });
+    // Update the location when entering a new tunnel state since it's likely changed.
+    this.updateLocation();
   }
 
   private setSettings(newSettings: ISettings) {
@@ -824,16 +840,12 @@ export default class AppRenderer {
     const reduxSettings = this.reduxActions.settings;
 
     reduxSettings.updateAllowLan(newSettings.allowLan);
-    reduxSettings.updateEnableIpv6(newSettings.tunnelOptions.generic.enableIpv6);
-    reduxSettings.updateBlockWhenDisconnected(newSettings.blockWhenDisconnected);
+    reduxSettings.updateEnableIpv6(newSettings.tunnelOptions.enableIpv6);
+    reduxSettings.updateLockdownMode(newSettings.lockdownMode);
     reduxSettings.updateShowBetaReleases(newSettings.showBetaReleases);
-    reduxSettings.updateOpenVpnMssfix(newSettings.tunnelOptions.openvpn.mssfix);
-    reduxSettings.updateWireguardMtu(newSettings.tunnelOptions.wireguard.mtu);
-    reduxSettings.updateWireguardQuantumResistant(
-      newSettings.tunnelOptions.wireguard.quantumResistant,
-    );
-    reduxSettings.updateWireguardDaita(newSettings.tunnelOptions.wireguard.daita);
-    reduxSettings.updateBridgeState(newSettings.bridgeState);
+    reduxSettings.updateWireguardMtu(newSettings.tunnelOptions.mtu);
+    reduxSettings.updateWireguardQuantumResistant(newSettings.tunnelOptions.quantumResistant);
+    reduxSettings.updateWireguardDaita(newSettings.tunnelOptions.daita);
     reduxSettings.updateDnsOptions(newSettings.tunnelOptions.dns);
     reduxSettings.updateSplitTunnelingState(newSettings.splitTunnel.enableExclusions);
     reduxSettings.updateObfuscationSettings(newSettings.obfuscationSettings);
@@ -842,14 +854,13 @@ export default class AppRenderer {
     reduxSettings.updateRelayOverrides(newSettings.relayOverrides);
 
     this.setReduxRelaySettings(newSettings.relaySettings);
-    this.setBridgeSettings(newSettings.bridgeSettings);
   }
 
   private setIsPerformingPostUpgrade(isPerformingPostUpgrade: boolean) {
     this.reduxActions.userInterface.setIsPerformingPostUpgrade(isPerformingPostUpgrade);
   }
 
-  private updateBlockedState(tunnelState: TunnelState, blockWhenDisconnected: boolean) {
+  private updateBlockedState(tunnelState: TunnelState) {
     const actions = this.reduxActions.connection;
     switch (tunnelState.state) {
       case 'connecting':
@@ -861,7 +872,7 @@ export default class AppRenderer {
         break;
 
       case 'disconnected':
-        actions.updateBlockState(blockWhenDisconnected);
+        actions.updateBlockState(tunnelState.lockedDown);
         break;
 
       case 'disconnecting':
@@ -874,10 +885,8 @@ export default class AppRenderer {
     }
   }
 
-  private handleDeviceEvent(deviceEvent: DeviceEvent, preventRedirectToConnect?: boolean) {
+  private handleDeviceEvent(deviceEvent: DeviceEvent) {
     const reduxAccount = this.reduxActions.account;
-
-    this.deviceState = deviceEvent.deviceState;
 
     switch (deviceEvent.type) {
       case 'logged in': {
@@ -887,16 +896,9 @@ export default class AppRenderer {
         switch (this.loginState) {
           case 'none':
             reduxAccount.loggedIn(accountNumber, device);
-            this.resetNavigation();
             break;
           case 'logging in':
             reduxAccount.loggedIn(accountNumber, device);
-
-            if (this.previousLoginState === 'too many devices') {
-              this.resetNavigation();
-            } else if (!preventRedirectToConnect) {
-              this.redirectToConnect();
-            }
             break;
           case 'creating account':
             reduxAccount.accountCreated(accountNumber, device, new Date().toISOString());
@@ -907,17 +909,14 @@ export default class AppRenderer {
       case 'logged out':
         this.loginScheduler.cancel();
         reduxAccount.loggedOut();
-        this.resetNavigation();
         break;
       case 'revoked': {
         this.loginScheduler.cancel();
         reduxAccount.deviceRevoked();
-        this.resetNavigation();
         break;
       }
     }
 
-    this.previousLoginState = this.loginState;
     this.loginState = 'none';
   }
 
@@ -961,9 +960,7 @@ export default class AppRenderer {
   }
 
   private setAccountExpiry(expiry?: string) {
-    const state = this.reduxStore.getState();
-    const previousExpiry = state.account.expiry;
-
+    log.info(`setAccountExpiry(${expiry}) called at ${new Date().toISOString()}`);
     this.expiryScheduler.cancel();
 
     if (expiry !== undefined) {
@@ -972,31 +969,17 @@ export default class AppRenderer {
       // Set state to expired when expiry date passes.
       if (!expired && closeToExpiry(expiry)) {
         const delay = new Date(expiry).getTime() - Date.now() + 1;
-        this.expiryScheduler.schedule(() => this.handleExpiry(expiry, true), delay);
+        this.expiryScheduler.schedule(() => this.handleExpiry(expiry), delay);
       }
 
-      if (expiry !== previousExpiry) {
-        this.handleExpiry(expiry, expired);
-      }
+      this.handleExpiry(expiry);
     } else {
       this.handleExpiry(expiry);
     }
   }
 
-  private handleExpiry(expiry?: string, expired?: boolean) {
-    const state = this.reduxStore.getState();
+  private handleExpiry(expiry?: string) {
     this.reduxActions.account.updateAccountExpiry(expiry);
-
-    if (
-      expiry !== undefined &&
-      state.account.status.type === 'ok' &&
-      ((state.account.status.expiredState === undefined && expired) ||
-        (state.account.status.expiredState === 'expired' && !expired)) &&
-      // If the login navigation is already scheduled no navigation is needed
-      !this.loginScheduler.isRunning
-    ) {
-      this.resetNavigation(true);
-    }
   }
 
   private storeAutoStart(autoStart: boolean) {

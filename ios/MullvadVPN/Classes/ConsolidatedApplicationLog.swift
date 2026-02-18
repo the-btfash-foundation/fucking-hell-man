@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 29/10/2020.
-//  Copyright © 2020 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -13,7 +13,7 @@ private let kRedactedPlaceholder = "[REDACTED]"
 private let kRedactedAccountPlaceholder = "[REDACTED ACCOUNT NUMBER]"
 private let kRedactedContainerPlaceholder = "[REDACTED CONTAINER PATH]"
 
-class ConsolidatedApplicationLog: TextOutputStreamable {
+class ConsolidatedApplicationLog: TextOutputStreamable, @unchecked Sendable {
     typealias Metadata = KeyValuePairs<MetadataKey, String>
     private let bufferSize: UInt64
 
@@ -43,14 +43,15 @@ class ConsolidatedApplicationLog: TextOutputStreamable {
         self.redactCustomStrings = redactCustomStrings
         self.bufferSize = bufferSize
 
-        applicationGroupContainers = securityGroupIdentifiers
+        applicationGroupContainers =
+            securityGroupIdentifiers
             .compactMap { securityGroupIdentifier -> URL? in
                 FileManager.default
                     .containerURL(forSecurityApplicationGroupIdentifier: securityGroupIdentifier)
             }
     }
 
-    func addLogFiles(fileURLs: [URL], completion: (() -> Void)? = nil) {
+    func addLogFiles(fileURLs: [URL], completion: (@Sendable () -> Void)? = nil) {
         logQueue.async(flags: .barrier) {
             for fileURL in fileURLs {
                 self.addSingleLogFile(fileURL)
@@ -61,7 +62,7 @@ class ConsolidatedApplicationLog: TextOutputStreamable {
         }
     }
 
-    func addError(message: String, error: String, completion: (() -> Void)? = nil) {
+    func addError(message: String, error: String, completion: (@Sendable () -> Void)? = nil) {
         let redactedError = redact(string: error)
         logQueue.async(flags: .barrier) {
             self.logs.append(LogAttachment(label: message, content: redactedError))
@@ -156,7 +157,8 @@ class ConsolidatedApplicationLog: TextOutputStreamable {
 
         let replacementCharacter = Character(UTF8.decode(UTF8.encodedReplacementCharacter))
         if let data = try? fileHandle.read(upToCount: Int(bufferSize)),
-           let lossyString = String(bytes: data, encoding: .utf8) {
+            let lossyString = String(bytes: data, encoding: .utf8)
+        {
             let resultString = lossyString.drop { ch in
                 // Drop leading replacement characters produced when decoding data
                 ch == replacementCharacter
@@ -169,7 +171,8 @@ class ConsolidatedApplicationLog: TextOutputStreamable {
 
     private func redactCustomStrings(in string: String) -> String {
         guard let customStrings = redactCustomStrings,
-              !customStrings.isEmpty else {
+            !customStrings.isEmpty
+        else {
             return string
         }
         return customStrings.reduce(string) { resultString, redact in
@@ -197,8 +200,8 @@ class ConsolidatedApplicationLog: TextOutputStreamable {
     }
 
     private func redactAccountNumber(string: String) -> String {
+        // swift-format-ignore: NeverUseForceTry
         redact(
-            // swiftlint:disable:next force_try
             regularExpression: try! NSRegularExpression(pattern: #"\d{16}"#),
             string: string,
             replacementString: kRedactedAccountPlaceholder
@@ -226,7 +229,7 @@ class ConsolidatedApplicationLog: TextOutputStreamable {
         string: String,
         replacementString: String
     ) -> String {
-        let nsRange = NSRange(string.startIndex ..< string.endIndex, in: string)
+        let nsRange = NSRange(string.startIndex..<string.endIndex, in: string)
         let template = NSRegularExpression.escapedTemplate(for: replacementString)
 
         return regularExpression.stringByReplacingMatches(

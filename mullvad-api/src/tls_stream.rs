@@ -7,11 +7,12 @@ use std::{
 };
 
 use hyper_util::client::legacy::connect::{Connected, Connection};
+use rustls_pki_types::{CertificateDer, pem::PemObject};
 use std::sync::LazyLock;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::{
-    rustls::{self, pki_types::ServerName, ClientConfig},
     TlsConnector,
+    rustls::{self, ClientConfig, pki_types::ServerName},
 };
 
 const LE_ROOT_CERT: &[u8] = include_bytes!("../le_root_cert.pem");
@@ -20,23 +21,30 @@ pub struct TlsStream<S: AsyncRead + AsyncWrite + Unpin> {
     stream: tokio_rustls::client::TlsStream<S>,
 }
 
+static TLS_CONFIG: LazyLock<Arc<ClientConfig>> = LazyLock::new(|| {
+    let config =
+        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .expect("ring crypt-prover should support TLS 1.3")
+            .with_root_certificates(read_cert_store().expect("Failed to parse pem file"))
+            .with_no_client_auth();
+    Arc::new(config)
+});
+
 impl<S> TlsStream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     pub async fn connect_https(stream: S, domain: &str) -> io::Result<TlsStream<S>> {
-        static TLS_CONFIG: LazyLock<Arc<ClientConfig>> = LazyLock::new(|| {
-            let config = ClientConfig::builder_with_provider(Arc::new(
-                rustls::crypto::ring::default_provider(),
-            ))
-            .with_protocol_versions(&[&rustls::version::TLS13])
-            .expect("ring crypt-prover should support TLS 1.3")
-            .with_root_certificates(read_cert_store())
-            .with_no_client_auth();
-            Arc::new(config)
-        });
+        Self::connect_https_with_client_config(stream, domain, Arc::clone(&TLS_CONFIG)).await
+    }
 
-        let connector = TlsConnector::from(TLS_CONFIG.clone());
+    pub async fn connect_https_with_client_config(
+        stream: S,
+        domain: &str,
+        client_config: Arc<ClientConfig>,
+    ) -> io::Result<TlsStream<S>> {
+        let connector = TlsConnector::from(client_config);
 
         let host = match ServerName::try_from(domain.to_owned()) {
             Ok(n) => n,
@@ -54,18 +62,17 @@ where
     }
 }
 
-fn read_cert_store() -> rustls::RootCertStore {
+fn read_cert_store() -> Result<rustls::RootCertStore, rustls_pki_types::pem::Error> {
     let mut cert_store = rustls::RootCertStore::empty();
 
-    let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(LE_ROOT_CERT))
-        .collect::<Result<Vec<_>, _>>()
-        .expect("Failed to parse pem file");
+    let certs = CertificateDer::pem_reader_iter(&mut std::io::BufReader::new(LE_ROOT_CERT))
+        .collect::<Result<Vec<_>, _>>()?;
     let (num_certs_added, num_failures) = cert_store.add_parsable_certificates(certs);
     if num_failures > 0 || num_certs_added != 1 {
         panic!("Failed to add root cert");
     }
 
-    cert_store
+    Ok(cert_store)
 }
 
 impl<S> AsyncRead for TlsStream<S>

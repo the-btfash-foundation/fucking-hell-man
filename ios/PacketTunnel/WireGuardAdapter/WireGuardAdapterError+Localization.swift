@@ -3,15 +3,17 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 14/07/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import WireGuardKit
 
-extension WireGuardAdapterError: LocalizedError {
+struct WireGuardAdapterErrorWrapper: LocalizedError {
+    let error: WireGuardAdapterError
+
     public var errorDescription: String? {
-        switch self {
+        switch error {
         case .cannotLocateTunnelFileDescriptor:
             return "Failure to locate tunnel file descriptor."
 
@@ -19,7 +21,8 @@ extension WireGuardAdapterError: LocalizedError {
             return "Failure to perform an operation in such state."
 
         case let .dnsResolution(resolutionErrors):
-            let detailedErrorDescription = resolutionErrors
+            let detailedErrorDescription =
+                resolutionErrors
                 .enumerated()
                 .map { index, dnsResolutionError in
                     let errorDescription = dnsResolutionError.errorDescription ?? "???"

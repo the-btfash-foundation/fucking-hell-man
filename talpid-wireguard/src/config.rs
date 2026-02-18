@@ -4,7 +4,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 use talpid_types::net::wireguard::{PeerConfig, PrivateKey};
-use talpid_types::net::{obfuscation::ObfuscatorConfig, wireguard, GenericTunnelOptions};
+use talpid_types::net::{GenericTunnelOptions, obfuscation::Obfuscators, wireguard};
 
 /// Name to use for the tunnel device
 #[cfg(target_os = "linux")]
@@ -32,7 +32,7 @@ pub struct Config {
     #[cfg(target_os = "linux")]
     pub enable_ipv6: bool,
     /// Obfuscator config to be used for reaching the relay.
-    pub obfuscator_config: Option<ObfuscatorConfig>,
+    pub obfuscator_config: Option<Obfuscators>,
     /// Enable quantum-resistant PSK exchange
     pub quantum_resistant: bool,
     /// Enable DAITA
@@ -71,7 +71,7 @@ impl Config {
         connection: &wireguard::ConnectionConfig,
         wg_options: &wireguard::TunnelOptions,
         generic_options: &GenericTunnelOptions,
-        obfuscator_config: &Option<ObfuscatorConfig>,
+        obfuscator_config: &Option<Obfuscators>,
         default_mtu: u16,
     ) -> Result<Config, Error> {
         let mut tunnel = connection.tunnel.clone();
@@ -219,7 +219,7 @@ impl WgConfigBuffer {
 }
 
 /// Returns a CString with the appropriate config for WireGuard-go
-#[allow(single_use_lifetimes)]
+#[expect(single_use_lifetimes)]
 pub fn userspace_format<'a>(
     private_key: &PrivateKey,
     peers: impl Iterator<Item = &'a PeerConfig>,
@@ -261,4 +261,29 @@ fn write_peer_to_config(wg_conf: &mut WgConfigBuffer, peer: &PeerConfig) {
     if peer.constant_packet_size {
         wg_conf.add("constant_packet_size", "true");
     }
+}
+
+/// Replace `0.0.0.0/0`/`::/0` with the gateway IPs.
+/// Used to block traffic to other destinations while connecting on Android.
+#[cfg(target_os = "android")]
+pub(crate) fn patch_allowed_ips(mut config: Config) -> Config {
+    use ipnetwork::IpNetwork;
+    use std::net::IpAddr;
+
+    let gateway_net_v4 = IpNetwork::from(IpAddr::from(config.ipv4_gateway));
+    let gateway_net_v6 = config
+        .ipv6_gateway
+        .map(|net| IpNetwork::from(IpAddr::from(net)));
+    for peer in config.peers_mut() {
+        for allowed_ips in &mut peer.allowed_ips {
+            if allowed_ips.prefix() == 0 {
+                match (allowed_ips.is_ipv4(), gateway_net_v6) {
+                    (true, _) => *allowed_ips = gateway_net_v4,
+                    (_, Some(net)) => *allowed_ips = net,
+                    _ => continue,
+                }
+            }
+        }
+    }
+    config
 }

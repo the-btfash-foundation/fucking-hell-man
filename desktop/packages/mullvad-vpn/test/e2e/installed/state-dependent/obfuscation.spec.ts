@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test';
 import { execSync } from 'child_process';
 import { Page } from 'playwright';
 
-import { colors } from '../../../../src/config.json';
-import { RoutePath } from '../../../../src/renderer/lib/routes';
+import { RoutePath } from '../../../../src/shared/routes';
+import { RoutesObjectModel } from '../../route-object-models';
 import { TestUtils } from '../../utils';
 import { startInstalledApp } from '../installed-utils';
 
@@ -15,92 +15,79 @@ const UDPOVERTCP_PORT = '80';
 
 let page: Page;
 let util: TestUtils;
+let routes: RoutesObjectModel;
 
 test.beforeAll(async () => {
   ({ page, util } = await startInstalledApp());
+  routes = new RoutesObjectModel(page, util);
+  await util.expectRoute(RoutePath.main);
+  await routes.main.gotoSettings();
+  await routes.settings.gotoVpnSettings();
+  await routes.vpnSettings.gotoAntiCensorship();
 });
 
 test.afterAll(async () => {
-  await page.close();
+  await util?.closePage();
 });
 
 test('App should have automatic obfuscation', async () => {
-  await util.waitForNavigation(() => page.click('button[aria-label="Settings"]'));
-  expect(await util.waitForNavigation(() => page.getByText('VPN settings').click())).toBe(
-    RoutePath.vpnSettings,
-  );
+  const automaticObfuscationOption = routes.antiCensorship.selectors.automaticOption();
 
-  expect(await util.waitForNavigation(() => page.getByText('WireGuard settings').click())).toBe(
-    RoutePath.wireguardSettings,
-  );
+  await expect(automaticObfuscationOption).toHaveAttribute('aria-selected', 'true');
 
-  const automatic = page.getByTestId('automatic-obfuscation');
-  await expect(automatic).toHaveCSS('background-color', colors.green);
-
-  const cliObfuscation = execSync('mullvad obfuscation get').toString().split('\n');
-  expect(cliObfuscation[0]).toEqual('Obfuscation mode: auto');
-  expect(cliObfuscation[1]).toEqual('udp2tcp settings: any port');
-  expect(cliObfuscation[2]).toEqual('Shadowsocks settings: any port');
+  const cliObfuscation = execSync('mullvad anti-censorship get').toString().split('\n');
+  expect(cliObfuscation[0]).toEqual('mode: auto');
 });
 
 test('App should set obfuscation to shadowsocks with custom port', async () => {
-  expect(
-    await util.waitForNavigation(() => page.click('button[aria-label="Shadowsocks settings"]')),
-  ).toBe(RoutePath.shadowsocks);
+  await routes.antiCensorship.gotoShadowSocksSettings();
+  const automaticOption = routes.shadowsocksSettings.selectors.automaticPortOption();
 
-  const automatic = page.locator('button', { hasText: 'Automatic' });
-  await expect(automatic).toHaveCSS('background-color', colors.green);
+  await expect(automaticOption).toHaveAttribute('aria-selected', 'true');
 
-  const customInput = page.locator('input[type="text"]');
-  await customInput.click();
-  await customInput.fill(`${SHADOWSOCKS_PORT}`);
-  await customInput.blur();
+  await routes.shadowsocksSettings.fillPortInput(SHADOWSOCKS_PORT);
 
-  const customItem = page.locator('div[role="option"]', { hasText: 'Custom' });
-  await expect(customItem).toHaveCSS('background-color', colors.green);
+  const customPortOption = routes.shadowsocksSettings.selectors.customPortOption();
+  await expect(customPortOption).toHaveAttribute('aria-selected', 'true');
 
-  await util.waitForNavigation(() => page.click('button[aria-label="Back"]'));
+  await routes.shadowsocksSettings.goBack();
 
-  const shadowsocksItem = page.locator('button', { hasText: 'Shadowsocks' });
-  await shadowsocksItem.click();
-  await expect(shadowsocksItem).toHaveCSS('background-color', colors.green);
-  await expect(shadowsocksItem).toContainText(`Port: ${SHADOWSOCKS_PORT}`);
+  const shadowsocksOption = routes.antiCensorship.selectors.shadowsocksOption();
+  await expect(shadowsocksOption).toContainText(`Port: ${SHADOWSOCKS_PORT}`);
 
-  const cliObfuscation = execSync('mullvad obfuscation get').toString().split('\n')[2];
-  expect(cliObfuscation).toEqual(`Shadowsocks settings: port ${SHADOWSOCKS_PORT}`);
+  await routes.antiCensorship.selectShadowsocks();
+  await expect(shadowsocksOption).toHaveAttribute('aria-selected', 'true');
+
+  const cliObfuscation = execSync('mullvad anti-censorship get').toString().split('\n')[2];
+  expect(cliObfuscation).toEqual(`shadowsocks settings: port ${SHADOWSOCKS_PORT}`);
 });
 
 test('App should still have shadowsocks custom port', async () => {
-  expect(
-    await util.waitForNavigation(() => page.click('button[aria-label="Shadowsocks settings"]')),
-  ).toBe(RoutePath.shadowsocks);
+  await routes.antiCensorship.gotoShadowSocksSettings();
 
-  const customItem = page.locator('div[role="option"]', { hasText: 'Custom' });
-  await expect(customItem).toHaveCSS('background-color', colors.green);
+  const customPortOption = routes.shadowsocksSettings.selectors.customPortOption();
+  await expect(customPortOption).toHaveAttribute('aria-selected', 'true');
 
-  await util.waitForNavigation(() => page.click('button[aria-label="Back"]'));
+  await routes.shadowsocksSettings.goBack();
 });
 
 test('App should set obfuscation to UDP-over-TCP with port', async () => {
-  expect(
-    await util.waitForNavigation(() => page.click('button[aria-label="UDP-over-TCP settings"]')),
-  ).toBe(RoutePath.udpOverTcp);
+  await routes.antiCensorship.gotoUdpOverTcpSettings();
 
-  const automatic = page.locator('button', { hasText: 'Automatic' });
-  await expect(automatic).toHaveCSS('background-color', colors.green);
+  const automaticOption = routes.udpOverTcpSettings.selectors.automaticPortOption();
+  await expect(automaticOption).toHaveAttribute('aria-selected', 'true');
 
-  const portButton = page.locator('button', { hasText: UDPOVERTCP_PORT });
-  await portButton.click();
+  await routes.udpOverTcpSettings.selectPort(parseInt(UDPOVERTCP_PORT));
+  const portButton = routes.udpOverTcpSettings.selectors.portNumber(parseInt(UDPOVERTCP_PORT));
+  await expect(portButton).toHaveAttribute('aria-selected', 'true');
 
-  await expect(portButton).toHaveCSS('background-color', colors.green);
+  await routes.udpOverTcpSettings.goBack();
 
-  await util.waitForNavigation(() => page.click('button[aria-label="Back"]'));
-
-  const udpOverTcpItem = page.locator('button', { hasText: 'UDP-over-TCP' });
-  await udpOverTcpItem.click();
-  await expect(udpOverTcpItem).toHaveCSS('background-color', colors.green);
+  const udpOverTcpItem = routes.antiCensorship.selectors.udpOverTcpOption();
+  await routes.antiCensorship.selectUdpOverTcp();
+  await expect(udpOverTcpItem).toHaveAttribute('aria-selected', 'true');
   await expect(udpOverTcpItem).toContainText(`Port: ${UDPOVERTCP_PORT}`);
 
-  const cliObfuscation = execSync('mullvad obfuscation get').toString().split('\n')[1];
+  const cliObfuscation = execSync('mullvad anti-censorship get').toString().split('\n')[1];
   expect(cliObfuscation).toEqual(`udp2tcp settings: port ${UDPOVERTCP_PORT}`);
 });

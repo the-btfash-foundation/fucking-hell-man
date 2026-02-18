@@ -1,5 +1,10 @@
+import './lib/path-helpers';
+
+import { expect } from '@playwright/test';
 import fs from 'fs';
 import { _electron as electron, ElectronApplication, Locator, Page } from 'playwright';
+
+const forceMotion = process.env.TEST_FORCE_MOTION === '1';
 
 export interface StartAppResponse {
   app: ElectronApplication;
@@ -7,33 +12,39 @@ export interface StartAppResponse {
   util: TestUtils;
 }
 
-export interface TestUtils {
-  currentRoute: () => Promise<string>;
-  waitForNavigation: (initiateNavigation?: () => Promise<void> | void) => Promise<string>;
-  waitForNoTransition: () => Promise<void>;
-}
+type TriggerFn = () => Promise<void> | void;
 
-interface History {
-  entries: Array<{ pathname: string }>;
-  index: number;
+export interface TestUtils {
+  closePage: () => Promise<void>;
+  getCurrentRoute: () => Promise<string | null>;
+  expectRoute: (route: string) => Promise<void>;
+  expectRouteChange: (trigger: TriggerFn) => Promise<void>;
+  setReducedMotion: (value: ReducedMotionValue) => Promise<void>;
 }
 
 type LaunchOptions = NonNullable<Parameters<typeof electron.launch>[0]>;
+
+type ReducedMotionValue = 'no-preference' | 'reduce';
 
 export const startApp = async (options: LaunchOptions): Promise<StartAppResponse> => {
   const app = await launch(options);
   const page = await app.firstWindow();
 
-  // Wait for initial navigation to finish
-  await waitForNoTransition(page);
+  if (!forceMotion) {
+    await setReducedMotion(page, 'reduce');
+  }
+
+  await promiseTimeout(page.waitForEvent('load'));
 
   page.on('pageerror', (error) => console.log(error));
   page.on('console', (msg) => console.log(msg.text()));
 
   const util: TestUtils = {
-    currentRoute: currentRouteFactory(app),
-    waitForNavigation: waitForNavigationFactory(app, page),
-    waitForNoTransition: () => waitForNoTransition(page),
+    closePage: () => closePage(page),
+    getCurrentRoute: () => getCurrentRoute(page),
+    expectRoute: (route: string) => expectRoute(page, route),
+    expectRouteChange: (trigger: TriggerFn) => expectRouteChange(page, trigger),
+    setReducedMotion: (value: ReducedMotionValue) => setReducedMotion(page, value),
   };
 
   return { app, page, util };
@@ -44,60 +55,44 @@ export const launch = (options: LaunchOptions): Promise<ElectronApplication> => 
   return electron.launch(options);
 };
 
-const currentRouteFactory = (app: ElectronApplication) => {
-  return () =>
-    app.evaluate<string>(({ webContents }) =>
-      webContents
-        .getAllWebContents()
-        // Select window that isn't devtools
-        .find((webContents) => webContents.getURL().startsWith('file://'))!
-        .executeJavaScript('window.e2e.location'),
-    );
-};
+function promiseTimeout<T>(promise: Promise<T>): Promise<T | void> {
+  const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, 1000));
+  return Promise.any([timeoutPromise, promise]);
+}
 
-const waitForNavigationFactory = (app: ElectronApplication, page: Page) => {
-  // Wait for navigation animation to finish. A function can be provided that initiates the
-  // navigation, e.g. clicks a button.
-  return async (initiateNavigation?: () => Promise<void> | void) => {
-    // Wait for route to change after optionally initiating the navigation.
-    const [route] = await Promise.all([waitForNextRoute(app), initiateNavigation?.()]);
+async function closePage(page: Page) {
+  try {
+    await promiseTimeout(page?.close());
+  } catch (e) {
+    // no-op, if a window failes to close it will be cleaned up automatically by playwright at the
+    // end of the run.
+    const error = e as Error;
+    console.error(`page.close() threw an error: ${error.message}`);
+  }
+}
 
-    // Wait for view corresponding to new route to appear
-    await page.getByTestId(route).isVisible();
-    await waitForNoTransition(page);
+function getCurrentRoute(page: Page): Promise<string | null> {
+  return page.evaluate('window?.e2e?.location ?? null');
+}
 
-    return route;
-  };
-};
+// Returns a promise which resolves when the provided route is reached.
+async function expectRoute(page: Page, expectedRoute: string): Promise<void> {
+  await expect.poll(() => getCurrentRoute(page)).toMatchPath(expectedRoute);
+}
 
-const waitForNoTransition = async (page: Page) => {
-  // Wait until there's only one transitionContents
-  let transitionContentsCount;
-  do {
-    if (transitionContentsCount !== undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+// Returns a promise which resolves when the route changes.
+async function expectRouteChange(page: Page, trigger: TriggerFn) {
+  const initialRoute = await getCurrentRoute(page);
+  await trigger();
+  await expect.poll(() => getCurrentRoute(page)).not.toMatchPath(initialRoute);
+}
 
-    try {
-      transitionContentsCount = await page.getByTestId('transition-content').count();
-    } catch {
-      console.log('Transition content count failed');
-      break;
-    }
-  } while (transitionContentsCount !== 1);
-};
+async function setReducedMotion(page: Page, value: ReducedMotionValue) {
+  await page.emulateMedia({ reducedMotion: value });
 
-// Returns the route when it changes
-const waitForNextRoute = (app: ElectronApplication): Promise<string> => {
-  return app.evaluate(
-    ({ ipcMain }) =>
-      new Promise((resolve) => {
-        ipcMain.once('navigation-setHistory', (_event, history: History) => {
-          resolve(history.entries[history.index].pathname);
-        });
-      }),
-  );
-};
+  const query = `(prefers-reduced-motion: ${value})`;
+  await page.evaluate((q) => window.matchMedia(q).matches, query);
+}
 
 const getStyleProperty = (locator: Locator, property: string) => {
   return locator.evaluate(

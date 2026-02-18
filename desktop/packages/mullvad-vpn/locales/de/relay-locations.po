@@ -10,7 +10,7 @@ msgstr ""
 "Project-Id-Version: mullvad-app\n"
 "Language-Team: German\n"
 "Language: de_DE\n"
-"PO-Revision-Date: 2024-12-20 14:20\n"
+"PO-Revision-Date: 2026-01-22 08:53\n"
 
 #. AU ADL
 msgid "Adelaide"
@@ -196,6 +196,10 @@ msgstr "Estland"
 msgid "Finland"
 msgstr "Finnland"
 
+#. BR FOR
+msgid "Fortaleza"
+msgstr "Fortaleza"
+
 #. FR
 msgid "France"
 msgstr "Frankreich"
@@ -284,9 +288,17 @@ msgstr "Japan"
 msgid "Johannesburg"
 msgstr "Johannesburg"
 
+#. US MKC
+msgid "Kansas City, MO"
+msgstr "Kansas City, MO"
+
 #. UA IEV
 msgid "Kiev"
 msgstr "Kiew"
+
+#. MY KUL
+msgid "Kuala Lumpur"
+msgstr "Kuala Lumpur"
 
 #. UA IEV
 msgid "Kyiv"
@@ -332,6 +344,10 @@ msgstr "Luxemburg"
 msgid "Madrid"
 msgstr "Madrid"
 
+#. MY
+msgid "Malaysia"
+msgstr "Malaysia"
+
 #. SE MMA
 msgid "Malmö"
 msgstr "Malmö"
@@ -339,6 +355,10 @@ msgstr "Malmö"
 #. GB MNC
 msgid "Manchester"
 msgstr "Manchester"
+
+#. PH MNL
+msgid "Manila"
+msgstr "Manila"
 
 #. FR MRS
 msgid "Marseille"
@@ -443,6 +463,10 @@ msgstr "Peru"
 #. US PHL
 msgid "Philadelphia, PA"
 msgstr "Philadelphia, PA"
+
+#. PH
+msgid "Philippines"
+msgstr "Philippinen"
 
 #. US PHX
 msgid "Phoenix, AZ"

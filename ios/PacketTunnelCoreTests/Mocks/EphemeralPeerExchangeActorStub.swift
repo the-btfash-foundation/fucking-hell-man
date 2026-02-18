@@ -3,23 +3,25 @@
 //  MullvadPostQuantumTests
 //
 //  Created by Mojgan on 2024-07-18.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
+
+import NetworkExtension
 
 @testable import MullvadRustRuntime
 @testable import MullvadTypes
-import NetworkExtension
 @testable import PacketTunnelCore
 @testable import WireGuardKitTypes
 
-final class EphemeralPeerExchangeActorStub: EphemeralPeerExchangeActorProtocol {
+final class EphemeralPeerExchangeActorStub: EphemeralPeerExchangeActorProtocol, @unchecked Sendable {
     typealias KeyNegotiationResult = Result<(PreSharedKey, PrivateKey), EphemeralPeerExchangeErrorStub>
     var result: KeyNegotiationResult = .failure(.unknown)
 
     var delegate: EphemeralPeerReceiving?
 
     func startNegotiation(with privateKey: PrivateKey, enablePostQuantum: Bool, enableDaita: Bool) {
-        let daita = enableDaita
+        let daita =
+            enableDaita
             ? DaitaV2Parameters(
                 machines: "test",
                 maximumEvents: 1,
@@ -31,11 +33,13 @@ final class EphemeralPeerExchangeActorStub: EphemeralPeerExchangeActorProtocol {
         switch result {
         case let .success((preSharedKey, ephemeralKey)):
             if enablePostQuantum {
-                Task { await delegate?.receivePostQuantumKey(
-                    preSharedKey,
-                    ephemeralKey: ephemeralKey,
-                    daitaParameters: daita
-                ) }
+                Task {
+                    await delegate?.receivePostQuantumKey(
+                        preSharedKey,
+                        ephemeralKey: ephemeralKey,
+                        daitaParameters: daita
+                    )
+                }
             } else {
                 Task { await delegate?.receiveEphemeralPeerPrivateKey(ephemeralKey, daitaParameters: daita) }
             }

@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { Locator, Page } from 'playwright';
+import { Page } from 'playwright';
 
-import { RoutePath } from '../../../../src/renderer/lib/routes';
+import { RoutePath } from '../../../../src/shared/routes';
+import { RoutesObjectModel } from '../../route-object-models';
 import { TestUtils } from '../../utils';
 import { startInstalledApp } from '../installed-utils';
 
@@ -12,47 +13,37 @@ import { startInstalledApp } from '../installed-utils';
 
 let page: Page;
 let util: TestUtils;
+let routes: RoutesObjectModel;
 
 test.beforeAll(async () => {
   ({ page, util } = await startInstalledApp());
+  routes = new RoutesObjectModel(page, util);
+  await util.expectRoute(RoutePath.login);
 });
 
 test.afterAll(async () => {
-  await page.close();
+  await util?.closePage();
 });
 
 test('App should show too many devices', async () => {
-  expect(await util.currentRoute()).toEqual(RoutePath.login);
-
-  const loginInput = getInput(page);
+  const loginInput = routes.login.selectors.loginInput();
   await loginInput.fill(process.env.ACCOUNT_NUMBER!);
 
-  expect(await util.waitForNavigation(() => loginInput.press('Enter'))).toEqual(
-    RoutePath.tooManyDevices,
-  );
+  await loginInput.press('Enter');
+  await util.expectRoute(RoutePath.tooManyDevices);
 
-  const loginButton = page.getByText('Continue with login');
-
-  await expect(page.getByTestId('title')).toHaveText('Too many devices');
+  const loginButton = routes.tooManyDevices.selectors.continueButton();
   await expect(loginButton).toBeDisabled();
-  await page
-    .getByLabel(/^Remove device named/)
-    .first()
-    .click();
-  await page.getByText('Yes, log out device').click();
+
+  const removeDeviceButton = routes.tooManyDevices.selectors.removeDeviceButtons();
+  await removeDeviceButton.first().click();
+
+  await routes.tooManyDevices.selectors.confirmRemoveDeviceButton().click();
 
   await expect(loginButton).toBeEnabled();
 
   // Trigger transition: too-many-devices -> login -> main
-  expect(await util.waitForNavigation(() => loginButton.click())).toEqual(RoutePath.login);
-
-  // Note: `util.waitForNavigation` won't return the navigation event when
-  // transitioning from login -> main, so we need to observe the state of the
-  // app after the entire transition chain has finished.
-  await util.waitForNoTransition();
-  await expect(page.getByTestId(RoutePath.main)).toBeVisible();
+  await loginButton.click();
+  await util.expectRoute(RoutePath.login);
+  await util.expectRoute(RoutePath.main);
 });
-
-function getInput(page: Page): Locator {
-  return page.getByPlaceholder('0000 0000 0000 0000');
-}

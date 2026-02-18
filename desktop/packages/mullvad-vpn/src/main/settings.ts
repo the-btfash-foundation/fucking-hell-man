@@ -37,38 +37,18 @@ export default class Settings implements Readonly<ISettings> {
     IpcMainEventChannel.settings.handleSetEnableIpv6((enableIpv6) =>
       this.daemonRpc.setEnableIpv6(enableIpv6),
     );
-    IpcMainEventChannel.settings.handleSetBlockWhenDisconnected((blockWhenDisconnected) =>
-      this.daemonRpc.setBlockWhenDisconnected(blockWhenDisconnected),
-    );
-    IpcMainEventChannel.settings.handleSetBridgeState(async (bridgeState) => {
-      await this.daemonRpc.setBridgeState(bridgeState);
-
-      // Reset bridge constraints to `any` when the state is set to auto or off if not custom
-      if (
-        (bridgeState === 'auto' || bridgeState === 'off') &&
-        this.bridgeSettings.type === 'normal'
-      ) {
-        await this.daemonRpc.setBridgeSettings({
-          ...this.bridgeSettings,
-          normal: { ...this.bridgeSettings.normal, location: 'any' },
-        });
-      }
-    });
-    IpcMainEventChannel.settings.handleSetOpenVpnMssfix((mssfix?: number) =>
-      this.daemonRpc.setOpenVpnMssfix(mssfix),
+    IpcMainEventChannel.settings.handleSetLockdownMode((lockdownMode) =>
+      this.daemonRpc.setLockdownMode(lockdownMode),
     );
     IpcMainEventChannel.settings.handleSetWireguardMtu((mtu?: number) =>
       this.daemonRpc.setWireguardMtu(mtu),
     );
-    IpcMainEventChannel.settings.handleSetWireguardQuantumResistant((quantumResistant?: boolean) =>
+    IpcMainEventChannel.settings.handleSetWireguardQuantumResistant((quantumResistant: boolean) =>
       this.daemonRpc.setWireguardQuantumResistant(quantumResistant),
     );
     IpcMainEventChannel.settings.handleSetRelaySettings((relaySettings) =>
       this.daemonRpc.setRelaySettings(relaySettings),
     );
-    IpcMainEventChannel.settings.handleUpdateBridgeSettings((bridgeSettings) => {
-      return this.daemonRpc.setBridgeSettings(bridgeSettings);
-    });
     IpcMainEventChannel.settings.handleSetDnsOptions((dns) => {
       return this.daemonRpc.setDnsOptions(dns);
     });
@@ -142,6 +122,10 @@ export default class Settings implements Readonly<ISettings> {
     IpcMainEventChannel.currentVersion.handleDisplayedChangelog(() => {
       this.guiSettings.changelogDisplayedForVersion = this.currentVersion.gui;
     });
+
+    IpcMainEventChannel.upgradeVersion.handleDismissedUpgrade((version: string) => {
+      this.guiSettings.updateDismissedForVersion = version;
+    });
   }
 
   public get all() {
@@ -154,8 +138,8 @@ export default class Settings implements Readonly<ISettings> {
   public get autoConnect() {
     return this.settingsValue.autoConnect;
   }
-  public get blockWhenDisconnected() {
-    return this.settingsValue.blockWhenDisconnected;
+  public get lockdownMode() {
+    return this.settingsValue.lockdownMode;
   }
   public get showBetaReleases() {
     return this.settingsValue.showBetaReleases;
@@ -165,12 +149,6 @@ export default class Settings implements Readonly<ISettings> {
   }
   public get tunnelOptions() {
     return this.settingsValue.tunnelOptions;
-  }
-  public get bridgeSettings() {
-    return this.settingsValue.bridgeSettings;
-  }
-  public get bridgeState() {
-    return this.settingsValue.bridgeState;
   }
   public get splitTunnel() {
     return this.settingsValue.splitTunnel;

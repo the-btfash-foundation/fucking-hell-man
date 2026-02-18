@@ -3,12 +3,12 @@
 //  MullvadTypes
 //
 //  Created by pronebird on 21/10/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 
-public enum RelayLocation: Codable, Hashable, CustomDebugStringConvertible {
+public enum RelayLocation: Codable, Hashable, CustomDebugStringConvertible, Sendable {
     case country(String)
     case city(String, String)
     case hostname(String, String, String)
@@ -87,9 +87,9 @@ public enum RelayLocation: Codable, Hashable, CustomDebugStringConvertible {
             output += "city(\(String(reflecting: country)), \(String(reflecting: city)))"
 
         case let .hostname(country, city, host):
-            output += "hostname(\(String(reflecting: country)), " +
-                "\(String(reflecting: city)), " +
-                "\(String(reflecting: host)))"
+            output +=
+                "hostname(\(String(reflecting: country)), " + "\(String(reflecting: city)), "
+                + "\(String(reflecting: host)))"
         }
 
         return output
@@ -107,7 +107,7 @@ public enum RelayLocation: Codable, Hashable, CustomDebugStringConvertible {
     }
 }
 
-public struct UserSelectedRelays: Codable, Equatable {
+public struct UserSelectedRelays: Codable, Equatable, Sendable {
     public let locations: [RelayLocation]
     public let customListSelection: CustomListSelection?
 
@@ -118,7 +118,8 @@ public struct UserSelectedRelays: Codable, Equatable {
 }
 
 extension UserSelectedRelays {
-    public struct CustomListSelection: Codable, Equatable {
+    public static let `default`: UserSelectedRelays = UserSelectedRelays(locations: [.country("se")])
+    public struct CustomListSelection: Codable, Equatable, Sendable {
         /// The ID of the custom list that the selected relays belong to.
         public let listId: UUID
         /// Whether the selected relays are subnodes or the custom list itself.

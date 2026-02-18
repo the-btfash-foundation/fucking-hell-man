@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-11-26.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
@@ -11,7 +11,8 @@ import Routing
 import SwiftUI
 import UIKit
 
-struct SettingsViewControllerFactory {
+@MainActor
+final class SettingsViewControllerFactory {
     /// The result of creating a child representing a route.
     enum MakeChildResult {
         /// View controller that should be pushed into navigation stack.
@@ -29,8 +30,12 @@ struct SettingsViewControllerFactory {
     private let accessMethodRepository: AccessMethodRepositoryProtocol
     private let proxyConfigurationTester: ProxyConfigurationTesterProtocol
     private let ipOverrideRepository: IPOverrideRepository
+
     private let navigationController: UINavigationController
     private let alertPresenter: AlertPresenter
+    private var appPreferences: AppPreferencesDataSource
+
+    var didUpdateNotificationSettings: ((NotificationSettings) -> Void)?
 
     init(
         interactorFactory: SettingsInteractorFactory,
@@ -38,7 +43,8 @@ struct SettingsViewControllerFactory {
         proxyConfigurationTester: ProxyConfigurationTesterProtocol,
         ipOverrideRepository: IPOverrideRepository,
         navigationController: UINavigationController,
-        alertPresenter: AlertPresenter
+        alertPresenter: AlertPresenter,
+        appPreferences: AppPreferencesDataSource
     ) {
         self.interactorFactory = interactorFactory
         self.accessMethodRepository = accessMethodRepository
@@ -46,6 +52,7 @@ struct SettingsViewControllerFactory {
         self.ipOverrideRepository = ipOverrideRepository
         self.navigationController = navigationController
         self.alertPresenter = alertPresenter
+        self.appPreferences = appPreferences
     }
 
     func makeRoute(for route: SettingsNavigationRoute) -> MakeChildResult {
@@ -53,127 +60,115 @@ struct SettingsViewControllerFactory {
         case .root:
             // Handled in SettingsCoordinator.
             .failed
-        case .vpnSettings:
-            makeVPNSettingsViewController()
-        case .problemReport:
-            makeProblemReportViewController()
-        case .apiAccess:
-            makeAPIAccessViewController()
         case .faq:
             // Handled separately and presented as a modal.
             .failed
+        case .language:
+            // Handled separately and presented settings.
+            .failed
+        case .vpnSettings:
+            makeVPNSettingsViewCoordinator()
+        case .problemReport:
+            makeProblemReportViewController()
+        case .apiAccess:
+            makeAPIAccessCoordinator()
+        case .changelog:
+            makeChangelogCoordinator()
         case .multihop:
-            makeMultihopViewController()
+            makeMultihopCoordinator()
         case .daita:
-            makeDAITAViewController()
+            makeDAITASettingsCoordinator()
+        case .notificationSettings:
+            makeNotificationSettingsCoordinator()
+        case .includeAllNetworks:
+            makeIncludeAllNetworksSettingsCoordinator()
         }
     }
 
-    private func makeVPNSettingsViewController() -> MakeChildResult {
-        return .childCoordinator(VPNSettingsCoordinator(
-            navigationController: navigationController,
-            interactorFactory: interactorFactory,
-            ipOverrideRepository: ipOverrideRepository
-        ))
+    private func makeVPNSettingsViewCoordinator() -> MakeChildResult {
+        return .childCoordinator(
+            VPNSettingsCoordinator(
+                navigationController: navigationController,
+                interactorFactory: interactorFactory,
+                ipOverrideRepository: ipOverrideRepository,
+                route: .settings(.vpnSettings)
+            ))
     }
 
     private func makeProblemReportViewController() -> MakeChildResult {
-        return .viewController(ProblemReportViewController(
-            interactor: interactorFactory.makeProblemReportInteractor(),
-            alertPresenter: alertPresenter
-        ))
+        return .viewController(
+            ProblemReportViewController(
+                interactor: interactorFactory.makeProblemReportInteractor(),
+                alertPresenter: alertPresenter
+            ))
     }
 
-    private func makeAPIAccessViewController() -> MakeChildResult {
-        return .childCoordinator(ListAccessMethodCoordinator(
-            navigationController: navigationController,
-            accessMethodRepository: accessMethodRepository,
-            proxyConfigurationTester: proxyConfigurationTester
-        ))
+    private func makeAPIAccessCoordinator() -> MakeChildResult {
+        return .childCoordinator(
+            ListAccessMethodCoordinator(
+                navigationController: navigationController,
+                accessMethodRepository: accessMethodRepository,
+                proxyConfigurationTester: proxyConfigurationTester
+            ))
     }
 
-    private func makeMultihopViewController() -> MakeChildResult {
-        let viewModel = MultihopTunnelSettingsViewModel(tunnelManager: interactorFactory.tunnelManager)
-        let view = SettingsMultihopView(tunnelViewModel: viewModel)
-
-        let host = UIHostingController(rootView: view)
-        host.title = NSLocalizedString(
-            "NAVIGATION_TITLE_MULTIHOP",
-            tableName: "Settings",
-            value: "Multihop",
-            comment: ""
-        )
-        host.view.setAccessibilityIdentifier(.multihopView)
-
-        return .viewController(host)
-    }
-
-    private func makeDAITAViewController() -> MakeChildResult {
-        let viewModel = DAITATunnelSettingsViewModel(tunnelManager: interactorFactory.tunnelManager)
-        let view = SettingsDAITAView(tunnelViewModel: viewModel)
-
-        viewModel.didFailDAITAValidation = { result in
-            showPrompt(
-                for: result.item,
-                onSave: {
-                    viewModel.value = result.setting
-                },
-                onDiscard: {}
+    private func makeChangelogCoordinator() -> MakeChildResult {
+        return .childCoordinator(
+            ChangeLogCoordinator(
+                route: .settings(.changelog),
+                navigationController: navigationController,
+                viewModel: ChangeLogViewModel(changeLogReader: ChangeLogReader())
             )
+        )
+    }
+
+    private func makeMultihopCoordinator() -> MakeChildResult {
+        let viewModel = MultihopTunnelSettingsViewModel(tunnelManager: interactorFactory.tunnelManager)
+        let coordinator = MultihopSettingsCoordinator(
+            navigationController: navigationController,
+            route: .settings(.multihop),
+            viewModel: viewModel
+        )
+
+        return .childCoordinator(coordinator)
+    }
+
+    private func makeDAITASettingsCoordinator() -> MakeChildResult {
+        let viewModel = DAITATunnelSettingsViewModel(tunnelManager: interactorFactory.tunnelManager)
+        let coordinator = DAITASettingsCoordinator(
+            navigationController: navigationController,
+            route: .settings(.daita),
+            viewModel: viewModel
+        )
+
+        return .childCoordinator(coordinator)
+    }
+
+    private func makeNotificationSettingsCoordinator() -> MakeChildResult {
+        let coordinator = NotificationSettingsCoordinator(
+            navigationController: navigationController,
+            viewModel: NotificationSettingsViewModel(settings: appPreferences.notificationSettings)
+        )
+        coordinator.didUpdateNotificationSettings = { [weak self] _, newValue in
+            guard let self else { return }
+            appPreferences.notificationSettings = newValue
+            didUpdateNotificationSettings?(newValue)
         }
 
-        let host = UIHostingController(rootView: view)
-        host.title = NSLocalizedString(
-            "NAVIGATION_TITLE_DAITA",
-            tableName: "Settings",
-            value: "DAITA",
-            comment: ""
-        )
-        host.view.setAccessibilityIdentifier(.daitaView)
-
-        return .viewController(host)
+        return .childCoordinator(coordinator)
     }
 
-    private func showPrompt(
-        for item: DAITASettingsPromptItem,
-        onSave: @escaping () -> Void,
-        onDiscard: @escaping () -> Void
-    ) {
-        let presentation = AlertPresentation(
-            id: "settings-daita-prompt",
-            accessibilityIdentifier: .daitaPromptAlert,
-            icon: .warning,
-            message: NSLocalizedString(
-                "SETTINGS_DAITA_ENABLE_TEXT",
-                tableName: "DAITA",
-                value: item.description,
-                comment: ""
-            ),
-            buttons: [
-                AlertAction(
-                    title: String(format: NSLocalizedString(
-                        "SETTINGS_DAITA_ENABLE_OK_ACTION",
-                        tableName: "DAITA",
-                        value: "Enable \"%@\"",
-                        comment: ""
-                    ), item.title),
-                    style: .default,
-                    accessibilityId: .daitaConfirmAlertEnableButton,
-                    handler: { onSave() }
-                ),
-                AlertAction(
-                    title: NSLocalizedString(
-                        "SETTINGS_DAITA_ENABLE_CANCEL_ACTION",
-                        tableName: "DAITA",
-                        value: "Cancel",
-                        comment: ""
-                    ),
-                    style: .default,
-                    handler: { onDiscard() }
-                ),
-            ]
+    private func makeIncludeAllNetworksSettingsCoordinator() -> MakeChildResult {
+        let viewModel = IncludeAllNetworksSettingsViewModelImpl(
+            tunnelManager: interactorFactory.tunnelManager,
+            appPreferences: appPreferences
+        )
+        let coordinator = IncludeAllNetworksSettingsCoordinator(
+            navigationController: navigationController,
+            route: .settings(.includeAllNetworks),
+            viewModel: viewModel
         )
 
-        alertPresenter.showAlert(presentation: presentation, animated: true)
+        return .childCoordinator(coordinator)
     }
 }

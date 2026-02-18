@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-11.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -17,18 +17,18 @@ private struct RelayInfo {
 class RelayTests: LoggedInWithTimeUITestCase {
     var removeFirewallRulesInTearDown = false
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
 
         removeFirewallRulesInTearDown = false
     }
 
-    override func tearDown() {
-        super.tearDown()
-
+    override func tearDown() async throws {
         if removeFirewallRulesInTearDown {
-            FirewallAPIClient().removeRules()
+            FirewallClient().removeRules()
         }
+
+        try await super.tearDown()
     }
 
     /// Restore default country by selecting it in location selector and immediately disconnecting when app starts connecting to relay in it
@@ -75,12 +75,12 @@ class RelayTests: LoggedInWithTimeUITestCase {
             .swipeDownToDismissModal()
 
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapConnectButton()
 
-        allowAddVPNConfigurationsIfAsked() // Allow adding VPN configurations iOS permission
+        allowAddVPNConfigurationsIfAsked()  // Allow adding VPN configurations iOS permission
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
 
         try Networking.verifyCannotReachAdServingDomain()
 
@@ -90,47 +90,47 @@ class RelayTests: LoggedInWithTimeUITestCase {
 
     func testAppConnection() throws {
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapConnectButton()
 
         allowAddVPNConfigurationsIfAsked()
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
 
         try Networking.verifyCanAccessInternet()
         try Networking.verifyConnectedThroughMullvad()
     }
 
     func testConnectionRetryLogic() throws {
-        FirewallAPIClient().removeRules()
+        FirewallClient().removeRules()
         removeFirewallRulesInTearDown = true
 
         addTeardownBlock {
             self.restoreDefaultCountry()
         }
 
-        // First get relay info
-        let relayInfo = getDefaultRelayInfo()
-
         // Run actual test
-        try FirewallAPIClient().createRule(
-            FirewallRule.makeBlockAllTrafficRule(toIPAddress: relayInfo.ipAddress)
+        try FirewallClient().createRule(
+            // Block all traffic not going to the router.
+            FirewallRule.makeBlockAllTrafficRule(toIPAddress: "8.8.8.8", inverted: true)
         )
 
         TunnelControlPage(app)
             .tapSelectLocationButton()
 
         SelectLocationPage(app)
-            .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultCityName)
-            .tapLocationCell(withName: relayInfo.name)
+            .tapLocationCell(withName: BaseUITestCase.testsDefaultQuicCountryName)
+
+        allowAddVPNConfigurationsIfAsked()
 
         // Should be two UDP connection attempts but sometimes only one is shown in the UI
         TunnelControlPage(app)
+            .tapRelayStatusExpandCollapseButton()
             .verifyConnectionAttemptsOrder()
             .tapCancelButton()
     }
 
-    func testWireGuardOverTCPManually() throws {
+    func testWireGuardOverTCPCustomPort80() throws {
         addTeardownBlock {
             HeaderBar(self.app)
                 .tapSettingsButton()
@@ -152,18 +152,129 @@ class RelayTests: LoggedInWithTimeUITestCase {
         VPNSettingsPage(app)
             .tapWireGuardObfuscationExpandButton()
             .tapWireGuardObfuscationUdpOverTcpCell()
+            .tapUDPOverTCPPortSelectorButton()
+
+        UDPOverTCPObfuscationSettingsPage(app)
+            .tapPort80Cell()
+            .tapBackButton()
+
+        VPNSettingsPage(app)
+            .tapBackButton()
+
+        SettingsPage(app)
+            .tapDoneButton()
+
+        // The packet capture has to start before the tunnel is up,
+        // otherwise the device cannot reach the in-house router anymore
+        startPacketCapture()
+
+        TunnelControlPage(app)
+            .tapConnectButton()
+
+        allowAddVPNConfigurationsIfAsked()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+
+        let (connectedToIPAddress, _) = TunnelControlPage(app)
+            .tapRelayStatusExpandCollapseButton()
+            .getInIPAddressAndPortFromConnectionStatus()
+
+        try Networking.verifyCanAccessInternet()
+
+        try generateTrafficAndDisconnect(from: connectedToIPAddress, searchForPort: 80, assertProtocol: .TCP)
+    }
+
+    func testWireGuardOverShadowsocksCustomPort() throws {
+        addTeardownBlock {
+            HeaderBar(self.app)
+                .tapSettingsButton()
+
+            SettingsPage(self.app)
+                .tapVPNSettingsCell()
+
+            VPNSettingsPage(self.app)
+                .tapWireGuardObfuscationExpandButton()
+                .tapWireGuardObfuscationOffCell()
+        }
+
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .tapVPNSettingsCell()
+
+        VPNSettingsPage(app)
+            .tapWireGuardObfuscationExpandButton()
+            .tapWireGuardObfuscationShadowsocksCell()
+            .tapShadowsocksPortSelectorButton()
+
+        ShadowsocksObfuscationSettingsPage(app)
+            .tapCustomCell()
+            .typeTextIntoCustomField("51900")
+            .tapBackButton()
+
+        VPNSettingsPage(app)
+            .tapBackButton()
+
+        SettingsPage(app)
+            .tapDoneButton()
+
+        // The packet capture has to start before the tunnel is up,
+        // otherwise the device cannot reach the in-house router anymore
+        startPacketCapture()
+
+        TunnelControlPage(app)
+            .tapConnectButton()
+
+        allowAddVPNConfigurationsIfAsked()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+
+        let (connectedToIPAddress, _) = TunnelControlPage(app)
+            .tapRelayStatusExpandCollapseButton()
+            .getInIPAddressAndPortFromConnectionStatus()
+
+        try Networking.verifyCanAccessInternet()
+
+        try generateTrafficAndDisconnect(from: connectedToIPAddress, searchForPort: 51900, assertProtocol: .UDP)
+    }
+
+    func testWireGuardOverTCPManually() throws {
+        addTeardownBlock {
+            HeaderBar(self.app)
+                .tapSettingsButton()
+
+            SettingsPage(self.app)
+                .tapVPNSettingsCell()
+
+            VPNSettingsPage(self.app)
+                .tapWireGuardObfuscationExpandButton()
+                .tapWireGuardObfuscationAutomaticCell()
+        }
+
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .tapVPNSettingsCell()
+
+        VPNSettingsPage(app)
+            .tapWireGuardObfuscationExpandButton()
+            .tapWireGuardObfuscationUdpOverTcpCell()
             .tapBackButton()
 
         SettingsPage(app)
             .tapDoneButton()
 
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapConnectButton()
 
         allowAddVPNConfigurationsIfAsked()
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
 
         try Networking.verifyCanAccessInternet()
 
@@ -199,12 +310,12 @@ class RelayTests: LoggedInWithTimeUITestCase {
             .tapDoneButton()
 
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapConnectButton()
 
         allowAddVPNConfigurationsIfAsked()
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
 
         try Networking.verifyCanAccessInternet()
 
@@ -212,21 +323,91 @@ class RelayTests: LoggedInWithTimeUITestCase {
             .tapDisconnectButton()
     }
 
-    /// Test automatic switching to TCP is functioning when UDP traffic to relay is blocked. This test first connects to a realy to get the IP address of it, in order to block UDP traffic to this relay.
+    func testWireGuardOverQuicManually() throws {
+        addTeardownBlock {
+            HeaderBar(self.app)
+                .tapSettingsButton()
+
+            SettingsPage(self.app)
+                .tapVPNSettingsCell()
+
+            VPNSettingsPage(self.app)
+                .tapWireGuardObfuscationExpandButton()
+                .tapWireGuardObfuscationOffCell()
+        }
+
+        let deviceIPAddress = try FirewallClient().getDeviceIPAddress()
+
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .tapVPNSettingsCell()
+
+        VPNSettingsPage(app)
+            .tapWireGuardObfuscationExpandButton()
+            .tapWireGuardObufscationQuicCell()
+            .tapBackButton()
+
+        SettingsPage(app)
+            .tapDoneButton()
+
+        startPacketCapture()
+
+        TunnelControlPage(app)
+            .tapSelectLocationButton()
+
+        SelectLocationPage(app)
+            .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultQuicCountryName)
+            .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultQuicCityName)
+            .tapLocationCell(withName: BaseUITestCase.testsDefaultQuicRelayName)
+
+        allowAddVPNConfigurationsIfAsked()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+
+        let (connectedToIPAddress, _) = TunnelControlPage(app)
+            .tapRelayStatusExpandCollapseButton()
+            .getInIPAddressAndPortFromConnectionStatus()
+
+        let (relayIPAddress, _) = TunnelControlPage(app)
+            .getInIPAddressAndPortFromConnectionStatus()
+
+        // Disconnect in order to create firewall rules, otherwise the test router cannot be reached
+        TunnelControlPage(app)
+            .tapDisconnectButton()
+
+        try FirewallClient().createRule(
+            FirewallRule.makeBlockWireGuardTrafficRule(
+                fromIPAddress: deviceIPAddress,
+                toIPAddress: relayIPAddress
+            )
+        )
+
+        // The VPN connects despite the wireguard protocol being blocked, QUIC obfuscation is in the works
+        TunnelControlPage(app)
+            .tapConnectButton()
+            .waitForConnectedLabel()
+
+        try Networking.verifyCanAccessInternet()
+
+        try generateTrafficAndDisconnect(from: connectedToIPAddress, searchForPort: 443, assertProtocol: .UDP)
+    }
+
+    /// Test automatic switching to TCP is functioning when UDP traffic to relays is blocked.
     func testWireGuardOverTCPAutomatically() throws {
-        FirewallAPIClient().removeRules()
+        FirewallClient().removeRules()
         removeFirewallRulesInTearDown = true
 
         addTeardownBlock {
             self.restoreDefaultCountry()
         }
 
-        // First get relay info
-        let relayInfo = getDefaultRelayInfo()
-
         // Run actual test
-        try FirewallAPIClient().createRule(
-            FirewallRule.makeBlockUDPTrafficRule(toIPAddress: relayInfo.ipAddress)
+        try FirewallClient().createRule(
+            // Block all UDP traffic not going to the router.
+            FirewallRule.makeBlockUDPTrafficRule(toIPAddress: "8.8.8.8", inverted: true)
         )
 
         HeaderBar(app)
@@ -247,13 +428,15 @@ class RelayTests: LoggedInWithTimeUITestCase {
             .tapSelectLocationButton()
 
         SelectLocationPage(app)
-            .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultCityName)
-            .tapLocationCell(withName: relayInfo.name)
+            .tapLocationCell(withName: BaseUITestCase.testsDefaultQuicCountryName)
+
+        allowAddVPNConfigurationsIfAsked()
 
         // Should be two UDP connection attempts but sometimes only one is shown in the UI
         TunnelControlPage(app)
+            .tapRelayStatusExpandCollapseButton()
             .verifyConnectingOverTCPAfterUDPAttempts()
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
             .tapDisconnectButton()
     }
 
@@ -275,29 +458,19 @@ class RelayTests: LoggedInWithTimeUITestCase {
             .swipeDownToDismissModal()
 
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapConnectButton()
 
         allowAddVPNConfigurationsIfAsked()
 
         TunnelControlPage(app)
             .tapRelayStatusExpandCollapseButton()
             .verifyConnectingToPort("4001")
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
             .tapDisconnectButton()
     }
 
     func testDAITASettings() throws {
-        // Undo enabling DAITA in teardown
-        addTeardownBlock {
-            HeaderBar(self.app)
-                .tapSettingsButton()
-
-            SettingsPage(self.app)
-                .tapDAITACell()
-
-            DAITAPage(self.app)
-                .tapEnableSwitchIfOn()
-        }
+        try disableDaitaInTeardown()
 
         HeaderBar(app)
             .tapSettingsButton()
@@ -318,14 +491,95 @@ class RelayTests: LoggedInWithTimeUITestCase {
             .tapDoneButton()
 
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapSelectLocationButton()
+
+        SelectLocationPage(app)
+            .tapLocationCell(withName: BaseUITestCase.testsNonDAITACountryName)
 
         allowAddVPNConfigurationsIfAsked()
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
+            .verifyConnectingUsingDAITAThroughMultihop()
+            .verifyNotConnectingOverMultihop()
+            .tapSelectLocationButton()
+
+        SelectLocationPage(app)
+            .tapLocationCell(withName: BaseUITestCase.testsDefaultDAITACountryName)
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
             .verifyConnectingUsingDAITA()
             .tapDisconnectButton()
+    }
+
+    func testDaitaIncreasesAverageDataConsumption() throws {
+        let skipReason = """
+                This test is currently skipped due to not being reliable. An issue to fix it has been added here:
+                https://linear.app/mullvad/issue/IOS-1348/fix-testdaitaincreasesaveragedataconsumption-flakiness
+            """
+        try XCTSkipIf(true, skipReason)
+
+        // Verify daita is off
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .verifyDAITAOff()
+            .tapDoneButton()
+
+        // Get packet capture #1
+        let (firstIPAddress, firstPort, streamWithoutDaita) = try generateTrafficSample()
+
+        // Turn on daita
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .verifyDAITAOff()
+            .tapDAITACell()
+
+        DAITAPage(app)
+            .verifyTwoPages()
+            .verifyDirectOnlySwitchIsDisabled()
+            .tapEnableSwitch()
+            .tapBackButton()
+
+        SettingsPage(app)
+            .verifyDAITAOn()
+            .tapDoneButton()
+
+        try disableDaitaInTeardown()
+
+        // Get packet capture #2
+        let (secondIpAddress, secondPort, streamWithDaita) = try generateTrafficSample()
+
+        // Compare packet capture #1 and #2 mean packet size
+        let packetStreamWithoutDaita = try XCTUnwrap(
+            streamWithoutDaita
+                .filter { $0.destinationAddress == firstIPAddress && $0.destinationPort == firstPort }
+                .first
+        )
+
+        let packetStreamWithDaita = try XCTUnwrap(
+            streamWithDaita
+                .filter { $0.destinationAddress == secondIpAddress && $0.destinationPort == secondPort }
+                .first
+        )
+
+        let computeMeanPacketSize: (Stream, Int) -> Int32 = { stream, sampleSize in
+            stream.packets[..<sampleSize]
+                .map { $0.size }
+                .reduce(0, +) / Int32(sampleSize)
+        }
+
+        // Sample size might vary a lot, but DAITA is consistently padding enough that 100 samples or so should be good
+        // In this case, limit the total sample size to the smallest packet capture
+        let maximumSampleSize = min(packetStreamWithoutDaita.packets.count, packetStreamWithDaita.packets.count)
+        let meanPacketSizeWithoutDaita = computeMeanPacketSize(packetStreamWithoutDaita, maximumSampleSize)
+        let meanPacketSizeWithDaita = computeMeanPacketSize(packetStreamWithDaita, maximumSampleSize)
+
+        XCTAssertTrue(meanPacketSizeWithDaita > meanPacketSizeWithoutDaita)
     }
 
     func testMultihopSettings() throws {
@@ -358,57 +612,100 @@ class RelayTests: LoggedInWithTimeUITestCase {
             .tapDoneButton()
 
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapConnectButton()
 
         allowAddVPNConfigurationsIfAsked()
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
             .verifyConnectingOverMultihop()
             .tapDisconnectButton()
     }
 
-    /// Connect to a relay in the default country and city, get name and IP address of the relay the app successfully connects to. Assumes user is logged on and at tunnel control page.
-    private func getDefaultRelayInfo() -> RelayInfo {
+    func testMultihopSelection() throws {
+        // Undo enabling Multihop in teardown
+        addTeardownBlock {
+            HeaderBar(self.app)
+                .tapSettingsButton()
+
+            SettingsPage(self.app)
+                .tapMultihopCell()
+
+            MultihopPage(self.app)
+                .tapEnableSwitchIfOn()
+                .tapBackButton()
+
+            SettingsPage(self.app)
+                .tapDoneButton()
+
+            self.restoreDefaultCountry()
+        }
+
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .verifyMultihopOff()
+            .tapMultihopCell()
+
+        MultihopPage(app)
+            .verifyOnePage()
+            .tapEnableSwitch()
+            .tapBackButton()
+
+        SettingsPage(app)
+            .verifyMultihopOn()
+            .tapDoneButton()
+
         TunnelControlPage(app)
             .tapSelectLocationButton()
 
-        if SelectLocationPage(app).locationCellIsExpanded(BaseUITestCase.testsDefaultCountryName) {
-            // Already expanded - just make sure the correct city cell is selected
-            SelectLocationPage(app)
-                .tapLocationCell(withName: BaseUITestCase.testsDefaultCityName)
-        } else {
-            SelectLocationPage(app)
-                .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultCountryName)
-                .tapLocationCell(withName: BaseUITestCase.testsDefaultCityName)
-        }
+        SelectLocationPage(app)
+            .tapEntryLocationButton()
+            .tapLocationCellExpandButton(
+                withName: BaseUITestCase.testsDefaultCountryName
+            )
+            .tapLocationCellExpandButton(
+                withName: BaseUITestCase.testsDefaultCityName
+            )
+            .tapLocationCell(
+                withName: BaseUITestCase.testsDefaultRelayName
+            )
 
         allowAddVPNConfigurationsIfAsked()
 
-        let relayIPAddress = TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
-            .tapRelayStatusExpandCollapseButton()
-            .getInIPAddressFromConnectionStatus()
-
-        let relayName = TunnelControlPage(app).getCurrentRelayName()
+        SelectLocationPage(app)
+            .tapLocationCellExpandButton(
+                withName: BaseUITestCase.testsDefaultQuicCountryName
+            )
+            .tapLocationCellExpandButton(
+                withName: BaseUITestCase.testsDefaultQuicCityName
+            )
+            .tapLocationCell(
+                withName: BaseUITestCase.testsDefaultQuicRelayName
+            )
 
         TunnelControlPage(app)
+            .waitForConnectedLabel()
+            .verifyConnectingOverMultihop()
+            .verifyConnectedRelays(
+                entry: BaseUITestCase.testsDefaultRelayName,
+                exit: BaseUITestCase.testsDefaultQuicRelayName
+            )
             .tapDisconnectButton()
-
-        return RelayInfo(name: relayName, ipAddress: relayIPAddress)
     }
 
     func testCustomDNS() throws {
         let dnsServerIPAddress = "8.8.8.8"
-        let dnsServerProviderName = "GOOGLE"
+        let dnsServerProviderName = "Google LLC"
 
         TunnelControlPage(app)
-            .tapSecureConnectionButton()
+            .tapConnectButton()
 
         allowAddVPNConfigurationsIfAsked()
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
 
         try Networking.verifyCanAccessInternet()
 
@@ -432,4 +729,229 @@ class RelayTests: LoggedInWithTimeUITestCase {
 
         try Networking.verifyDNSServerProvider(dnsServerProviderName, isMullvad: false)
     }
-} // swiftlint:disable:this file_length
+
+    func testQuantumResistanceSettings() throws {
+        addTeardownBlock {
+            HeaderBar(self.app)
+                .tapSettingsButton()
+
+            SettingsPage(self.app)
+                .tapVPNSettingsCell()
+
+            VPNSettingsPage(self.app)
+                .tapQuantumResistantTunnelExpandButton()
+                .tapQuantumResistantTunnelAutomaticCell()
+        }
+
+        TunnelControlPage(app)
+            .tapConnectButton()
+
+        allowAddVPNConfigurationsIfAsked()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+            .verifyConnectingUsingQuantumResistance()
+
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .tapVPNSettingsCell()
+
+        VPNSettingsPage(app)
+            .tapQuantumResistantTunnelExpandButton()
+            .tapQuantumResistantTunnelOffCell()
+            .tapBackButton()
+
+        SettingsPage(app)
+            .tapDoneButton()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+            .verifyNotConnectingUsingQuantumResistance()
+            .tapDisconnectButton()
+    }
+
+    func testIncludeAllNetworksSettings() throws {
+        addTeardownBlock {
+            HeaderBar(self.app)
+                .tapSettingsButton()
+
+            SettingsPage(self.app)
+                .tapIncludeAllNetworksCell()
+
+            IncludeAllNetworksPage(self.app)
+                .tapEnableLocalNetworkSharing()
+                .tapEnableIncludeAllNetworks()
+                .tapBackButton()
+        }
+
+        TunnelControlPage(app)
+            .tapConnectButton()
+
+        allowAddVPNConfigurationsIfAsked()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+            .verifyNotConnectingUsingIncludeAllNetworks()
+            .verifyNotConnectingUsingLocalNetworkSharing()
+
+        HeaderBar(app)
+            .tapSettingsButton()
+
+        SettingsPage(app)
+            .tapIncludeAllNetworksCell()
+
+        IncludeAllNetworksPage(app)
+            .verifyFourPages()
+            .goToLastPage()
+            .verifyIncludeAllNetworksSwitchIsDisabled()
+            .verifyLocalNetworkSharingSwitchIsDisabled()
+            .tapEnableConsent()
+            .verifyIncludeAllNetworksSwitchIsEnabled()
+            .verifyLocalNetworkSharingSwitchIsDisabled()
+            .tapEnableIncludeAllNetworks()
+            .tapDismissAlert()
+            .tapDismissAlert()
+            .verifyLocalNetworkSharingSwitchIsEnabled()
+            .tapEnableLocalNetworkSharing()
+            .tapDismissAlert()
+            .tapBackButton()
+
+        SettingsPage(app)
+            .tapDoneButton()
+
+        TunnelControlPage(app)
+            .waitForConnectedLabel()
+            .tapRelayStatusExpandCollapseButton()
+            .verifyConnectingUsingIncludeAllNetworks()
+            .verifyConnectingUsingLocalNetworkSharing()
+            .tapDisconnectButton()
+    }
+}
+
+extension RelayTests {
+    private func disableDaitaInTeardown() throws {
+        // Undo enabling DAITA in teardown
+        addTeardownBlock {
+            HeaderBar(self.app)
+                .tapSettingsButton()
+
+            SettingsPage(self.app)
+                .tapDAITACell()
+
+            DAITAPage(self.app)
+                .tapEnableSwitchIfOn()
+        }
+    }
+
+    /// Connect to a relay in the default country and city, get name and IP address of the relay the app successfully connects to. Assumes user is logged on and at tunnel control page.
+    private func getDefaultRelayInfo() -> RelayInfo {
+        TunnelControlPage(app)
+            .tapSelectLocationButton()
+
+        if SelectLocationPage(app).locationCellIsExpanded(BaseUITestCase.testsDefaultCountryName) {
+            // Already expanded - just make sure the correct city cell is selected
+            SelectLocationPage(app)
+                .tapLocationCell(withName: BaseUITestCase.testsDefaultCityName)
+        } else {
+            SelectLocationPage(app)
+                .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultCountryName)
+                .tapLocationCell(withName: BaseUITestCase.testsDefaultCityName)
+        }
+
+        return getRelay()
+    }
+
+    /// Connect to a relay in the default country and city, get name and IP address of the relay the app successfully connects to. Assumes user is logged on and at tunnel control page.
+    private func getQuicRelayInfo() -> RelayInfo {
+        TunnelControlPage(app)
+            .tapSelectLocationButton()
+
+        if SelectLocationPage(app).locationCellIsExpanded(BaseUITestCase.testsDefaultQuicCountryName) {
+            // Already expanded - just make sure the correct city cell is selected
+            SelectLocationPage(app)
+                .tapLocationCell(withName: BaseUITestCase.testsDefaultQuicCityName)
+        } else {
+            SelectLocationPage(app)
+                .tapLocationCellExpandButton(withName: BaseUITestCase.testsDefaultQuicCountryName)
+                .tapLocationCell(withName: BaseUITestCase.testsDefaultQuicCityName)
+        }
+
+        return getRelay()
+    }
+
+    private func getRelay() -> RelayInfo {
+        allowAddVPNConfigurationsIfAsked()
+
+        let (relayIPAddress, _) = TunnelControlPage(app)
+            .waitForConnectedLabel()
+            .tapRelayStatusExpandCollapseButton()
+            .getInIPAddressAndPortFromConnectionStatus()
+
+        let relayName = TunnelControlPage(app).getCurrentRelayName()
+
+        TunnelControlPage(app)
+            .tapDisconnectButton()
+
+        return RelayInfo(name: relayName, ipAddress: relayIPAddress)
+    }
+
+    @discardableResult
+    private func generateTrafficAndDisconnect(
+        from connectedToIPAddress: String,
+        searchForPort port: Int,
+        duration: TimeInterval = 1,
+        assertProtocol transportProtocol: NetworkTransportProtocol
+    ) throws -> [Stream] {
+        let targetIPAddress = Networking.getAlwaysReachableIPAddress()
+        let trafficGenerator = TrafficGenerator(destinationHost: targetIPAddress, port: 80)
+        trafficGenerator.startGeneratingUDPTraffic(interval: 0.1)
+
+        RunLoop.current.run(until: .now + duration)
+        trafficGenerator.stopGeneratingUDPTraffic()
+
+        TunnelControlPage(app)
+            .tapDisconnectButton()
+        let capturedStreams = stopPacketCapture()
+
+        // The capture will contain several streams where `other_addr` contains the IP the device connected to
+        // One stream will be for the source port, the other for the destination port
+        let streamFromPeerToRelay = try XCTUnwrap(
+            capturedStreams.filter { $0.destinationAddress == connectedToIPAddress && $0.destinationPort == port }.first
+        )
+
+        XCTAssertTrue(streamFromPeerToRelay.transportProtocol == transportProtocol)
+        return capturedStreams
+    }
+
+    /// Starts a packet capture, connects to a relay, generates synthetic traffic,
+    /// disconnects from the relay, and gets a representation of the captured traffic
+    private func generateTrafficSample() throws -> (String, Int, [Stream]) {
+        startPacketCapture()
+
+        // Connect
+        TunnelControlPage(app)
+            .tapSelectLocationButton()
+
+        SelectLocationPage(app)
+            .tapLocationCell(withName: BaseUITestCase.testsDefaultDAITACountryName)
+
+        allowAddVPNConfigurationsIfAsked()
+
+        // Generate traffic sample
+        let (IPAddress, port) = TunnelControlPage(app)
+            .waitForConnectedLabel()
+            .tapRelayStatusExpandCollapseButton()
+            .getInIPAddressAndPortFromConnectionStatus()
+
+        let stream = try generateTrafficAndDisconnect(
+            from: IPAddress,
+            searchForPort: port,
+            duration: 30,
+            assertProtocol: .UDP
+        )
+
+        return (IPAddress, port, stream)
+    }
+}

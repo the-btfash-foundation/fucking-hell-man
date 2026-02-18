@@ -3,19 +3,20 @@
 //  MullvadVPN
 //
 //  Created by Andreas Lif on 2022-08-05.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import UIKit
 
 class VoucherTextField: CustomTextField, UITextFieldDelegate {
-    private let inputFormatter = InputTextFormatter(configuration: InputTextFormatter.Configuration(
-        allowedInput: .alphanumeric(isUpperCase: true),
-        groupSeparator: "-",
-        groupSize: 4,
-        maxGroups: 4
-    ))
+    private let inputFormatter = InputTextFormatter(
+        configuration: InputTextFormatter.Configuration(
+            allowedInput: .alphanumeric(isUpperCase: true),
+            groupSeparator: "-",
+            groupSize: 4,
+            maxGroups: 4
+        ))
 
     private var voucherLength: UInt8 {
         let maxGroups = inputFormatter.configuration.maxGroups

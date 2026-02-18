@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-01-16.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -14,12 +14,7 @@ class IPOverrideTextViewController: UIViewController {
 
     private lazy var importButton: UIBarButtonItem = {
         return UIBarButtonItem(
-            title: NSLocalizedString(
-                "IMPORT_TEXT_IMPORT_BUTTON",
-                tableName: "IPOverride",
-                value: "Import",
-                comment: ""
-            ),
+            title: NSLocalizedString("Import", comment: ""),
             primaryAction: UIAction(handler: { [weak self] _ in
                 self?.interactor.import(text: self?.textView.text ?? "")
                 self?.dismiss(animated: true)
@@ -42,12 +37,7 @@ class IPOverrideTextViewController: UIViewController {
 
         view.backgroundColor = .secondaryColor
 
-        navigationItem.title = NSLocalizedString(
-            "IMPORT_TEXT_NAVIGATION_TITLE",
-            tableName: "IPOverride",
-            value: "Import via text",
-            comment: ""
-        )
+        navigationItem.title = NSLocalizedString("Import via text", comment: "")
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel,

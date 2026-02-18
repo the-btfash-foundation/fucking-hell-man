@@ -1,4 +1,5 @@
-use anyhow::{anyhow, Result};
+use crate::BIN_NAME;
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use itertools::Itertools;
 use mullvad_management_interface::MullvadProxyClient;
@@ -94,7 +95,7 @@ impl Account {
     }
 
     async fn logout(rpc: &mut MullvadProxyClient) -> Result<()> {
-        rpc.logout_account().await?;
+        rpc.logout_account(&format!("{BIN_NAME} logout")).await?;
         println!("Removed device from Mullvad account");
         Ok(())
     }
@@ -122,7 +123,7 @@ impl Account {
                 if verbose {
                     println!("{:<20}{}", "Device id:", device.device.id);
                     println!("{:<20}{}", "Device pubkey:", device.device.pubkey);
-                    println!("{:<20}{}", "Device created:", device.device.created,);
+                    println!("{:<20}{}", "Device created:", device.device.created);
                 }
             }
             DeviceState::LoggedOut => {
@@ -131,7 +132,7 @@ impl Account {
             DeviceState::Revoked => {
                 println!("{REVOKED_MESSAGE}");
                 if let Some(account_number) = rpc.get_account_history().await? {
-                    println!("Mullvad account: {}", account_number);
+                    println!("Mullvad account: {account_number}");
                 }
             }
         }

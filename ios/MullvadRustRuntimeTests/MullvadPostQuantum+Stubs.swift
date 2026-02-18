@@ -3,27 +3,15 @@
 //  MullvadRustRuntimeTests
 //
 //  Created by Marco Nikic on 2024-06-12.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
+
+import NetworkExtension
 
 @testable import MullvadRustRuntime
 @testable import MullvadTypes
-import NetworkExtension
 @testable import PacketTunnelCore
 @testable import WireGuardKitTypes
-
-class NWTCPConnectionStub: NWTCPConnection {
-    var _isViable = false
-    override var isViable: Bool {
-        _isViable
-    }
-
-    func becomeViable() {
-        willChangeValue(for: \.isViable)
-        _isViable = true
-        didChangeValue(for: \.isViable)
-    }
-}
 
 class TunnelProviderStub: TunnelProvider {
     func tunnelHandle() throws -> Int32 {
@@ -37,21 +25,6 @@ class TunnelProviderStub: TunnelProvider {
             receive: { _, _, _, _ in return 0 },
             send: { _, _, _, _ in return 0 }
         )
-    }
-
-    let tcpConnection: NWTCPConnectionStub
-
-    init(tcpConnection: NWTCPConnectionStub) {
-        self.tcpConnection = tcpConnection
-    }
-
-    func createTCPConnectionThroughTunnel(
-        to remoteEndpoint: NWEndpoint,
-        enableTLS: Bool,
-        tlsParameters TLSParameters: NWTLSParameters?,
-        delegate: Any?
-    ) -> NWTCPConnection {
-        tcpConnection
     }
 }
 

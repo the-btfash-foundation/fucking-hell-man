@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 25/02/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -12,16 +12,16 @@ import NetworkExtension
 
 // Switch to stabs on simulator
 #if targetEnvironment(simulator)
-typealias TunnelProviderManagerType = SimulatorTunnelProviderManager
+    typealias TunnelProviderManagerType = SimulatorTunnelProviderManager
 #else
-typealias TunnelProviderManagerType = NETunnelProviderManager
+    typealias TunnelProviderManagerType = NETunnelProviderManager
 #endif
 
 protocol TunnelStatusObserver {
     func tunnel(_ tunnel: any TunnelProtocol, didReceiveStatus status: NEVPNStatus)
 }
 
-protocol TunnelProtocol: AnyObject {
+protocol TunnelProtocol: AnyObject, Sendable {
     associatedtype TunnelManagerProtocol: VPNTunnelProviderManagerProtocol
     var status: NEVPNStatus { get }
     var isOnDemandEnabled: Bool { get set }
@@ -49,30 +49,30 @@ protocol TunnelProtocol: AnyObject {
 }
 
 /// Tunnel wrapper class.
-final class Tunnel: TunnelProtocol, Equatable {
+final class Tunnel: TunnelProtocol, Equatable, @unchecked Sendable {
     /// Unique identifier assigned to instance at the time of creation.
     let identifier = UUID()
 
     var backgroundTaskProvider: BackgroundTaskProviding
 
     #if DEBUG
-    /// System VPN configuration identifier.
-    /// This property performs a private call to obtain system configuration ID so it does not
-    /// guarantee to return anything, also it may not return anything for newly created tunnels.
-    var systemIdentifier: UUID? {
-        let configurationKey = "configuration"
-        let identifierKey = "identifier"
+        /// System VPN configuration identifier.
+        /// This property performs a private call to obtain system configuration ID so it does not
+        /// guarantee to return anything, also it may not return anything for newly created tunnels.
+        var systemIdentifier: UUID? {
+            let configurationKey = "configuration"
+            let identifierKey = "identifier"
 
-        guard tunnelProvider.responds(to: NSSelectorFromString(configurationKey)),
-              let config = tunnelProvider.value(forKey: configurationKey) as? NSObject,
-              config.responds(to: NSSelectorFromString(identifierKey)),
-              let identifier = config.value(forKey: identifierKey) as? UUID
-        else {
-            return nil
+            guard tunnelProvider.responds(to: NSSelectorFromString(configurationKey)),
+                let config = tunnelProvider.value(forKey: configurationKey) as? NSObject,
+                config.responds(to: NSSelectorFromString(identifierKey)),
+                let identifier = config.value(forKey: identifierKey) as? UUID
+            else {
+                return nil
+            }
+
+            return identifier
         }
-
-        return identifier
-    }
     #endif
 
     /// Tunnel start date.
@@ -104,9 +104,9 @@ final class Tunnel: TunnelProtocol, Equatable {
     func logFormat() -> String {
         var s = identifier.uuidString
         #if DEBUG
-        if let configurationIdentifier = systemIdentifier?.uuidString {
-            s += " (system profile ID: \(configurationIdentifier))"
-        }
+            if let configurationIdentifier = systemIdentifier?.uuidString {
+                s += " (system profile ID: \(configurationIdentifier))"
+            }
         #endif
         return s
     }
@@ -121,10 +121,15 @@ final class Tunnel: TunnelProtocol, Equatable {
         self.tunnelProvider = tunnelProvider
         self.backgroundTaskProvider = backgroundTaskProvider
 
+        // Observe ALL NEVPNStatusDidChange notifications rather than filtering by specific
+        // connection object. This is necessary because `loadFromPreferences` may internally
+        // replace the connection object, causing notifications to be sent to a different
+        // object than the one we originally registered for. We filter in the handler instead
+        // by comparing against the current `tunnelProvider.connection`.
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleVPNStatusChangeNotification(_:)),
             name: .NEVPNStatusDidChange,
-            object: tunnelProvider.connection
+            object: nil
         )
 
         handleVPNStatus(tunnelProvider.connection.status)
@@ -187,6 +192,11 @@ final class Tunnel: TunnelProtocol, Equatable {
 
     @objc private func handleVPNStatusChangeNotification(_ notification: Notification) {
         guard let connection = notification.object as? VPNConnectionProtocol else { return }
+
+        // Filter to only handle notifications for our connection.
+        // We compare against the current `tunnelProvider.connection` (not a captured reference)
+        // because `loadFromPreferences` may replace the connection object internally.
+        guard connection === tunnelProvider.connection else { return }
 
         let newStatus = connection.status
 

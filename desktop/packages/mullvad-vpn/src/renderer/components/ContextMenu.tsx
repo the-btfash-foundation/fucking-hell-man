@@ -1,10 +1,11 @@
 import React, { useCallback, useContext, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../config.json';
+import { IconButton } from '../lib/components';
+import { colors } from '../lib/foundations';
 import { useBoolean, useStyledRef } from '../lib/utility-hooks';
 import { smallText } from './common-styles';
-import { BackAction } from './KeyboardNavigation';
+import { BackAction } from './keyboard-navigation';
 
 const BORDER_WIDTH = 1;
 const PADDING_VERTICAL = 10;
@@ -86,18 +87,14 @@ export function ContextMenuContainer(props: React.PropsWithChildren) {
   );
 }
 
-const StyledTrigger = styled.button({
-  borderWidth: 0,
-  padding: 0,
-  margin: 0,
-  cursor: 'default',
-  backgroundColor: 'transparent',
-});
-
-export function ContextMenuTrigger(props: React.PropsWithChildren) {
+export function ContextMenuTrigger() {
   const { toggleVisibility } = useContext(menuContext);
 
-  return <StyledTrigger onClick={toggleVisibility}>{props.children}</StyledTrigger>;
+  return (
+    <IconButton onClick={toggleVisibility}>
+      <IconButton.Icon icon="more-horizontal-circle" />
+    </IconButton>
+  );
 }
 
 interface StyledMenuProps {
@@ -116,7 +113,7 @@ const StyledMenu = styled.div<StyledMenuProps>((props) => {
     left: props.$align === 'left' ? iconMargin : 'auto',
     right: props.$align === 'left' ? 'auto' : iconMargin,
     padding: '7px 4px',
-    background: 'rgb(36, 53, 78)',
+    background: colors.blue40,
     border: `1px solid ${colors.darkBlue}`,
     borderRadius: '8px',
     zIndex: 1,
@@ -127,13 +124,13 @@ const StyledMenuItem = styled.button(smallText, (props) => ({
   minWidth: '110px',
   padding: '1px 10px 2px',
   lineHeight: `${ITEM_HEIGHT}px`,
-  background: 'transparent',
+  background: colors.transparent,
   border: 'none',
   textAlign: 'left',
-  color: props.disabled ? colors.white50 : colors.white,
+  color: props.disabled ? colors.whiteAlpha40 : colors.white,
 
   '&&:hover': {
-    background: props.disabled ? 'transparent' : colors.blue,
+    background: props.disabled ? colors.transparent : colors.blue,
   },
 }));
 

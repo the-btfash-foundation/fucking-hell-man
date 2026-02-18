@@ -3,12 +3,13 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 21/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
-import struct MullvadTypes.Duration
 import UIKit
+
+import struct MullvadTypes.Duration
 
 /// The view controller providing the interface for editing method settings
 /// and testing the proxy configuration.
@@ -46,7 +47,7 @@ class MethodSettingsViewController: UITableViewController {
 
     lazy var saveBarButton: UIBarButtonItem = {
         let barButtonItem = UIBarButtonItem(
-            title: NSLocalizedString("SAVE_NAVIGATION_BUTTON", tableName: "APIAccess", value: "Save", comment: ""),
+            title: NSLocalizedString("Save", comment: ""),
             primaryAction: UIAction { [weak self] _ in
                 self?.onTest()
             }
@@ -108,10 +109,10 @@ class MethodSettingsViewController: UITableViewController {
 
         switch itemIdentifier {
         case .name, .protocol, .proxyConfiguration, .cancelTest:
-            return UIMetrics.SettingsCell.apiAccessCellHeight
+            return UITableView.automaticDimension
         case .validationError:
             return contentValidationErrors.isEmpty
-                ? UIMetrics.SettingsCell.apiAccessCellHeight
+                ? 44.0
                 : UITableView.automaticDimension
         case .testingStatus:
             return UITableView.automaticDimension
@@ -119,28 +120,27 @@ class MethodSettingsViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        guard let sectionIdentifier = dataSource?.snapshot().sectionIdentifiers[section] else { return nil }
-
-        guard let headerView = tableView
-            .dequeueReusableView(withIdentifier: AccessMethodHeaderFooterReuseIdentifier.primary)
+        guard let sectionIdentifier = dataSource?.snapshot().sectionIdentifiers[section],
+            sectionIdentifier.sectionName != nil
         else { return nil }
 
-        var contentConfiguration = UIListContentConfiguration.mullvadGroupedHeader(tableStyle: tableView.style)
+        var contentConfiguration = ListCellContentConfiguration(
+            textProperties:
+                ListCellContentConfiguration
+                .TextProperties(color: .TableSection.headerTextColor)
+        )
         contentConfiguration.text = sectionIdentifier.sectionName
 
-        headerView.contentConfiguration = contentConfiguration
-
-        return headerView
+        return contentConfiguration.makeContentView()
     }
 
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         guard let sectionIdentifier = dataSource?.snapshot().sectionIdentifiers[section] else { return 0 }
-
         switch sectionIdentifier {
-        case .name, .protocol, .proxyConfiguration, .testingStatus:
-            return UITableView.automaticDimension
-        case .validationError, .cancelTest:
+        case .protocol, .cancelTest, .testingStatus, .validationError:
             return 0
+        case .proxyConfiguration, .name:
+            return UITableView.automaticDimension
         }
     }
 
@@ -153,7 +153,7 @@ class MethodSettingsViewController: UITableViewController {
 
         switch sectionIdentifier {
         case .name, .protocol, .cancelTest:
-            return UITableView.automaticDimension
+            return 24.0
         case .proxyConfiguration, .validationError, .testingStatus:
             return 0
         }
@@ -161,7 +161,8 @@ class MethodSettingsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, willSelectRowAt indexPath: IndexPath) -> IndexPath? {
         guard !isTesting, let itemIdentifier = dataSource?.itemIdentifier(for: indexPath),
-              itemIdentifier.isSelectable else { return nil }
+            itemIdentifier.isSelectable
+        else { return nil }
 
         return indexPath
     }
@@ -201,7 +202,6 @@ class MethodSettingsViewController: UITableViewController {
 
     private func configureDataSource() {
         tableView.registerReusableViews(from: AccessMethodCellReuseIdentifier.self)
-        tableView.registerReusableViews(from: AccessMethodHeaderFooterReuseIdentifier.self)
 
         dataSource = UITableViewDiffableDataSource(
             tableView: tableView,
@@ -246,7 +246,7 @@ class MethodSettingsViewController: UITableViewController {
         tableView.delegate = self
         tableView.backgroundColor = .secondaryColor
         tableView.separatorColor = .secondaryColor
-        tableView.separatorInset.left = UIMetrics.SettingsCell.apiAccessInsetLayoutMargins.leading
+        tableView.separatorInset.left = UIMetrics.SettingsCell.defaultLayoutMargins.leading
     }
 
     // MARK: - Misc
@@ -256,9 +256,10 @@ class MethodSettingsViewController: UITableViewController {
         let validationError = validationResult.error as? AccessMethodValidationError
 
         // Only look for empty values for input validation.
-        inputValidationErrors = validationError?.fieldErrors.filter { error in
-            error.kind == .emptyValue
-        } ?? []
+        inputValidationErrors =
+            validationError?.fieldErrors.filter { error in
+                error.kind == .emptyValue
+            } ?? []
 
         saveBarButton.isEnabled = !isTesting && inputValidationErrors.isEmpty
     }
@@ -267,10 +268,11 @@ class MethodSettingsViewController: UITableViewController {
         let validationResult = Result { try subject.value.validate() }
         let validationError = validationResult.error as? AccessMethodValidationError
 
-        // Only look for format errors for test(save validation.
-        contentValidationErrors = validationError?.fieldErrors.filter { error in
-            error.kind != .emptyValue
-        } ?? []
+        // Only look for format errors for test (save validation).
+        contentValidationErrors =
+            validationError?.fieldErrors.filter { error in
+                error.kind != .emptyValue
+            } ?? []
     }
 
     private func onSave(transitionDelay: Duration = .zero) {
@@ -298,7 +300,9 @@ class MethodSettingsViewController: UITableViewController {
         saveBarButton.isEnabled = false
 
         interactor.startProxyConfigurationTest { [weak self] _ in
-            self?.onTestCompleted()
+            Task { @MainActor in
+                self?.onTestCompleted()
+            }
         }
     }
 
@@ -312,20 +316,10 @@ class MethodSettingsViewController: UITableViewController {
                 id: "api-access-methods-testing-status-failed-alert",
                 accessibilityIdentifier: .accessMethodUnreachableAlert,
                 icon: .warning,
-                message: NSLocalizedString(
-                    "METHOD_SETTINGS_SAVE_PROMPT",
-                    tableName: "APIAccess",
-                    value: "API could not be reached, save anyway?",
-                    comment: ""
-                ),
+                message: NSLocalizedString("API unreachable, save method anyway?", comment: ""),
                 buttons: [
                     AlertAction(
-                        title: NSLocalizedString(
-                            "METHOD_SETTINGS_SAVE_BUTTON",
-                            tableName: "APIAccess",
-                            value: "Save anyway",
-                            comment: ""
-                        ),
+                        title: NSLocalizedString("Save", comment: ""),
                         style: .default,
                         accessibilityId: .accessMethodUnreachableSaveButton,
                         handler: { [weak self] in
@@ -333,12 +327,7 @@ class MethodSettingsViewController: UITableViewController {
                         }
                     ),
                     AlertAction(
-                        title: NSLocalizedString(
-                            "METHOD_SETTINGS_BACK_BUTTON",
-                            tableName: "APIAccess",
-                            value: "Back to editing",
-                            comment: ""
-                        ),
+                        title: NSLocalizedString("Cancel", comment: ""),
                         style: .default,
                         accessibilityId: .accessMethodUnreachableBackButton
                     ),

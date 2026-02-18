@@ -1,62 +1,44 @@
 import {
   ApiAccessMethodSettings,
+  IRelaySettingsNormal,
   ISettings,
   ObfuscationType,
   Ownership,
 } from '../shared/daemon-rpc-types';
 
+export function getDefaultRelaySettingsNormal(): IRelaySettingsNormal {
+  return {
+    location: 'any',
+    providers: [],
+    ownership: Ownership.any,
+    wireguardConstraints: {
+      ipVersion: 'any',
+      useMultihop: false,
+      entryLocation: 'any',
+    },
+  };
+}
+
 export function getDefaultSettings(): ISettings {
   return {
     allowLan: false,
     autoConnect: false,
-    blockWhenDisconnected: false,
+    lockdownMode: false,
     showBetaReleases: false,
     splitTunnel: {
-      enableExclusions: false,
+      enableExclusions: true,
       appsList: [],
     },
     relaySettings: {
-      normal: {
-        location: 'any',
-        tunnelProtocol: 'any',
-        providers: [],
-        ownership: Ownership.any,
-        openvpnConstraints: {
-          port: 'any',
-          protocol: 'any',
-        },
-        wireguardConstraints: {
-          port: 'any',
-          ipVersion: 'any',
-          useMultihop: false,
-          entryLocation: 'any',
-        },
-      },
+      normal: getDefaultRelaySettingsNormal(),
     },
-    bridgeSettings: {
-      type: 'normal',
-      normal: {
-        location: 'any',
-        providers: [],
-        ownership: Ownership.any,
-      },
-      custom: undefined,
-    },
-    bridgeState: 'auto',
     tunnelOptions: {
-      generic: {
-        enableIpv6: false,
-      },
-      openvpn: {
-        mssfix: undefined,
-      },
-      wireguard: {
-        mtu: undefined,
-        quantumResistant: undefined,
-        daita: {
-          enabled: false,
-          directOnly: false,
-        },
+      enableIpv6: false,
+      mtu: undefined,
+      quantumResistant: true,
+      daita: {
+        enabled: false,
+        directOnly: false,
       },
       dns: {
         state: 'default',
@@ -79,6 +61,9 @@ export function getDefaultSettings(): ISettings {
         port: 'any',
       },
       shadowsocksSettings: {
+        port: 'any',
+      },
+      wireGuardPortSettings: {
         port: 'any',
       },
     },

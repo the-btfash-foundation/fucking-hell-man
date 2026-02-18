@@ -3,13 +3,13 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 25/05/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Routing
 import UIKit
 
-enum HeaderBarStyle {
+enum HeaderBarStyle: Sendable {
     case transparent, `default`, unsecured, secured
 
     fileprivate func backgroundColor() -> UIColor {
@@ -26,7 +26,7 @@ enum HeaderBarStyle {
     }
 }
 
-struct HeaderBarPresentation {
+struct HeaderBarPresentation: Sendable {
     let style: HeaderBarStyle
     let showsDivider: Bool
 
@@ -36,7 +36,8 @@ struct HeaderBarPresentation {
 }
 
 /// A protocol that defines the relationship between the root container and its child controllers
-protocol RootContainment {
+@MainActor
+protocol RootContainment: Sendable {
     /// Return the preferred header bar style
     var preferredHeaderBarPresentation: HeaderBarPresentation { get }
 
@@ -52,7 +53,7 @@ protocol RootContainment {
 
 extension RootContainment {
     var prefersNotificationBarHidden: Bool {
-        false
+        true
     }
 
     var prefersDeviceInfoBarHidden: Bool {
@@ -60,7 +61,7 @@ extension RootContainment {
     }
 }
 
-protocol RootContainerViewControllerDelegate: AnyObject {
+protocol RootContainerViewControllerDelegate: AnyObject, Sendable {
     func rootContainerViewControllerShouldShowAccount(
         _ controller: RootContainerViewController,
         animated: Bool
@@ -130,7 +131,8 @@ class RootContainerViewController: UIViewController {
     }
 
     override var disablesAutomaticKeyboardDismissal: Bool {
-        topViewController?.disablesAutomaticKeyboardDismissal ?? super
+        topViewController?.disablesAutomaticKeyboardDismissal
+            ?? super
             .disablesAutomaticKeyboardDismissal
     }
 
@@ -326,7 +328,8 @@ class RootContainerViewController: UIViewController {
     // MARK: - Accessibility
 
     override func accessibilityPerformMagicTap() -> Bool {
-        delegate?.rootContainerViewAccessibilityPerformMagicTap(self) ?? super
+        delegate?.rootContainerViewAccessibilityPerformMagicTap(self)
+            ?? super
             .accessibilityPerformMagicTap()
     }
 
@@ -382,7 +385,7 @@ class RootContainerViewController: UIViewController {
             transitionViewButton.removeFromSuperview()
             button = transitionViewButton
         } else {
-            button = HeaderBarView.makeHeaderBarButton(with: UIImage(named: "IconAccount"))
+            button = HeaderBarView.makeHeaderBarButton(with: UIImage.Buttons.account)
             button.addTarget(
                 self,
                 action: #selector(handleAccountButtonTap),
@@ -403,7 +406,7 @@ class RootContainerViewController: UIViewController {
             transitionViewButton.removeFromSuperview()
             button = transitionViewButton
         } else {
-            button = HeaderBarView.makeHeaderBarButton(with: UIImage(named: "IconSettings"))
+            button = HeaderBarView.makeHeaderBarButton(with: UIImage.Buttons.settings)
             button.isEnabled = headerBarView.settingsButton.isEnabled
             button.addTarget(
                 self,
@@ -423,7 +426,6 @@ class RootContainerViewController: UIViewController {
         showSettings(animated: true)
     }
 
-    // swiftlint:disable:next function_body_length
     private func setViewControllersInternal(
         _ newViewControllers: [UIViewController],
         isUnwinding: Bool,
@@ -553,12 +555,14 @@ class RootContainerViewController: UIViewController {
          */
         if shouldHandleAppearanceEvents {
             if let targetViewController,
-               sourceViewController != targetViewController {
+                sourceViewController != targetViewController
+            {
                 self.endChildControllerTransition(targetViewController)
             }
 
             if let sourceViewController,
-               sourceViewController != targetViewController {
+                sourceViewController != targetViewController
+            {
                 self.endChildControllerTransition(sourceViewController)
             }
         }
@@ -626,7 +630,8 @@ class RootContainerViewController: UIViewController {
     ) {
         if shouldHandleAppearanceEvents {
             if let sourceViewController,
-               sourceViewController != targetViewController {
+                sourceViewController != targetViewController
+            {
                 beginChildControllerTransition(
                     sourceViewController,
                     isAppearing: false,
@@ -634,7 +639,8 @@ class RootContainerViewController: UIViewController {
                 )
             }
             if let targetViewController,
-               sourceViewController != targetViewController {
+                sourceViewController != targetViewController
+            {
                 beginChildControllerTransition(
                     targetViewController,
                     isAppearing: true,
@@ -720,7 +726,8 @@ class RootContainerViewController: UIViewController {
 
     private func updateNotificationBarHiddenFromChildPreferences() {
         if let notificationController,
-           let conforming = topViewController as? RootContainment {
+            let conforming = topViewController as? RootContainment
+        {
             if conforming.prefersNotificationBarHidden {
                 removeNotificationController(notificationController)
             } else {
@@ -746,7 +753,7 @@ class RootContainerViewController: UIViewController {
 
             // Tell UIKit to update the interface orientation
             if attemptRotateToDeviceOrientation {
-                Self.attemptRotationToDeviceOrientation()
+                setNeedsUpdateOfSupportedInterfaceOrientations()
             }
         }
     }
@@ -804,7 +811,7 @@ class RootContainerViewController: UIViewController {
 
     /**
      Layout guide for notification view.
-
+    
      When set, notification view follows the layout guide that defines its dimensions and position, otherwise it's
      laid out within container's safe area.
      */
@@ -873,5 +880,4 @@ extension RootContainerViewController {
         headerBarView.update(configuration: configuration)
     }
 
-    // swiftlint:disable:next file_length
 }

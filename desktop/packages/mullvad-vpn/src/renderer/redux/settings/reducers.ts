@@ -3,10 +3,7 @@ import { ISplitTunnelingApplication } from '../../../shared/application-types';
 import {
   AccessMethodSetting,
   ApiAccessMethodSettings,
-  BridgeState,
-  BridgeType,
   CustomLists,
-  CustomProxy,
   IDaitaSettings,
   IDnsOptions,
   IpVersion,
@@ -15,38 +12,23 @@ import {
   ObfuscationSettings,
   ObfuscationType,
   Ownership,
-  RelayEndpointType,
+  Quic,
   RelayLocation,
   RelayOverride,
   RelayProtocol,
-  TunnelProtocol,
 } from '../../../shared/daemon-rpc-types';
 import { IGuiSettingsState } from '../../../shared/gui-settings-state';
 import { ReduxAction } from '../store';
 
 export type NormalRelaySettingsRedux = {
-  tunnelProtocol: LiftedConstraint<TunnelProtocol>;
   location: LiftedConstraint<RelayLocation>;
   providers: string[];
   ownership: Ownership;
-  openvpn: {
-    port: LiftedConstraint<number>;
-    protocol: LiftedConstraint<RelayProtocol>;
-  };
   wireguard: {
-    port: LiftedConstraint<number>;
     ipVersion: LiftedConstraint<IpVersion>;
     useMultihop: boolean;
     entryLocation: LiftedConstraint<RelayLocation>;
   };
-};
-
-export type NormalBridgeSettingsRedux = {
-  location: LiftedConstraint<RelayLocation>;
-  /** Providers are used to filter bridges and as bridge constraints for the daemon. */
-  providers: string[];
-  /** Ownership is used to filter bridges and as bridge constraints for the daemon. */
-  ownership: Ownership;
 };
 
 export type RelaySettingsRedux =
@@ -61,12 +43,6 @@ export type RelaySettingsRedux =
       };
     };
 
-export type BridgeSettingsRedux = {
-  type: BridgeType;
-  normal: NormalBridgeSettingsRedux;
-  custom?: CustomProxy;
-};
-
 export interface IRelayLocationRelayRedux {
   hostname: string;
   provider: string;
@@ -75,8 +51,9 @@ export interface IRelayLocationRelayRedux {
   active: boolean;
   owned: boolean;
   weight: number;
-  endpointType: RelayEndpointType;
   daita: boolean;
+  quic?: Quic;
+  lwo: boolean;
 }
 
 export interface IRelayLocationCityRedux {
@@ -101,21 +78,17 @@ export interface ISettingsReduxState {
   wireguardEndpointData: IWireguardEndpointData;
   allowLan: boolean;
   enableIpv6: boolean;
-  bridgeSettings: BridgeSettingsRedux;
-  bridgeState: BridgeState;
-  blockWhenDisconnected: boolean;
+  lockdownMode: boolean;
   showBetaReleases: boolean;
-  openVpn: {
-    mssfix?: number;
-  };
   wireguard: {
     mtu?: number;
-    quantumResistant?: boolean;
+    quantumResistant: boolean;
     daita?: IDaitaSettings;
   };
   dns: IDnsOptions;
   splitTunneling: boolean;
   splitTunnelingApplications: ISplitTunnelingApplication[];
+  splitTunnelingSupported: boolean;
   obfuscationSettings: ObfuscationSettings;
   customLists: CustomLists;
   apiAccessMethods: ApiAccessMethodSettings;
@@ -134,39 +107,26 @@ const initialState: ISettingsReduxState = {
     unpinnedWindow: window.env.platform !== 'win32' && window.env.platform !== 'darwin',
     browsedForSplitTunnelingApplications: [],
     changelogDisplayedForVersion: '',
+    updateDismissedForVersion: '',
     animateMap: true,
   },
   relaySettings: {
     normal: {
       location: 'any',
-      tunnelProtocol: 'any',
       providers: [],
       ownership: Ownership.any,
-      wireguard: { port: 'any', ipVersion: 'any', useMultihop: false, entryLocation: 'any' },
-      openvpn: {
-        port: 'any',
-        protocol: 'any',
-      },
+      wireguard: { ipVersion: 'any', useMultihop: false, entryLocation: 'any' },
     },
   },
   relayLocations: [],
   wireguardEndpointData: { portRanges: [], udp2tcpPorts: [] },
   allowLan: false,
   enableIpv6: true,
-  bridgeSettings: {
-    type: 'normal',
-    normal: {
-      location: 'any',
-      providers: [],
-      ownership: Ownership.any,
-    },
-    custom: undefined,
-  },
-  bridgeState: 'auto',
-  blockWhenDisconnected: false,
+  lockdownMode: false,
   showBetaReleases: false,
-  openVpn: {},
-  wireguard: {},
+  wireguard: {
+    quantumResistant: true,
+  },
   dns: {
     state: 'default',
     defaultOptions: {
@@ -183,12 +143,16 @@ const initialState: ISettingsReduxState = {
   },
   splitTunneling: false,
   splitTunnelingApplications: [],
+  splitTunnelingSupported: false,
   obfuscationSettings: {
     selectedObfuscation: ObfuscationType.auto,
     udp2tcpSettings: {
       port: 'any',
     },
     shadowsocksSettings: {
+      port: 'any',
+    },
+    wireGuardPortSettings: {
       port: 'any',
     },
   },
@@ -239,25 +203,16 @@ export default function (
         enableIpv6: action.enableIpv6,
       };
 
-    case 'UPDATE_BLOCK_WHEN_DISCONNECTED':
+    case 'UPDATE_LOCKDOWN_MODE':
       return {
         ...state,
-        blockWhenDisconnected: action.blockWhenDisconnected,
+        lockdownMode: action.lockdownMode,
       };
 
     case 'UPDATE_SHOW_BETA_NOTIFICATIONS':
       return {
         ...state,
         showBetaReleases: action.showBetaReleases,
-      };
-
-    case 'UPDATE_OPENVPN_MSSFIX':
-      return {
-        ...state,
-        openVpn: {
-          ...state.openVpn,
-          mssfix: action.mssfix,
-        },
       };
 
     case 'UPDATE_WIREGUARD_MTU':
@@ -292,18 +247,6 @@ export default function (
         autoStart: action.autoStart,
       };
 
-    case 'UPDATE_BRIDGE_SETTINGS':
-      return {
-        ...state,
-        bridgeSettings: action.bridgeSettings,
-      };
-
-    case 'UPDATE_BRIDGE_STATE':
-      return {
-        ...state,
-        bridgeState: action.bridgeState,
-      };
-
     case 'UPDATE_DNS_OPTIONS':
       return {
         ...state,
@@ -320,6 +263,12 @@ export default function (
       return {
         ...state,
         splitTunnelingApplications: action.applications,
+      };
+
+    case 'SET_SPLIT_TUNNELING_SUPPORTED':
+      return {
+        ...state,
+        splitTunnelingSupported: action.supported,
       };
 
     case 'SET_OBFUSCATION_SETTINGS':

@@ -3,7 +3,7 @@
 //  RelaySelector
 //
 //  Created by Marco Nikic on 2023-07-11.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import CoreLocation
@@ -19,7 +19,9 @@ public enum Midpoint {
     ///
     /// https://en.wikipedia.org/wiki/Spherical_coordinate_system#Cartesian_coordinates
     static func location(in coordinates: [CLLocationCoordinate2D]) -> CLLocationCoordinate2D {
-        var x = 0.0, y = 0.0, z = 0.0
+        var x = 0.0
+        var y = 0.0
+        var z = 0.0
         var count = 0
 
         coordinates.forEach { coordinate in

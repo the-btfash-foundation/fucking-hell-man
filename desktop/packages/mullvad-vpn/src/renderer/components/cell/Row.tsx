@@ -1,7 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../../config.json';
+import { colors } from '../../lib/foundations';
 import { measurements } from '../common-styles';
 import { Group } from './Group';
 

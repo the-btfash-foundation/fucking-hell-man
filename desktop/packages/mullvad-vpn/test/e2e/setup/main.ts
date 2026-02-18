@@ -9,15 +9,16 @@ import {
   IAccountData,
   IAppVersionInfo,
   ILocation,
-  IRelayList,
-  IWireguardEndpointData,
 } from '../../../src/shared/daemon-rpc-types';
 import { messages, relayLocations } from '../../../src/shared/gettext';
 import { IGuiSettingsState } from '../../../src/shared/gui-settings-state';
 import { ITranslations, MacOsScrollbarVisibility } from '../../../src/shared/ipc-schema';
 import { ICurrentAppVersionInfo } from '../../../src/shared/ipc-types';
+import { mockData } from '../mock-data';
 
 const DEBUG = false;
+const TEST_SHOW_WINDOW = process.env.TEST_SHOW_WINDOW === '1';
+const CI_E2E = process.env.CI === 'e2e';
 
 class ApplicationMain {
   private guiSettings: IGuiSettingsState = {
@@ -29,6 +30,7 @@ class ApplicationMain {
     unpinnedWindow: process.platform !== 'win32' && process.platform !== 'darwin',
     browsedForSplitTunnelingApplications: [],
     changelogDisplayedForVersion: '',
+    updateDismissedForVersion: '',
     animateMap: true,
   };
 
@@ -73,41 +75,6 @@ class ApplicationMain {
     mullvadExitIp: false,
   };
 
-  private relayList: IRelayList = {
-    countries: [
-      {
-        name: 'Sweden',
-        code: 'se',
-        cities: [
-          {
-            name: 'Gothenburg',
-            code: 'got',
-            latitude: 58,
-            longitude: 12,
-            relays: [
-              {
-                hostname: 'se-got-wg-101',
-                provider: 'mullvad',
-                ipv4AddrIn: '127.0.0.1',
-                includeInCountry: true,
-                active: true,
-                weight: 0,
-                owned: true,
-                endpointType: 'wireguard',
-                daita: false,
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  };
-
-  private wireguardEndpointData: IWireguardEndpointData = {
-    portRanges: [],
-    udp2tcpPorts: [],
-  };
-
   public constructor() {
     app.enableSandbox();
     app.on('ready', this.onReady);
@@ -126,7 +93,8 @@ class ApplicationMain {
       show: DEBUG,
       frame: true,
       webPreferences: {
-        preload: path.join(__dirname, '../../../src/renderer/preloadBundle.js'),
+        offscreen: CI_E2E && !TEST_SHOW_WINDOW,
+        preload: path.join(import.meta.dirname, 'preload.js'),
         nodeIntegration: false,
         nodeIntegrationInWorker: false,
         nodeIntegrationInSubFrames: false,
@@ -141,8 +109,11 @@ class ApplicationMain {
 
     this.registerIpcListeners();
 
-    const filePath = path.resolve(path.join(__dirname, '../../../src/renderer/index.html'));
-    await window.loadFile(filePath);
+    await window.loadFile(path.join(import.meta.dirname, 'index.html'));
+
+    if (process.argv.includes('--show-window')) {
+      window.show();
+    }
 
     if (DEBUG) {
       window.webContents.openDevTools({ mode: 'detach' });
@@ -155,14 +126,13 @@ class ApplicationMain {
       autoStart: false,
       accountData: this.accountData,
       accountHistory: undefined,
-      tunnelState: { state: 'disconnected', location: this.location },
+      tunnelState: { state: 'disconnected', location: this.location, lockedDown: false },
       settings: this.settings,
       isPerformingPostUpgrade: false,
       deviceState: this.deviceState,
-      relayListPair: {
-        relays: this.relayList,
-        bridges: this.relayList,
-        wireguardEndpointData: this.wireguardEndpointData,
+      relayList: {
+        relayList: mockData.relayList,
+        wireguardEndpointData: mockData.wireguardEndpointData,
       },
       currentVersion: this.currentVersion,
       upgradeVersion: this.upgradeVersion,

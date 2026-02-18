@@ -186,6 +186,10 @@ msgstr ""
 msgid "Finland"
 msgstr ""
 
+#. BR FOR
+msgid "Fortaleza"
+msgstr ""
+
 #. FR
 msgid "France"
 msgstr ""
@@ -274,8 +278,16 @@ msgstr ""
 msgid "Johannesburg"
 msgstr ""
 
+#. US MKC
+msgid "Kansas City, MO"
+msgstr ""
+
 #. UA IEV
 msgid "Kiev"
+msgstr ""
+
+#. MY KUL
+msgid "Kuala Lumpur"
 msgstr ""
 
 #. UA IEV
@@ -322,12 +334,20 @@ msgstr ""
 msgid "Madrid"
 msgstr ""
 
+#. MY
+msgid "Malaysia"
+msgstr ""
+
 #. SE MMA
 msgid "Malmö"
 msgstr ""
 
 #. GB MNC
 msgid "Manchester"
+msgstr ""
+
+#. PH MNL
+msgid "Manila"
 msgstr ""
 
 #. FR MRS
@@ -432,6 +452,10 @@ msgstr ""
 
 #. US PHL
 msgid "Philadelphia, PA"
+msgstr ""
+
+#. PH
+msgid "Philippines"
 msgstr ""
 
 #. US PHX

@@ -3,7 +3,7 @@
 //  MullvadRustRuntimeTests
 //
 //  Created by pronebird on 27/06/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -16,16 +16,17 @@ protocol Connection {
 
 /// Minimal implementation of UDP connection capable of sending data.
 /// > Warning: Do not use this implementation in production code. See the warning in `start()`.
-class UDPConnection: Connection {
+class UDPConnection: Connection, @unchecked Sendable {
     private let dispatchQueue = DispatchQueue(label: "UDPConnection")
     private let nwConnection: NWConnection
 
     convenience init(remote: IPAddress, port: UInt16) {
-        self.init(nwConnection: NWConnection(
-            host: NWEndpoint.Host("\(remote)"),
-            port: NWEndpoint.Port(integerLiteral: port),
-            using: .udp
-        ))
+        self.init(
+            nwConnection: NWConnection(
+                host: NWEndpoint.Host("\(remote)"),
+                port: NWEndpoint.Port(integerLiteral: port),
+                using: .udp
+            ))
     }
 
     required init(nwConnection: NWConnection) {
@@ -87,13 +88,15 @@ class UDPConnection: Connection {
 
     func sendData(_ data: Data) async throws {
         return try await withCheckedThrowingContinuation { continuation in
-            nwConnection.send(content: data, completion: .contentProcessed { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            })
+            nwConnection.send(
+                content: data,
+                completion: .contentProcessed { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: ())
+                    }
+                })
         }
     }
 }

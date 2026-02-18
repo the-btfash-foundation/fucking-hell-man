@@ -1,7 +1,16 @@
 package net.mullvad.mullvadvpn.test.common.page
 
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.waitForStableInActiveWindow
+import net.mullvad.mullvadvpn.lib.ui.tag.CONNECT_BUTTON_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.CONNECT_CARD_HEADER_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.LOCATION_INFO_CONNECTION_IN_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.LOCATION_INFO_CONNECTION_OUT_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.SELECT_LOCATION_BUTTON_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.TOP_BAR_ACCOUNT_BUTTON_TEST_TAG
+import net.mullvad.mullvadvpn.lib.ui.tag.TOP_BAR_SETTINGS_BUTTON_TEST_TAG
 import net.mullvad.mullvadvpn.test.common.constant.VERY_LONG_TIMEOUT
+import net.mullvad.mullvadvpn.test.common.extension.findObjectByCaseInsensitiveText
 import net.mullvad.mullvadvpn.test.common.extension.findObjectWithTimeout
 
 class ConnectPage internal constructor() : Page() {
@@ -16,11 +25,11 @@ class ConnectPage internal constructor() : Page() {
     }
 
     fun clickSettings() {
-        uiDevice.findObjectWithTimeout(By.res(TOP_BAR_SETTINGS_BUTTON)).click()
+        uiDevice.findObjectWithTimeout(By.res(TOP_BAR_SETTINGS_BUTTON_TEST_TAG)).click()
     }
 
     fun clickAccount() {
-        uiDevice.findObjectWithTimeout(By.res(TOP_BAR_ACCOUNT_BUTTON)).click()
+        uiDevice.findObjectWithTimeout(By.res(TOP_BAR_ACCOUNT_BUTTON_TEST_TAG)).click()
     }
 
     fun clickSelectLocation() {
@@ -51,22 +60,48 @@ class ConnectPage internal constructor() : Page() {
         uiDevice.findObjectWithTimeout(connectingSelector)
     }
 
-    /**
-     * Extracts the in IPv4 address from the connection card. It is a prerequisite that the
-     * connection card is in collapsed state.
-     */
-    fun extractInIpv4Address(): String {
-        uiDevice.findObjectWithTimeout(By.res("connect_card_header_test_tag")).click()
+    fun waitForFeatureIndicator(featureIndicator: String) {
+        uiDevice.findObjectByCaseInsensitiveText(featureIndicator, VERY_LONG_TIMEOUT)
+    }
+
+    private fun expandConnectionCard() {
+        uiDevice.findObjectWithTimeout(By.res(CONNECT_CARD_HEADER_TEST_TAG)).click()
+    }
+
+    /** Extracts the ip address, port and protocol from the connection card. */
+    private fun extractInIpInformation(): Triple<String, String, String> {
         val inString =
             uiDevice
                 .findObjectWithTimeout(
-                    By.res("location_info_connection_in_test_tag"),
+                    By.res(LOCATION_INFO_CONNECTION_IN_TEST_TAG),
                     VERY_LONG_TIMEOUT,
                 )
                 .text
 
-        val extractedIpAddress = inString.split(" ")[0].split(":")[0]
-        return extractedIpAddress
+        val splitString = inString.split(" ")
+        val ipString = splitString[0].substringBeforeLast(":", "")
+        val portString = splitString[0].substringAfterLast(":", "")
+        return Triple(ipString, portString, splitString[1])
+    }
+
+    /**
+     * Extracts the in IPv4 address from the connection card. It is a prerequisite that the
+     * connection card is in collapsed state.
+     */
+    fun extractInIpAddress(): String {
+        expandConnectionCard()
+        uiDevice.waitForStableInActiveWindow()
+        return extractInIpInformation().first
+    }
+
+    /**
+     * Extracts the in IPv4 port from the connection card. It is a prerequisite that the connection
+     * card is in collapsed state.
+     */
+    fun extractInIpPort(): String {
+        expandConnectionCard()
+        uiDevice.waitForStableInActiveWindow()
+        return extractInIpInformation().second
     }
 
     /**
@@ -74,21 +109,13 @@ class ConnectPage internal constructor() : Page() {
      * connection card is in collapsed state.
      */
     fun extractOutIpv4Address(): String {
-        uiDevice.findObjectWithTimeout(By.res("connect_card_header_test_tag")).click()
+        uiDevice.findObjectWithTimeout(By.res(CONNECT_CARD_HEADER_TEST_TAG)).click()
         return uiDevice
             .findObjectWithTimeout(
                 // Text exist and contains IP address
-                By.res("location_info_connection_out_test_tag").textContains("."),
+                By.res(LOCATION_INFO_CONNECTION_OUT_TEST_TAG).textContains("."),
                 VERY_LONG_TIMEOUT,
             )
             .text
-    }
-
-    companion object {
-        const val TOP_BAR_ACCOUNT_BUTTON = "top_bar_account_button"
-        const val TOP_BAR_SETTINGS_BUTTON = "top_bar_settings_button"
-        const val CONNECT_CARD_HEADER_TEST_TAG = "connect_card_header_test_tag"
-        const val SELECT_LOCATION_BUTTON_TEST_TAG = "select_location_button_test_tag"
-        const val CONNECT_BUTTON_TEST_TAG = "connect_button_test_tag"
     }
 }

@@ -3,13 +3,13 @@
 //  MullvadVPNTests
 //
 //  Created by Mojgan on 2024-11-21.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import XCTest
 
-class ConsolidatedApplicationLogTests: XCTestCase {
-    var consolidatedLog: ConsolidatedApplicationLog!
+final class ConsolidatedApplicationLogTests: XCTestCase, @unchecked Sendable {
+    nonisolated(unsafe) var consolidatedLog: ConsolidatedApplicationLog!
     let mockRedactStrings = ["sensitive", "secret"]
     let mockSecurityGroupIdentifiers = ["group1", "group2"]
     var createdMockFiles: [URL] = []
@@ -35,7 +35,7 @@ class ConsolidatedApplicationLogTests: XCTestCase {
         createdMockFiles = []
     }
 
-    func testAddLogFiles() {
+    func testAddLogFiles() async {
         var string = ""
         let expectation = self.expectation(description: "Log files added")
         let mockFile = createMockFile(content: content, fileName: "\(generateRandomName()).txt")
@@ -44,7 +44,7 @@ class ConsolidatedApplicationLogTests: XCTestCase {
             expectation.fulfill()
         }
 
-        waitForExpectations(timeout: 1)
+        await fulfillment(of: [expectation], timeout: 1)
         consolidatedLog.write(to: &string)
         XCTAssertTrue(
             consolidatedLog.string.contains(string),
@@ -52,7 +52,7 @@ class ConsolidatedApplicationLogTests: XCTestCase {
         )
     }
 
-    func testAddError() {
+    func testAddError() async {
         let expectation = self.expectation(description: "Error added to log")
         let errorMessage = "Test error"
         let errorDetails = "A sensitive error occurred"
@@ -61,14 +61,14 @@ class ConsolidatedApplicationLogTests: XCTestCase {
             expectation.fulfill()
         }
 
-        waitForExpectations(timeout: 1)
+        await fulfillment(of: [expectation], timeout: 1)
         XCTAssertTrue(
             consolidatedLog.string.contains(errorMessage),
             "Log should include the error message."
         )
     }
 
-    func testStringOutput() {
+    func testStringOutput() async {
         let expectation = self.expectation(description: "Log files added")
         let mockFile = createMockFile(content: content, fileName: "\(generateRandomName()).txt")
         consolidatedLog.addLogFiles(fileURLs: [mockFile]) {
@@ -76,7 +76,7 @@ class ConsolidatedApplicationLogTests: XCTestCase {
             let output = self.consolidatedLog.string
             XCTAssertFalse(output.isEmpty, "Output string should include redacted log content.")
         }
-        waitForExpectations(timeout: 1)
+        await fulfillment(of: [expectation], timeout: 1)
     }
 
     // MARK: - Private functions
@@ -96,7 +96,7 @@ class ConsolidatedApplicationLogTests: XCTestCase {
 
     private func generateRandomName() -> String {
         let characterSet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        let randomName = (0 ..< 6).compactMap { _ in characterSet.randomElement() }
+        let randomName = (0..<6).compactMap { _ in characterSet.randomElement() }
         return String(randomName)
     }
 }
@@ -104,24 +104,24 @@ class ConsolidatedApplicationLogTests: XCTestCase {
 extension ConsolidatedApplicationLogTests {
     private var content: String {
         return """
-        MullvadVPN version xxxx.x
-        [22/11/2024 @ 08:52:22][AppDelegate][debug] Registered app refresh task.
-        [22/11/2024 @ 08:52:22][AppDelegate][debug] Registered address cache update task.
-        [22/11/2024 @ 08:52:22][AppDelegate][debug] Registered private key rotation task.
-        [22/11/2024 @ 08:52:23][TunnelManager][debug] Refresh device state
-        and tunnel status
-        due to application becoming active.
-        [22/11/2024 @ 08:52:23][RelayCacheTracker][debug] Start periodic relay updates.
-        [22/11/2024 @ 08:52:23][AddressCache.Tracker][debug] Start periodic address cache updates.
-        [22/11/2024 @ 08:52:23][AddressCache.Tracker][debug] Schedule address cache update at 23/11/2024 @ 08:49:52.
-        [22/11/2024 @ 08:52:23][AppDelegate][debug] Attempted migration from UI Process, but found nothing to do.
-        [22/11/2024 @ 08:52:23][TunnelManager][debug] Refresh tunnel status for new tunnel.
-        [22/11/2024 @ 08:52:23][REST.NetworkOperation][debug] name=get-access-token.2
-        Send request
-        to /auth/v1/token via 127.0.0.1 using encrypted-dns-url-session.
-        [22/11/2024 @ 08:52:23][ApplicationRouter][debug] Presenting .main.
-        [22/11/2024 @ 08:52:23][REST.NetworkOperation][debug] name=get-access-token.2 Response: 200.
-        [22/11/2024 @ 08:52:23][AppDelegate][debug] Finished initialization.
-        """
+            MullvadVPN version xxxx.x
+            [22/11/2024 @ 08:52:22][AppDelegate][debug] Registered app refresh task.
+            [22/11/2024 @ 08:52:22][AppDelegate][debug] Registered address cache update task.
+            [22/11/2024 @ 08:52:22][AppDelegate][debug] Registered private key rotation task.
+            [22/11/2024 @ 08:52:23][TunnelManager][debug] Refresh device state
+            and tunnel status
+            due to application becoming active.
+            [22/11/2024 @ 08:52:23][RelayCacheTracker][debug] Start periodic relay updates.
+            [22/11/2024 @ 08:52:23][AddressCache.Tracker][debug] Start periodic address cache updates.
+            [22/11/2024 @ 08:52:23][AddressCache.Tracker][debug] Schedule address cache update at 23/11/2024 @ 08:49:52.
+            [22/11/2024 @ 08:52:23][AppDelegate][debug] Attempted migration from UI Process, but found nothing to do.
+            [22/11/2024 @ 08:52:23][TunnelManager][debug] Refresh tunnel status for new tunnel.
+            [22/11/2024 @ 08:52:23][REST.NetworkOperation][debug] name=get-access-token.2
+            Send request
+            to /auth/v1/token via 127.0.0.1 using encrypted-dns-url-session.
+            [22/11/2024 @ 08:52:23][ApplicationRouter][debug] Presenting .main.
+            [22/11/2024 @ 08:52:23][REST.NetworkOperation][debug] name=get-access-token.2 Response: 200.
+            [22/11/2024 @ 08:52:23][AppDelegate][debug] Finished initialization.
+            """
     }
 }

@@ -34,15 +34,16 @@ impl<T: Match<U>, U> Match<U> for Constraint<T> {
 /// * If two `RelayQuery`s differ such that no relay matches both, [`Option::None`] is returned:
 /// ```rust, ignore
 /// # use mullvad_relay_selector::query::builder::RelayQueryBuilder;
-/// let query_a = RelayQueryBuilder::new().wireguard().build();
-/// let query_b = RelayQueryBuilder::new().openvpn().build();
+/// # use crate::relay_constraints::Ownership;
+/// let query_a = RelayQueryBuilder::new().ownership(Ownership::MullvadOwned).build();
+/// let query_b = RelayQueryBuilder::new().ownership(Ownership::Rented).build();
 /// assert_eq!(query_a.intersection(query_b), None);
 /// ```
 ///
 /// * Otherwise, a new `RelayQuery` is returned where each constraint is as specific as possible.
 ///   See [`Constraint`] for further details.
 /// ```rust, ignore
-/// let query_a = RelayQueryBuilder::new().wireguard().build();
+/// let query_a = RelayQueryBuilder::new().build();
 /// let query_b = RelayQueryBuilder::new().location(city("Sweden", "Gothenburg")).build();
 ///
 /// let result = relay_selector.get_relay_by_query(query_a.intersection(query_b).unwrap());
@@ -67,13 +68,11 @@ impl<T: Match<U>, U> Match<U> for Constraint<T> {
 /// trait is using the derive macro. Using the derive macro on `RelayQuery`
 /// ```rust, ignore
 /// #[derive(Intersection)]
-/// struct RelayQuery {
+/// pub struct RelayQuery {
 ///     pub location: Constraint<LocationConstraint>,
 ///     pub providers: Constraint<Providers>,
 ///     pub ownership: Constraint<Ownership>,
-///     pub tunnel_protocol: Constraint<TunnelType>,
 ///     pub wireguard_constraints: WireguardRelayQuery,
-///     pub openvpn_constraints: OpenVpnRelayQuery,
 /// }
 /// ```
 ///
@@ -90,13 +89,9 @@ impl<T: Match<U>, U> Match<U> for Constraint<T> {
 ///             location: self.location.intersection(other.location)?,
 ///             providers: self.providers.intersection(other.providers)?,
 ///             ownership: self.ownership.intersection(other.ownership)?,
-///             tunnel_protocol: self.tunnel_protocol.intersection(other.tunnel_protocol)?,
 ///             wireguard_constraints: self
 ///                 .wireguard_constraints
 ///                 .intersection(other.wireguard_constraints)?,
-///             openvpn_constraints: self
-///                 .openvpn_constraints
-///                 .intersection(other.openvpn_constraints)?,
 ///         })
 ///     }
 /// }
@@ -120,25 +115,21 @@ macro_rules! impl_intersection_partialeq {
     ($ty:ty) => {
         impl $crate::Intersection for $ty {
             fn intersection(self, other: Self) -> Option<Self> {
-                if self == other {
-                    Some(self)
-                } else {
-                    None
-                }
+                if self == other { Some(self) } else { None }
             }
         }
     };
 }
 
+// Note that deriving `Intersection` for using `impl_intersection_partialeq`
+// may not do what you expect for data structures that represent/wrap sets, such as
+// `Vec<T>` or `HashSet<T>`. `Constraint::Only` will only match if the
+// `Vec<T>` or `HashSet<T>` is exactly the same, not if they contain overlapping elements.
 impl_intersection_partialeq!(u16);
 impl_intersection_partialeq!(bool);
-
-// NOTE: this implementation does not do what you may expect of an intersection
 impl_intersection_partialeq!(relay_constraints::Providers);
-// NOTE: should take actual intersection
 impl_intersection_partialeq!(relay_constraints::LocationConstraint);
 impl_intersection_partialeq!(relay_constraints::Ownership);
-// NOTE: it contains an inner constraint
 impl_intersection_partialeq!(talpid_types::net::TransportProtocol);
-impl_intersection_partialeq!(talpid_types::net::TunnelType);
 impl_intersection_partialeq!(talpid_types::net::IpVersion);
+impl_intersection_partialeq!(relay_constraints::AllowedIps);

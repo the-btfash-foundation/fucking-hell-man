@@ -21,11 +21,256 @@ Line wrap the file at 100 chars.                                              Th
 * **Fixed**: for any bug fixes.
 * **Security**: in case of vulnerabilities.
 
-## [Unreleased]
+## [android/2026.2] - 2025-02-06
+### Fixed
+- Fix default launcher icon on TV devices.
+
+
+## [android/2026.1] - 2025-02-05
+Identical to `android/2026.1-beta3`.
+
+
+## [android/2026.1-beta3] - 2025-02-02
+### Fixed
+- Fix long press on the quick settings tile not opening the app.
+- Fix snackbar dismiss button color being black instead of white.
+
+
+## [android/2026.1-beta2] - 2025-01-27
+### Changed
+- Disable "View logs" button until logs are fully parsed.
+
+### Fixed
+- Various fixes for layout positioning when using a RTL language.
+- Fix not being able to open the app via notification if the app icon is changed.
+- Fix scroll to selection sometimes not working in select location screen.
+- Fix disabled content blockers hint not showing.
+
+
+## [android/2026.1-beta1] - 2025-01-22
+### Added
+- Add Arabic and Persian as new languages in the app with full RTL support.
+- Add toggle button to enable/disable all content blockers.
+- Add the ability to change app icon and title.
+- Add port 443 to list of valid UDP2TCP ports.
+
+### Removed
+- Remove "Automatic" as a setting for the "Quantum-resistant tunnel" option.
+
+### Changed
+- Add new anti-censorship settings screen reachable from VPN settings.
+- Change `WireGuard port` to no longer affect the port used for LWO.
+- Update design of select location screen
+- Introduce new list item design.
+
+### Fixed
+- Fix pending payment state not updating correctly.
+
+
+## [android/2025.11] - 2025-12-08
+Identical to `android/2025.11-beta1`.
+
+
+## [android/2025.11-beta1] - 2025-12-02
+### Fixed
+- Fix failing settings migrations.
+- Upgrade DataStore to `1.2.0` to fix corruption in user preferences.
+
+
+## [android/2025.10] - 2025-11-24
+Identical to `android/2025.10-beta2` except for updated translations.
+
+
+## [android/2025.10-beta2] - 2025-11-18
+### Security
+- Fix regression introduced in 2025.10-beta1 where IPv6 traffic would leak when enabling
+  Local Network Sharing and disabling In-tunnel IPv6.
+
+### Fixed
+- Fix Android 16 upgrade warning text not being displayed properly in some languages.
+
+
+## [android/2025.10-beta1] - 2025-11-10
+### Added
+- Option to show server location in the connection notification.
+- Option to include account token in problem reports.
+
+### Changed
+- Switch from wireguard-go to GotaTun as default wireguard library.
+- Improve login and create account error messages.
+- Show feature indicators while connecting.
+- Show the exact obfuscation method used instead of "Obfuscation" in feature indicators.
+- Remember the expanded state of the connection panel between connections.
+
+### Fixed
+- Recents will now always show the selected location.
+
+
+## [android/2025.9] - 2025-10-20
+Identical to `android/2025.9-beta1` except for updated translations.
+
+
+## [android/2025.9-beta1] - 2025-10-13
+### Added
+- Add LWO obfuscation.
+- Add a warning banner to Android 16 users when they are unable to connect after an app upgrade.
+  This can happen due to a known issue in Android 16.
+
+
+## [android/2025.8] - 2025-09-22
+Identical to `android/2025.8-beta1`.
+
+
+## [android/2025.8-beta1] - 2025-09-15
+### Added
+- Set default server based on the current location when the app is started for the first time.
+- Add QUIC obfuscation.
+
+### Changed
+- Enable quantum-resistant tunnels by default (when set to `Automatic`).
+
+
+## [android/2025.7] - 2025-09-08
+### Fixed
+- Fix an issue with recents containing ineligible items if DAITA is turned on.
+
+
+## [android/2025.7-beta2] - 2025-09-04
+### Fixed
+- Fix a rare case of not being able to change exit location
+  if entry location had never been selected.
+
+
+## [android/2025.7-beta1] - 2025-08-27
+### Added
+- Add list of recent server selections in the select location view.
+- Add support for devices with 16KB page size.
+
+
+## [android/2025.6] - 2025-08-12
+### Fixed
+- Remove redundant square for relays in custom list location list.
+
+
+## [android/2025.6-beta3] - 2025-08-04
+### Fixed
+- Fix several crashes related to notifications.
+- Fix a crash in Split Tunneling that happened when another app had a missing icon.
+
+
+## [android/2025.6-beta2] - 2025-07-18
+### Fixed
+- Fix a crash related to the selected relay location.
+
+
+## [android/2025.6-beta1] - 2025-07-17
+### Added
+- Add Memory Tagging (MTE) opt-in flag to enable it by default on supported Android versions and
+  devices.
+
+### Changed
+- Improve the expiry notification scheduling by switching to use AlarmManager.
+- Update the design of the select location screen.
+
+
+## [android/2025.5] - 2025-07-02
+### Fixed
+- Fix bottom margins in Filter Screen and Lockdown Mode Screen.
+- Fix expiry date not always updating after a successful in app purchase.
+
+
+## [android/2025.5-beta1] - 2025-06-17
+### Added
+- Add the ability to purchase 90 days (3 months).
+
+### Changed
+- Replace Classic McEliece with HQC as one of the post-quantum safe key exchange
+  mechanisms used for the quantum-resistant tunnels. The main benefits here are that HQC
+  uses a lot less CPU to compute the keypair, and the public key sent to the server
+  is drastically smaller.
+- Update the UI and flow for adding time.
+- Change so that search no longer requires at least 2 letters.
+
+### Removed
+- Remove logging from the Google in-app purchase component in an experimental and non-supported way.
+  Only affects our Google Play builds.
+
+### Fixed
+- Fix offline detection on Android 9 and below.
+
+
+## [android/2025.4] - 2025-05-28
+Identical to `android/2025.4-beta2` except for updated translations.
+
+
+## [android/2025.4-beta2] - 2025-05-20
+### Changed
+- Improve error message when the app cannot connect due to an invalid port.
+
+### Fixed
+- Fix password prompt appearing every time when returning to the welcome screen.
+
+
+## [android/2025.4-beta1] - 2025-05-06
+### Added
+- Make feature indicators clickable, allowing for easy access to active features.
+- Add device management which enables the revoking of wireguard keys from the app.
+
+### Fixed
+- Remove unintended permissions added by an unused transitive Google dependency.
+- Fix crash on TV devices when trying to access system vpn settings.
+
+
+## [android/2025.3] - 2025-04-30
+### Fixed
+- Fix in-app language bug that could cause unexpected language changes
+  in the app or its notifications.
+
+
+## [android/2025.2] - 2025-04-28
+Identical to `android/2025.2-beta2`
+
+
+## [android/2025.2-beta2] - 2025-04-15
+### Fixed
+- Fix focus on TV devices when returning to connect screen from select location.
+
+
+## [android/2025.2-beta1] - 2025-04-04
+### Added
+- Prompt password manager to store new account number on account creation.
+- Add the ability to force the ip version used to connect to a relay.
+- Add the ability to disable IPv6 in the tunnel.
+
+### Changed
+- Disable Wireguard port setting when a obfuscation is selected since it is not used when an
+  obfuscation is applied.
+- Adapt UI on Connect Screen for Android TV, including a navigation rail and redesigned in-app
+  notification bar.
+
+### Removed
+- Remove Google's resolvers from encrypted DNS proxy.
+
+### Fixed
+- Will no longer try to connect using an IP version if that IP version is not available.
+- Fix connection details showing in IP from exit server instead of entry when using multihop.
+
+
+## [android/2025.1] - 2025-03-20
+Identical to `android/2025.1-beta1`
+
+
+## [android/2025.1-beta1] - 2025-03-05
+### Fixed
+- Fix a crash that could occur in the Filter screen.
+- Fix a bug that could cause the app to crash while navigating.
+
+### Security
+- Make daemon aware of route changes to prevent sending traffic before routes are up.
+- Minimize calls to re-establish the VPN tunnel, since this may cause Android to leak some traffic.
 
 
 ## [android/2024.10-beta2] - 2024-12-20
-
 ### Fixed
 - Update bundled relay list to address a UI bug in the filter screen.
 

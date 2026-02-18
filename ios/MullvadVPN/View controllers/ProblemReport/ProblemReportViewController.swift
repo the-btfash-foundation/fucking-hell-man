@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 15/09/2020.
-//  Copyright © 2020 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadREST
@@ -12,12 +12,13 @@ import Operations
 import UIKit
 
 final class ProblemReportViewController: UIViewController, UITextFieldDelegate {
-    private let interactor: ProblemReportInteractor
     private let alertPresenter: AlertPresenter
+    let interactor: ProblemReportInteractor
 
     var textViewKeyboardResponder: AutomaticKeyboardResponder?
     var scrollViewKeyboardResponder: AutomaticKeyboardResponder?
     var showsSubmissionOverlay = false
+    var includeAccountTokenInLogs = false
 
     /// Constraints used when description text view is active
     var activeMessageTextViewConstraints = [NSLayoutConstraint]()
@@ -34,6 +35,7 @@ final class ProblemReportViewController: UIViewController, UITextFieldDelegate {
     lazy var containerView: UIView = { makeContainerView() }()
     /// Subheading label displayed below navigation bar
     lazy var subheaderLabel: UILabel = { makeSubheaderLabel() }()
+    lazy var includeAccountTokenCheckbox: UIStackView = { makeCheckboxStackView() }()
     lazy var emailTextField: CustomTextField = { makeEmailTextField() }()
     lazy var messageTextView: CustomTextView = { makeMessageTextView() }()
     /// Container view for text input fields
@@ -56,6 +58,9 @@ final class ProblemReportViewController: UIViewController, UITextFieldDelegate {
 
     lazy var submissionOverlayView: ProblemReportSubmissionOverlayView = { makeSubmissionOverlayView() }()
 
+    var checkboxView: CheckboxView!
+    var reduceAnonymityWarningView: ReduceAnonymityWarningView!
+
     // MARK: - View lifecycle
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -77,7 +82,7 @@ final class ProblemReportViewController: UIViewController, UITextFieldDelegate {
         view.backgroundColor = .secondaryColor
         view.setAccessibilityIdentifier(.problemReportView)
 
-        navigationItem.title = Self.persistentViewModel.navigationTitle
+        navigationItem.title = ProblemReportViewModel.navigationTitle
 
         textViewKeyboardResponder = AutomaticKeyboardResponder(targetView: messageTextView)
         scrollViewKeyboardResponder = AutomaticKeyboardResponder(targetView: scrollView)
@@ -170,17 +175,17 @@ final class ProblemReportViewController: UIViewController, UITextFieldDelegate {
         let presentation = AlertPresentation(
             id: "problem-report-alert",
             icon: .alert,
-            message: Self.persistentViewModel.emptyEmailAlertWarning,
+            message: ProblemReportViewModel.emptyEmailAlertWarning,
             buttons: [
                 AlertAction(
-                    title: Self.persistentViewModel.confirmEmptyEmailTitle,
+                    title: ProblemReportViewModel.confirmEmptyEmailTitle,
                     style: .destructive,
                     handler: {
                         completion(true)
                     }
                 ),
                 AlertAction(
-                    title: Self.persistentViewModel.cancelEmptyEmailTitle,
+                    title: ProblemReportViewModel.cancelEmptyEmailTitle,
                     style: .default,
                     handler: {
                         completion(false)
@@ -204,7 +209,8 @@ final class ProblemReportViewController: UIViewController, UITextFieldDelegate {
     private func updatePersistentViewModel() {
         Self.persistentViewModel = ProblemReportViewModel(
             email: emailTextField.text ?? "",
-            message: messageTextView.text
+            message: messageTextView.text,
+            includeAccountTokenInLogs: includeAccountTokenInLogs
         )
 
         validateForm()
@@ -245,7 +251,11 @@ final class ProblemReportViewController: UIViewController, UITextFieldDelegate {
             clearPersistentViewModel()
 
         case let .failure(error):
-            submissionOverlayView.state = .failure(error)
+            if let error = error as? OperationError, error == .cancelled {
+                hideSubmissionOverlay()
+            } else {
+                submissionOverlayView.state = .failure(error)
+            }
         }
 
         navigationItem.setHidesBackButton(false, animated: true)
@@ -260,13 +270,20 @@ final class ProblemReportViewController: UIViewController, UITextFieldDelegate {
 
         interactor.sendReport(
             email: viewModel.email,
-            message: viewModel.message
-        ) { completion in
-            self.didSendProblemReport(viewModel: viewModel, completion: completion)
+            message: viewModel.message,
+            includeAccountTokenInLogs: includeAccountTokenInLogs
+        ) { [weak self] completion in
+            Task { @MainActor in
+                self?.didSendProblemReport(viewModel: viewModel, completion: completion)
+            }
         }
     }
 
     // MARK: - Input fields notifications
+
+    func didToggleIncludeAccountTokenInLogs(_ includeTokenInLogs: Bool) {
+        includeAccountTokenInLogs = includeTokenInLogs
+    }
 
     @objc private func messageTextViewDidBeginEditing() {
         setDescriptionFieldExpanded(true)

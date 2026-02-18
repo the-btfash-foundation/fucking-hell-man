@@ -1,8 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import styled from 'styled-components';
 
 import { useAppContext } from '../../context';
-import { Colors, Spacings } from '../../lib/foundations';
+import { colors, spacings } from '../../lib/foundations';
 import { useHistory } from '../../lib/history';
 import { useBoolean, useEffectEvent } from '../../lib/utility-hooks';
 import Accordion from '../Accordion';
@@ -22,8 +22,8 @@ interface SectionTitleProps {
 }
 
 export const SectionTitle = styled(Row)<SectionTitleProps>(buttonText, (props) => ({
-  paddingRight: Spacings.spacing5,
-  color: props.disabled ? Colors.white20 : Colors.white,
+  paddingRight: spacings.medium,
+  color: props.disabled ? colors.whiteAlpha20 : colors.white,
   fontWeight: props.$thin ? 400 : 600,
   fontSize: props.$thin ? '15px' : '18px',
   ...(props.$thin ? openSans : sourceSansPro),
@@ -49,7 +49,7 @@ export function Section(props: SectionProps) {
 
 const StyledChevronButton = styled(ChevronButton)({
   padding: 0,
-  marginRight: Spacings.spacing5,
+  marginRight: spacings.medium,
 });
 
 const StyledTitleContainer = styled(Container)({
@@ -66,18 +66,24 @@ export function ExpandableSection(props: ExpandableSectionProps) {
   const { expandableId, expandedInitially, sectionTitle, ...otherProps } = props;
 
   const history = useHistory();
+  const location = useRef(history.location);
   const { setNavigationHistory } = useAppContext();
   const expandedValue =
     history.location.state.expandedSections[props.expandableId] ?? !!expandedInitially;
   const [expanded, , , toggleExpanded] = useBoolean(expandedValue);
 
   const updateHistory = useEffectEvent((expanded: boolean) => {
-    history.recordSectionExpandedState(props.expandableId, expanded);
+    location.current.state.expandedSections[props.expandableId] = expanded;
     setNavigationHistory(history.asObject);
   });
 
   useEffect(() => {
     updateHistory(expanded);
+    // These lint rules are disabled for now because the react plugin for eslint does
+    // not understand that useEffectEvent should not be added to the dependency array.
+    // Enable these rules again when eslint can lint useEffectEvent properly.
+    // eslint-disable-next-line react-compiler/react-compiler
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded]);
 
   const title = (

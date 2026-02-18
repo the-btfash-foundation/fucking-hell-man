@@ -3,14 +3,15 @@
 //  MullvadVPNTests
 //
 //  Created by Mojgan on 2024-05-29.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
+
+import MullvadMockData
+@preconcurrency import XCTest
 
 @testable import MullvadREST
 @testable import MullvadSettings
 @testable import MullvadTypes
-
-import XCTest
 
 class ShadowsocksLoaderTests: XCTestCase {
     private let sampleRelays = ServerRelaysResponseStubs.sampleRelays
@@ -25,23 +26,28 @@ class ShadowsocksLoaderTests: XCTestCase {
         shadowsocksConfigurationCache = ShadowsocksConfigurationCacheStub()
         relaySelector = ShadowsocksRelaySelectorStub(relays: sampleRelays)
 
-        relaySelector.exitBridgeResult = .success(try XCTUnwrap(closetRelayTo(
-            location: relayConstraints.exitLocations,
-            port: relayConstraints.port,
-            filter: relayConstraints.filter,
-            in: sampleRelays
-        )))
+        relaySelector.exitBridgeResult = .success(
+            try XCTUnwrap(
+                closetRelayTo(
+                    location: relayConstraints.exitLocations,
+                    port: relayConstraints.port,
+                    filter: relayConstraints.filter,
+                    in: sampleRelays
+                )))
 
-        relaySelector.entryBridgeResult = .success(try XCTUnwrap(closetRelayTo(
-            location: relayConstraints.entryLocations,
-            port: relayConstraints.port,
-            filter: relayConstraints.filter,
-            in: sampleRelays
-        )))
+        relaySelector.entryBridgeResult = .success(
+            try XCTUnwrap(
+                closetRelayTo(
+                    location: relayConstraints.entryLocations,
+                    port: relayConstraints.port,
+                    filter: relayConstraints.filter,
+                    in: sampleRelays
+                )))
 
         shadowsocksLoader = ShadowsocksLoader(
             cache: shadowsocksConfigurationCache,
             relaySelector: relaySelector,
+            tunnelSettings: LatestTunnelSettings(),
             settingsUpdater: SettingsUpdater(listener: settingsListener)
         )
     }
@@ -82,16 +88,14 @@ class ShadowsocksLoaderTests: XCTestCase {
         filter: RelayConstraint<RelayFilter>,
         in: REST.ServerRelaysResponse
     ) -> REST.BridgeRelay? {
-        RelaySelector.Shadowsocks.closestRelay(
+        RelaySelector.Shadowsocks.closestBridge(
             location: location,
-            port: port,
-            filter: filter,
             in: sampleRelays
         )
     }
 }
 
-class ShadowsocksRelaySelectorStub: ShadowsocksRelaySelectorProtocol {
+class ShadowsocksRelaySelectorStub: ShadowsocksRelaySelectorProtocol, @unchecked Sendable {
     var entryBridgeResult: Result<REST.BridgeRelay, Error> = .failure(ShadowsocksRelaySelectorStubError())
     var exitBridgeResult: Result<REST.BridgeRelay, Error> = .failure(ShadowsocksRelaySelectorStubError())
     private let relays: REST.ServerRelaysResponse
@@ -100,7 +104,7 @@ class ShadowsocksRelaySelectorStub: ShadowsocksRelaySelectorProtocol {
         self.relays = relays
     }
 
-    func selectRelay(with settings: LatestTunnelSettings) throws -> REST.BridgeRelay? {
+    func selectBridge(with settings: LatestTunnelSettings) throws -> REST.BridgeRelay? {
         switch settings.tunnelMultihopState {
         case .on:
             try entryBridgeResult.get()
@@ -109,12 +113,12 @@ class ShadowsocksRelaySelectorStub: ShadowsocksRelaySelectorProtocol {
         }
     }
 
-    func getBridges() throws -> REST.ServerShadowsocks? {
-        RelaySelector.Shadowsocks.tcpBridge(from: relays)
+    func getBridgeConfig() throws -> REST.ServerShadowsocks? {
+        RelaySelector.Shadowsocks.randomBridgeConfig(from: relays)
     }
 }
 
-class ShadowsocksConfigurationCacheStub: ShadowsocksConfigurationCacheProtocol {
+class ShadowsocksConfigurationCacheStub: ShadowsocksConfigurationCacheProtocol, @unchecked Sendable {
     private(set) var cachedConfiguration: ShadowsocksConfiguration?
 
     func read() throws -> ShadowsocksConfiguration {

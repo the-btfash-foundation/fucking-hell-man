@@ -3,17 +3,22 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-05-08.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
 class SelectableSettingsCell: SettingsCell {
     let tickImageView: UIImageView = {
-        let imageView = UIImageView(image: UIImage(named: "IconTick"))
+        let imageView = UIImageView(image: UIImage.tick)
         imageView.contentMode = .center
         imageView.tintColor = .white
         imageView.alpha = 0
+        imageView
+            .setContentCompressionResistancePriority(
+                .required,
+                for: .horizontal
+            )
         return imageView
     }()
 
@@ -42,10 +47,11 @@ class SelectableSettingsCell: SettingsCell {
     private func setTickView() {
         setLeadingView { superview in
             superview.addConstrainedSubviews([tickImageView]) {
-                tickImageView.pinEdgesToSuperview(PinnableEdges([
-                    .leading(0), .top(0), .bottom(0),
-                    .trailing(UIMetrics.SettingsCell.selectableSettingsCellLeftViewSpacing),
-                ]))
+                tickImageView.pinEdgesToSuperview(
+                    PinnableEdges([
+                        .leading(0), .top(0), .bottom(0),
+                        .trailing(UIMetrics.SettingsCell.selectableSettingsCellLeftViewSpacing),
+                    ]))
             }
         }
     }

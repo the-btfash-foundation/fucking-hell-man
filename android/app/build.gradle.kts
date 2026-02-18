@@ -1,29 +1,43 @@
-import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 import com.android.build.gradle.internal.tasks.factory.dependsOn
 import com.github.triplet.gradle.androidpublisher.ReleaseStatus
-import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.util.Properties
 import org.gradle.internal.extensions.stdlib.capitalized
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import utilities.BuildTypes
+import utilities.FlavorDimensions
+import utilities.Flavors
+import utilities.SigningConfigs
+import utilities.Variant
+import utilities.allPlayDebugReleaseVariants
+import utilities.appVersionProvider
+import utilities.baselineFilter
+import utilities.generateRemapArguments
+import utilities.getBooleanProperty
+import utilities.getStringListProperty
+import utilities.isReleaseBuild
+import utilities.leakCanaryImplementation
+import utilities.matchesAny
+import utilities.ossProdAnyBuildType
+import utilities.playImplementation
 
 plugins {
+    alias(libs.plugins.mullvad.utilities)
     alias(libs.plugins.android.application)
     alias(libs.plugins.play.publisher)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.ksp)
     alias(libs.plugins.compose)
-    alias(libs.plugins.protobuf.core)
-    alias(libs.plugins.rust.android.gradle)
-
-    id(Dependencies.junit5AndroidPluginId) version Versions.junit5Plugin
+    alias(libs.plugins.baselineprofile)
+    alias(libs.plugins.mullvad.unit.test)
+    id("de.mannodermaus.android-junit5")
+    id("net.mullvad.rust-android")
 }
 
 val repoRootPath = rootProject.projectDir.absoluteFile.parentFile.absolutePath
-val extraAssetsDirectory = layout.buildDirectory.dir("extraAssets").get()
-val relayListPath = extraAssetsDirectory.file("relays.json").asFile
-val defaultChangelogAssetsDirectory = "$repoRootPath/android/src/main/play/release-notes/"
+val relayListDirectory = file("$repoRootPath/dist-assets/relays/").absolutePath
+val changelogAssetsDirectory = "$repoRootPath/android/src/main/play/release-notes/"
 val rustJniLibsDir = layout.buildDirectory.dir("rustJniLibs/android").get()
 
 val credentialsPath = "${rootProject.projectDir}/credentials"
@@ -34,20 +48,20 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+val appVersion = appVersionProvider.get()
+
 android {
     namespace = "net.mullvad.mullvadvpn"
-    compileSdk = Versions.compileSdkVersion
-    buildToolsVersion = Versions.buildToolsVersion
-    ndkVersion = Versions.ndkVersion
+    compileSdk = libs.versions.compile.sdk.get().toInt()
+    buildToolsVersion = libs.versions.build.tools.get()
+    ndkVersion = libs.versions.ndk.get()
 
     defaultConfig {
-        val localProperties = gradleLocalProperties(rootProject.projectDir, providers)
-
         applicationId = "net.mullvad.mullvadvpn"
-        minSdk = Versions.minSdkVersion
-        targetSdk = Versions.targetSdkVersion
-        versionCode = generateVersionCode(localProperties)
-        versionName = generateVersionName(localProperties)
+        minSdk = libs.versions.min.sdk.get().toInt()
+        targetSdk = libs.versions.target.sdk.get().toInt()
+        versionCode = appVersion.code
+        versionName = appVersion.name
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         lint {
@@ -60,11 +74,29 @@ android {
         }
     }
 
-    playConfigs { register("playStagemoleRelease") { enabled = true } }
+    playConfigs {
+        register("playDevmoleRelease") { enabled = appVersion.isAlpha }
+        register("playStagemoleRelease") { enabled = appVersion.isAlpha }
+        register("playProdRelease") {
+            enabled = !appVersion.isDev
+            releaseStatus.set(ReleaseStatus.DRAFT)
+            track.set(
+                when {
+                    appVersion.isStable -> "production"
+                    appVersion.isBeta -> "beta"
+                    else -> "internal"
+                }
+            )
+        }
+    }
 
     androidResources {
         @Suppress("UnstableApiUsage")
-        generateLocaleConfig = true
+        // Due to a bug in the Android platform we need to disable this as the auto-generated local
+        // config causes a crash on some versions of android.
+        // See: https://issuetracker.google.com/issues/399131926#comment29
+        // Restoring this behavior when the issue has been resolved is tracked in: DROID-2163
+        generateLocaleConfig = false
     }
 
     if (keystorePropertiesFile.exists()) {
@@ -88,6 +120,7 @@ android {
                 "proguard-rules.pro",
             )
         }
+        getByName(BuildTypes.DEBUG) { isPseudoLocalesEnabled = true }
         create(BuildTypes.FDROID) {
             initWith(buildTypes.getByName(BuildTypes.RELEASE))
             signingConfig = null
@@ -112,24 +145,33 @@ android {
         create(Flavors.PROD) {
             dimension = FlavorDimensions.INFRASTRUCTURE
             isDefault = true
+            buildConfigField("String", "API_ENDPOINT", "\"\"")
+            buildConfigField("String", "API_IP", "\"\"")
         }
         create(Flavors.DEVMOLE) {
             dimension = FlavorDimensions.INFRASTRUCTURE
             applicationId = "net.mullvad.mullvadvpn.devmole"
+            buildConfigField("String", "API_ENDPOINT", "\"api-app.devmole.eu\"")
+            buildConfigField("String", "API_IP", "\"185.217.116.4\"")
         }
         create(Flavors.STAGEMOLE) {
             dimension = FlavorDimensions.INFRASTRUCTURE
             applicationId = "net.mullvad.mullvadvpn.stagemole"
+            buildConfigField("String", "API_ENDPOINT", "\"api-app.stagemole.eu\"")
+            buildConfigField("String", "API_IP", "\"185.217.116.132\"")
         }
     }
 
     sourceSets {
-        getByName("main") {
-            val changelogDir =
-                gradleLocalProperties(rootProject.projectDir, providers)
-                    .getOrDefault("OVERRIDE_CHANGELOG_DIR", defaultChangelogAssetsDirectory)
-
-            assets.srcDirs(extraAssetsDirectory, changelogDir)
+        getByName("main") { assets.srcDirs(relayListDirectory, changelogAssetsDirectory) }
+        // Workaround to include all instrumented tests in app module. Without this we'd have to
+        // create an APK for each submodule and pass each on for testing with the orchestrator.
+        getByName("androidTest") {
+            rootProject.subprojects
+                .mapNotNull { subProject ->
+                    subProject.file("src/androidTest/kotlin").takeIf { it.exists() }
+                }
+                .forEach { java.srcDir(it) }
         }
     }
 
@@ -143,19 +185,19 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = Versions.jvmTarget
-        allWarningsAsErrors = true
-        freeCompilerArgs =
-            listOf(
-                // Opt-in option for Koin annotation of KoinComponent.
-                "-opt-in=kotlin.RequiresOptIn"
-            )
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.fromTarget(libs.versions.jvm.target.get())
+            allWarningsAsErrors = true
+            freeCompilerArgs =
+                listOf(
+                    // Opt-in option for Koin annotation of KoinComponent.
+                    "-opt-in=kotlin.RequiresOptIn",
+                    "-XXLanguage:+WhenGuards",
+                )
+        }
     }
 
-    // Suppressing since we don't seem have much of an option than using this api. The impact should
-    // also be limited to tests.
-    @Suppress("UnstableApiUsage")
     testOptions {
         unitTests.all { test ->
             test.testLogging {
@@ -163,11 +205,15 @@ android {
                 events("passed", "skipped", "failed", "standardOut", "standardError")
                 showCauses = true
                 showExceptions = true
+                showStandardStreams = true
             }
         }
     }
 
     packaging {
+        if (getBooleanProperty("mullvad.app.build.keepDebugSymbols")) {
+            jniLibs.keepDebugSymbols.add("**/*.so")
+        }
         jniLibs.useLegacyPackaging = true
         resources {
             pickFirsts +=
@@ -185,14 +231,16 @@ android {
     }
 
     applicationVariants.configureEach {
-        val enableInAppVersionNotifications =
-            gradleLocalProperties(rootProject.projectDir, providers)
-                .getProperty("ENABLE_IN_APP_VERSION_NOTIFICATIONS") ?: "true"
-
         buildConfigField(
             "boolean",
             "ENABLE_IN_APP_VERSION_NOTIFICATIONS",
-            enableInAppVersionNotifications,
+            getBooleanProperty("mullvad.app.config.inAppVersionNotifications.enable").toString(),
+        )
+        val shouldRequireBundleRelayFile = isReleaseBuild() && !appVersion.isDev
+        buildConfigField(
+            "Boolean",
+            "REQUIRE_BUNDLED_RELAY_FILE",
+            shouldRequireBundleRelayFile.toString(),
         )
     }
 
@@ -236,9 +284,6 @@ android {
 
         createDistBundle.dependsOn("bundle$capitalizedVariantName")
 
-        // Ensure we have relay list ready before merging assets.
-        tasks["merge${capitalizedVariantName}Assets"].dependsOn(tasks["generateRelayList"])
-
         // Ensure that we have all the JNI libs before merging them.
         tasks["merge${capitalizedVariantName}JniLibFolders"].apply {
             // This is required for the merge task to run every time the .so files are updated.
@@ -248,65 +293,65 @@ android {
             dependsOn("cargoBuild")
         }
 
-        // Ensure all relevant assemble tasks depend on our ensure task.
-        tasks["assemble$capitalizedVariantName"].dependsOn(tasks["ensureValidVersionCode"])
+        tasks.findByPath("generate${capitalizedVariantName}BaselineProfile")?.let {
+            it.doLast {
+                val baselineFile = "baseline-prof.txt"
+                val sourceDir = "${rootProject.projectDir}/app/src"
+                val fromDir = "$sourceDir/$variantName/generated/baselineProfiles"
+                val toDir = "$sourceDir/main"
+                file("$fromDir/$baselineFile").renameTo(file("$toDir/$baselineFile"))
+            }
+        }
     }
 }
 
 junitPlatform {
     instrumentationTests {
-        version.set(Versions.junit5Android)
+        version.set(libs.versions.junit5.android.asProvider())
         includeExtensions.set(true)
     }
 }
 
 cargo {
     val isReleaseBuild = isReleaseBuild()
-    val enableApiOverride = !isReleaseBuild || isAlphaOrDevBuild()
+    val generateDebugSymbolsForReleaseBuilds =
+        getBooleanProperty("mullvad.app.build.cargo.generateDebugSymbolsForReleaseBuilds")
+    val enableGotaTun = getBooleanProperty("mullvad.app.build.gotatun.enable")
+    val enableApiOverride = !isReleaseBuild || appVersion.isDev || appVersion.isAlpha
     module = repoRootPath
     libname = "mullvad-jni"
     // All available targets:
     // https://github.com/mozilla/rust-android-gradle/tree/master?tab=readme-ov-file#targets
-    targets =
-        gradleLocalProperties(rootProject.projectDir, providers)
-            .getProperty("CARGO_TARGETS")
-            ?.split(",") ?: listOf("arm", "arm64", "x86", "x86_64")
+    targets = getStringListProperty("mullvad.app.build.cargo.targets")
     profile =
         if (isReleaseBuild) {
-            "release"
+            if (generateDebugSymbolsForReleaseBuilds) "release-debuginfo" else "release"
         } else {
             "debug"
         }
-    prebuiltToolchains = true
     targetDirectory = "$repoRootPath/target"
     features {
-        if (enableApiOverride) {
-            defaultAnd(arrayOf("api-override"))
-        }
+        val enabledFeatures =
+            buildList {
+                    if (enableApiOverride) {
+                        add("api-override")
+                    }
+                    if (!enableGotaTun) {
+                        add("wireguard-go")
+                    }
+                }
+                .toTypedArray()
+
+        @Suppress("SpreadOperator") defaultAnd(*enabledFeatures)
     }
     targetIncludes = arrayOf("libmullvad_jni.so")
     extraCargoBuildArguments = buildList {
         add("--package=mullvad-jni")
-        if (isReleaseBuild) {
-            add("--locked")
-        }
+        add("--locked")
     }
-}
 
-tasks.register<Exec>("generateRelayList") {
-    workingDir = File(repoRootPath)
-    standardOutput = ByteArrayOutputStream()
-
-    onlyIf { isReleaseBuild() || !relayListPath.exists() }
-
-    commandLine("cargo", "run", "--bin", "relay_list")
-
-    doLast {
-        val output = standardOutput as ByteArrayOutputStream
-        // Create file if needed
-        relayListPath.parentFile.mkdirs()
-        relayListPath.createNewFile()
-        FileOutputStream(relayListPath).use { it.write(output.toByteArray()) }
+    if (getBooleanProperty("mullvad.app.build.replaceRustPathPrefix")) {
+        environmentalOverrides["RUSTFLAGS"] = generateRemapArguments()
     }
 }
 
@@ -315,58 +360,21 @@ tasks.register<Exec>("cargoClean") {
     commandLine("cargo", "clean")
 }
 
-if (
-    gradleLocalProperties(rootProject.projectDir, providers)
-        .getProperty("CLEAN_CARGO_BUILD")
-        ?.toBoolean() != false
-) {
+if (getBooleanProperty("mullvad.app.build.cargo.cleanBuild")) {
     tasks["clean"].dependsOn("cargoClean")
 }
 
-// This is a hack and will not work correctly under all scenarios.
-// See DROID-1696 for how we can improve this.
-fun isReleaseBuild() =
-    gradle.startParameter.getTaskNames().any { it.contains("release", ignoreCase = true) }
-
-fun isAlphaOrDevBuild(): Boolean {
-    val localProperties = gradleLocalProperties(rootProject.projectDir, providers)
-    val versionName = generateVersionName(localProperties)
-    return versionName.contains("dev") || versionName.contains("alpha")
-}
+baselineProfile { warnings { disabledVariants = false } }
 
 androidComponents {
     beforeVariants { variantBuilder ->
         variantBuilder.enable =
-            variantBuilder.let { currentVariant ->
-                val enabledVariants =
-                    enabledAppVariantTriples.map { (billing, infra, buildType) ->
-                        billing + infra.capitalized() + buildType.capitalized()
-                    }
-                enabledVariants.contains(currentVariant.name)
-            }
+            Variant(variantBuilder.buildType, variantBuilder.productFlavors)
+                .matchesAny(allPlayDebugReleaseVariants, ossProdAnyBuildType, baselineFilter)
     }
 }
 
-configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
-    // Skip the lintClassPath configuration, which relies on many dependencies that has been flagged
-    // to have CVEs, as it's related to the lint tooling rather than the project's compilation class
-    // path. The alternative would be to suppress specific CVEs, however that could potentially
-    // result in suppressed CVEs in project compilation class path.
-    skipConfigurations = listOf("lintClassPath")
-}
-
-// This is a safety net to avoid generating too big version codes, since that could potentially be
-// hard and inconvenient to recover from.
-tasks.register("ensureValidVersionCode") {
-    doLast {
-        val versionCode = project.android.defaultConfig.versionCode!!
-        if (versionCode >= MAX_ALLOWED_VERSION_CODE) {
-            throw GradleException("Bad version code: $versionCode")
-        }
-    }
-}
-
-tasks.create("printVersion") {
+tasks.register("printVersion") {
     doLast {
         println("versionCode=${project.android.defaultConfig.versionCode}")
         println("versionName=${project.android.defaultConfig.versionName}")
@@ -386,44 +394,83 @@ play {
     userFraction = 1.0
 }
 
-protobuf {
-    protoc { artifact = libs.plugins.protobuf.protoc.get().toString() }
-    plugins {
-        create("java") { artifact = libs.plugins.grpc.protoc.gen.grpc.java.get().toString() }
-    }
-    generateProtoTasks {
-        all().forEach {
-            it.plugins { create("java") { option("lite") } }
-            it.builtins { create("kotlin") { option("lite") } }
-        }
-    }
-}
-
 dependencies {
     implementation(projects.lib.common)
-    implementation(projects.lib.daemonGrpc)
+    implementation(project(":lib:common-compose"))
+    implementation(projects.lib.grpc)
     implementation(projects.lib.endpoint)
+    implementation(projects.lib.feature.account.impl)
+    implementation(projects.lib.feature.addtime.impl)
+    implementation(projects.lib.feature.anticensorship.impl)
+    implementation(projects.lib.feature.apiaccess.impl)
+    implementation(projects.lib.feature.appinfo.impl)
+    implementation(projects.lib.feature.appearance.impl)
+    implementation(projects.lib.feature.autoconnect.impl)
+    implementation(projects.lib.feature.customlist.impl)
+    implementation(projects.lib.feature.daita.impl)
+    implementation(projects.lib.feature.filter.impl)
+    implementation(projects.lib.feature.home.impl)
+    implementation(projects.lib.feature.location.impl)
+    implementation(projects.lib.feature.login.impl)
+    implementation(projects.lib.feature.managedevices.impl)
+    implementation(projects.lib.feature.multihop.impl)
+    implementation(projects.lib.feature.notification.impl)
+    implementation(projects.lib.feature.problemreport.impl)
+    implementation(projects.lib.feature.redeemvoucher.impl)
+    implementation(projects.lib.feature.serveripoverride.impl)
+    implementation(projects.lib.feature.settings.impl)
+    implementation(projects.lib.feature.splittunneling.impl)
+    implementation(projects.lib.feature.vpnsettings.impl)
     implementation(projects.lib.map)
     implementation(projects.lib.model)
+    implementation(projects.lib.pushNotification)
+    implementation(projects.lib.navigation)
     implementation(projects.lib.payment)
-    implementation(projects.lib.resource)
-    implementation(projects.lib.shared)
+    implementation(projects.lib.repository)
     implementation(projects.lib.talpid)
-    implementation(projects.tile)
-    implementation(projects.lib.theme)
-    implementation(projects.service)
+    implementation(projects.lib.tv)
+    implementation(projects.lib.ui.designsystem)
+    implementation(projects.lib.ui.component)
+    implementation(projects.lib.ui.icon)
+    implementation(projects.lib.ui.resource)
+    implementation(projects.lib.ui.tag)
+    implementation(projects.lib.ui.theme)
+    implementation(projects.lib.ui.util)
+    implementation(projects.lib.usecase)
+    implementation(libs.androidx.profileinstaller)
+
+    // Baseline profile
+    baselineProfile(projects.test.baselineprofile)
 
     // Play implementation
     playImplementation(projects.lib.billing)
 
-    implementation(libs.commons.validator)
+    // This dependency can be replaced when minimum SDK is 29 or higher.
+    // It can then be replaced with InetAddress.isNumericAddress
+    implementation(libs.commons.validator) {
+        // This dependency has a known vulnerability
+        // https://osv.dev/vulnerability/GHSA-wxr5-93ph-8wr9
+        // It is not used so let's exclude it.
+        // Unfortunately, this is not possible to do using libs.version.toml
+        // https://github.com/gradle/gradle/issues/26367#issuecomment-2120830998
+        exclude("commons-beanutils", "commons-beanutils")
+    }
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.datastore)
-    implementation(libs.androidx.ktx)
     implementation(libs.androidx.coresplashscreen)
+    implementation(libs.androidx.credentials) {
+        // This dependency adds a lot of unused permissions to the app.
+        // It is not used so let's exclude it.
+        // Unfortunately, this is not possible to do using libs.version.toml
+        // https://github.com/gradle/gradle/issues/26367#issuecomment-2120830998
+        exclude("androidx.biometric", "biometric")
+    }
+    implementation(libs.androidx.ktx)
     implementation(libs.androidx.lifecycle.runtime)
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.tv)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.arrow)
     implementation(libs.arrow.optics)
     implementation(libs.arrow.resilience)
@@ -436,7 +483,6 @@ dependencies {
     implementation(libs.compose.destinations)
     ksp(libs.compose.destinations.ksp)
 
-    implementation(libs.jodatime)
     implementation(libs.kermit)
     implementation(libs.koin)
     implementation(libs.koin.android)
@@ -453,22 +499,22 @@ dependencies {
     // Leak canary
     leakCanaryImplementation(libs.leakCanary)
 
-    // Needed for createComposeExtension() and createAndroidComposeExtension()
-    debugImplementation(libs.compose.ui.test.manifest)
-    testImplementation(projects.lib.commonTest)
-    testImplementation(libs.kotlin.test)
-    testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.mockk)
-    testImplementation(libs.turbine)
-    testImplementation(Dependencies.junitJupiterApi)
-    testRuntimeOnly(Dependencies.junitJupiterEngine)
-    testImplementation(Dependencies.junitJupiterParams)
+    // HACK:
+    // Not used by app module, but otherwise an older version pre 1.8.0 will be used at runtime for
+    // the e2e tests. This causes the deserialization to fail because of a missing function that was
+    // introduced in 1.8.0.
+    implementation(libs.kotlinx.serialization.json)
 
     // UI test dependencies
+
+    // Needed for createComposeExtension() and createAndroidComposeExtension()
     debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(libs.koin.test)
     androidTestImplementation(libs.kotlin.test)
     androidTestImplementation(libs.mockk.android)
-    androidTestImplementation(Dependencies.junitJupiterApi)
-    androidTestImplementation(Dependencies.junit5AndroidTestCompose)
+    androidTestImplementation(libs.turbine)
+    androidTestImplementation(libs.junit.jupiter.api)
+    androidTestImplementation(libs.junit5.android.test.compose)
+    androidTestImplementation(libs.androidx.espresso)
+    androidTestImplementation(projects.lib.screenTest)
 }

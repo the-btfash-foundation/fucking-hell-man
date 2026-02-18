@@ -3,8 +3,7 @@
 This document will guide you to setup your development environment on macOS. It has been
 tested on a clean install of macOS Ventura 13.5.1 on a M2 MacBook.
 
-> __*WARNING:*__ This guide will not apply the [wireguard-go patch](https://git.zx2c4.com/wireguard-android/tree/tunnel/tools/libwg-go/goruntime-boottime-over-monotonic.diff)
-> as done in Linux build instructions which may affect app performance.
+As an alternative to this guide you can also follow [these nix devshell instructions](../BuildInstructions.md#build-using-nix-devshell).
 
 ## 1. Install Prerequisites
 
@@ -17,7 +16,7 @@ brew install --cask android-studio
 
 Install the following packages:
 ```bash
-brew install protobuf gcc go openjdk@17 rustup-init python3
+brew install protobuf gcc openjdk@17 rustup-init python3
 ```
 
 > __*NOTE:*__ Ensure that you setup `openjdk@17` to be the active JDK, follow instructions in
@@ -28,17 +27,12 @@ Finish the install of `rustup`:
 rustup-init
 ```
 
-Install `cbindgen` which is required to build `wireguard-go-rs`:
-```bash
-cargo install --force cbindgen
-```
-
 ## 2. Install SDK Tools and Android NDK Toolchain
 Open Android Studio -> Tools -> SDK Manager, and install `Android SDK Command-line Tools (latest)`.
 
 Install the necessary Android SDK tools
 ```bash
-~/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" "ndk;27.2.12479018"
+~/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "ndk;27.3.13750724"
 ```
 
 Install Android targets
@@ -50,7 +44,7 @@ Export the following environmental variables, and possibly store them for exampl
 `~/.zprofile` or `~/.zshrc` file:
 ```bash
 export ANDROID_HOME="$HOME/Library/Android/sdk"
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
 export NDK_TOOLCHAIN_DIR="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin"
 export AR_aarch64_linux_android="$NDK_TOOLCHAIN_DIR/llvm-ar"
 export AR_armv7_linux_androideabi="$NDK_TOOLCHAIN_DIR/llvm-ar"
@@ -66,11 +60,9 @@ export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$NDK_TOOLCHAIN_DIR/i686-linux-and
 export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$NDK_TOOLCHAIN_DIR/x86_64-linux-android26-clang"
 ```
 
-## 3. Checkout wireguard-go-rs submodule
-wireguard-go-rs submodule need to be downloaded:
-
+## 3. Checkout required submodules
 ```bash
-git submodule update --init --recursive --depth=1 wireguard-go-rs
+git submodule update --init android/rust-android-gradle-plugin
 ```
 
 ## 4. Debug build

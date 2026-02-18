@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2023-06-30.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -21,28 +21,25 @@ class SetupAccountCompletedContentView: UIView {
         label.adjustsFontForContentSizeCategory = true
         label.lineBreakMode = .byWordWrapping
         label.numberOfLines = .zero
-        label.text = NSLocalizedString(
-            "CREATED_ACCOUNT_CONFIRMATION_PAGE_TITLE",
-            tableName: "CreatedAccountConfirmation",
-            value: "You’re all set!!",
-            comment: ""
-        )
+        label.text = NSLocalizedString("You’re all set!", comment: "")
         return label
     }()
 
     private let commentLabel: UILabel = {
         let label = UILabel()
 
-        let message = NSMutableAttributedString(string: NSLocalizedString(
-            "CREATED_ACCOUNT_CONFIRMATION_PAGE_BODY",
-            tableName: "CreatedAccountConfirmation",
-            value: """
-            Go ahead and start using the app to begin reclaiming your online privacy.
-            To continue your journey as a privacy ninja, \
-            visit our website to pick up other privacy-friendly habits and tools.
-            """,
-            comment: ""
-        ))
+        let message = NSMutableAttributedString(
+            string: [
+                NSLocalizedString(
+                    "Go ahead and start using the app to begin reclaiming your online privacy.",
+                    comment: ""
+                ),
+                NSLocalizedString(
+                    "To continue your journey as a privacy ninja, visit our website to pick up"
+                        + " other privacy-friendly habits and tools.",
+                    comment: ""
+                ),
+            ].joined(separator: " "))
         message.apply(paragraphStyle: .alert)
 
         label.attributedText = message
@@ -57,12 +54,7 @@ class SetupAccountCompletedContentView: UIView {
     private let privacyButton: AppButton = {
         let button = AppButton(style: .success)
         button.setAccessibilityIdentifier(.learnAboutPrivacyButton)
-        let localizedString = NSLocalizedString(
-            "LEARN_ABOUT_PRIVACY_BUTTON",
-            tableName: "CreatedAccountConfirmation",
-            value: "Learn about privacy",
-            comment: ""
-        )
+        let localizedString = NSLocalizedString("Learn about privacy", comment: "")
         button.setTitle(localizedString, for: .normal)
         button.setImage(UIImage(named: "IconExtlink")?.imageFlippedForRightToLeftLayoutDirection(), for: .normal)
         return button
@@ -71,12 +63,7 @@ class SetupAccountCompletedContentView: UIView {
     private let startButton: AppButton = {
         let button = AppButton(style: .success)
         button.setAccessibilityIdentifier(.startUsingTheAppButton)
-        button.setTitle(NSLocalizedString(
-            "START_USING_THE_APP_BUTTON",
-            tableName: "CreatedAccountConfirmation",
-            value: "Start using the app",
-            comment: ""
-        ), for: .normal)
+        button.setTitle(NSLocalizedString("Start using the app", comment: ""), for: .normal)
         return button
     }()
 
@@ -93,14 +80,17 @@ class SetupAccountCompletedContentView: UIView {
         return stackView
     }()
 
+    let scrollView = UIScrollView()
+
     weak var delegate: SetupAccountCompletedContentViewDelegate?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
 
         backgroundColor = .primaryColor
-        directionalLayoutMargins = UIMetrics.contentLayoutMargins
         backgroundColor = .secondaryColor
+
+        setAccessibilityIdentifier(.setUpAccountCompletedView)
 
         configureUI()
         addActions()
@@ -119,18 +109,39 @@ class SetupAccountCompletedContentView: UIView {
         buttonsStackView.addArrangedSubview(privacyButton)
         buttonsStackView.addArrangedSubview(startButton)
 
-        addSubview(textsStackView)
-        addSubview(buttonsStackView)
-        addConstraints()
-    }
+        scrollView.addConstrainedSubviews([textsStackView]) {
+            textsStackView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .leading(0),
+                    .trailing(0),
+                ]))
 
-    private func addConstraints() {
-        addConstrainedSubviews([textsStackView, buttonsStackView]) {
-            textsStackView
-                .pinEdgesToSuperviewMargins(.all().excluding(.bottom))
+            textsStackView.pinEdgesToSuperview(
+                PinnableEdges([
+                    .top(0),
+                    .bottom(0),
+                ]))
+        }
 
-            buttonsStackView
-                .pinEdgesToSuperviewMargins(.all().excluding(.top))
+        addConstrainedSubviews([scrollView, buttonsStackView]) {
+            scrollView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .top(UIMetrics.contentLayoutMargins.top),
+                    .leading(0),
+                    .trailing(0),
+                ]))
+
+            buttonsStackView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .leading(UIMetrics.padding8),
+                    .trailing(UIMetrics.padding8),
+                    .bottom(UIMetrics.contentLayoutMargins.bottom),
+                ]))
+
+            buttonsStackView.topAnchor.constraint(
+                equalTo: scrollView.bottomAnchor,
+                constant: UIMetrics.contentLayoutMargins.top
+            )
         }
     }
 

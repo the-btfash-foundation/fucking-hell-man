@@ -5,4 +5,7 @@ enum class ObfuscationMode {
     Off,
     Udp2Tcp,
     Shadowsocks,
+    Quic,
+    Lwo,
+    WireguardPort,
 }

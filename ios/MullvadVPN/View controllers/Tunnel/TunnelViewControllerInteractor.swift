@@ -3,14 +3,14 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 26/10/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import MullvadSettings
 import MullvadTypes
 
-final class TunnelViewControllerInteractor {
+final class TunnelViewControllerInteractor: @unchecked Sendable {
     private let tunnelManager: TunnelManager
     private let outgoingConnectionService: OutgoingConnectionServiceHandling
     private var tunnelObserver: TunnelObserver?
@@ -60,8 +60,10 @@ final class TunnelViewControllerInteractor {
                 didUpdateTunnelStatus?(tunnelStatus)
                 if case .connected = tunnelStatus.state {
                     outgoingConnectionTask = Task(priority: .high) { [weak self] in
-                        guard let outgoingConnectionInfo = try await self?.outgoingConnectionService
-                            .getOutgoingConnectionInfo() else {
+                        guard
+                            let outgoingConnectionInfo = try await self?.outgoingConnectionService
+                                .getOutgoingConnectionInfo()
+                        else {
                             return
                         }
                         await self?.didGetOutgoingAddress?(outgoingConnectionInfo)

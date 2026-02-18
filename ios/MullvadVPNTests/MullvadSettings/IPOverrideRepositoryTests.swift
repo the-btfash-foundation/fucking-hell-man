@@ -3,12 +3,13 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2024-01-17.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadSettings
 import Network
 import XCTest
+
+@testable import MullvadSettings
 
 final class IPOverrideRepositoryTests: XCTestCase {
     static let store = InMemorySettingsStore<SettingNotFound>()
@@ -19,7 +20,7 @@ final class IPOverrideRepositoryTests: XCTestCase {
     }
 
     override static func tearDown() {
-        SettingsManager.unitTestStore = nil
+        store.reset()
     }
 
     override func tearDownWithError() throws {

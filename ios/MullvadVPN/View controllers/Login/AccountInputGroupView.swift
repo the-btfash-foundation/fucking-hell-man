@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 22/03/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadTypes
@@ -22,15 +22,10 @@ final class AccountInputGroupView: UIView {
     let sendButton: UIButton = {
         let button = UIButton(type: .custom)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.setImage(UIImage(named: "IconArrow"), for: .normal)
+        button.setImage(UIImage.Buttons.rightArrow, for: .normal)
         button.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         button.setAccessibilityIdentifier(.loginTextFieldButton)
-        button.accessibilityLabel = NSLocalizedString(
-            "ACCOUNT_INPUT_LOGIN_BUTTON_ACCESSIBILITY_LABEL",
-            tableName: "AccountInput",
-            value: "Log in",
-            comment: ""
-        )
+        button.accessibilityLabel = NSLocalizedString("Login", comment: "")
         return button
     }()
 
@@ -51,8 +46,9 @@ final class AccountInputGroupView: UIView {
 
     private let privateTextField: AccountTextField = {
         let textField = AccountTextField()
-        textField.font = accountNumberFont()
+        textField.font = .mullvadMedium
         textField.translatesAutoresizingMaskIntoConstraints = false
+        textField.adjustsFontForContentSizeCategory = true
         textField.placeholder = "0000 0000 0000 0000"
         textField.placeholderTextColor = .lightGray
         textField.textContentType = .username
@@ -96,18 +92,13 @@ final class AccountInputGroupView: UIView {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.contentHorizontalAlignment = .leading
         button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        button.accessibilityLabel = NSLocalizedString(
-            "LAST_USED_ACCOUNT_ACCESSIBILITY_LABEL",
-            tableName: "AccountInput",
-            value: "Last used account",
-            comment: ""
-        )
+        button.accessibilityLabel = NSLocalizedString("Last used account", comment: "")
         button.configuration?.contentInsets = UIMetrics.textFieldMargins.toDirectionalInsets
         button.configuration?.title = " "
         button.configuration?
             .titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributeContainer in
                 var updatedAttributeContainer = attributeContainer
-                updatedAttributeContainer.font = AccountInputGroupView.accountNumberFont()
+                updatedAttributeContainer.font = UIFont.mullvadMedium
                 updatedAttributeContainer.foregroundColor = .AccountTextField.NormalState.textColor
                 return updatedAttributeContainer
             }
@@ -119,13 +110,8 @@ final class AccountInputGroupView: UIView {
         let button = CustomButton()
         button.translatesAutoresizingMaskIntoConstraints = false
         button.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        button.accessibilityLabel = NSLocalizedString(
-            "REMOVE_LAST_USED_ACCOUNT_ACCESSIBILITY_LABEL",
-            tableName: "AccountInput",
-            value: "Remove last used account",
-            comment: ""
-        )
-        button.configuration?.image = UIImage(resource: .iconCloseSml).withTintColor(.primaryColor)
+        button.accessibilityLabel = NSLocalizedString("Remove last used account", comment: "")
+        button.configuration?.image = UIImage.Buttons.closeSmall.withTintColor(.primaryColor)
         button.configuration?.title = " "
         return button
     }()
@@ -370,14 +356,9 @@ final class AccountInputGroupView: UIView {
 
     @objc private func didTapRemoveLastUsedAccount() {
         didRemoveLastUsedAccount?()
-        setLastUsedAccount(nil, animated: true)
     }
 
     // MARK: - Private
-
-    private static func accountNumberFont() -> UIFont {
-        UIFont.monospacedSystemFont(ofSize: 20, weight: .regular)
-    }
 
     private func addTextFieldNotificationObservers() {
         let notificationCenter = NotificationCenter.default
@@ -469,8 +450,9 @@ final class AccountInputGroupView: UIView {
 
         bottomRowView.accessibilityElementsHidden = !shouldShow
 
-        if lastUsedAccountButton.accessibilityElementIsFocused() ||
-            removeLastUsedAccountButton.accessibilityElementIsFocused() {
+        if lastUsedAccountButton.accessibilityElementIsFocused()
+            || removeLastUsedAccountButton.accessibilityElementIsFocused()
+        {
             UIAccessibility.post(notification: .layoutChanged, argument: textField)
         }
     }
@@ -560,5 +542,4 @@ private class AccountInputBorderLayer: CAShapeLayer {
         return super.defaultAction(forKey: event)
     }
 
-    // swiftlint:disable:next file_length
 }

@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2024-02-29.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -11,7 +11,7 @@ import MullvadSettings
 import MullvadTypes
 import UIKit
 
-protocol AddLocationsViewControllerDelegate: AnyObject {
+protocol AddLocationsViewControllerDelegate: AnyObject, Sendable {
     func didBack()
 }
 
@@ -25,7 +25,8 @@ class AddLocationsViewController: UIViewController {
         let tableView = UITableView()
         tableView.separatorColor = .secondaryColor
         tableView.separatorInset = .zero
-        tableView.rowHeight = 56
+        tableView.estimatedRowHeight = UIMetrics.TableView.rowHeight
+        tableView.rowHeight = UITableView.automaticDimension
         tableView.indicatorStyle = .white
         tableView.setAccessibilityIdentifier(.editCustomListEditLocationsTableView)
         return tableView

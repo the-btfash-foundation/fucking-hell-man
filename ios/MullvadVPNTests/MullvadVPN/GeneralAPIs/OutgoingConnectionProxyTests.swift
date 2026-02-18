@@ -3,12 +3,12 @@
 //  MullvadVPNTests
 //
 //  Created by Mojgan on 2023-10-25.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadMockData
-import MullvadREST
 import XCTest
+
+@testable import MullvadMockData
 
 final class OutgoingConnectionProxyTests: XCTestCase {
     private var mockIPV6ConnectionData: Data!
@@ -30,9 +30,10 @@ final class OutgoingConnectionProxyTests: XCTestCase {
     func testSuccessGettingIPV4() async throws {
         let iPv4Expectation = expectation(description: "Did receive IPv4")
 
-        let outgoingConnectionProxy = OutgoingConnectionProxy(urlSession: URLSessionStub(
-            response: (mockIPV4ConnectionData, createHTTPURLResponse(ip: .v4, statusCode: 200))
-        ), hostname: hostname)
+        let outgoingConnectionProxy = OutgoingConnectionProxy(
+            urlSession: URLSessionStub(
+                response: (mockIPV4ConnectionData, createHTTPURLResponse(ip: .v4, statusCode: 200))
+            ), hostname: hostname)
 
         let result = try await outgoingConnectionProxy.getIPV4(retryStrategy: .noRetry)
 
@@ -45,9 +46,10 @@ final class OutgoingConnectionProxyTests: XCTestCase {
     func testFailureGettingIPV4() async throws {
         let noIPv4Expectation = expectation(description: "Did not receive IPv4")
 
-        let outgoingConnectionProxy = OutgoingConnectionProxy(urlSession: URLSessionStub(
-            response: (Data(), createHTTPURLResponse(ip: .v4, statusCode: 503))
-        ), hostname: hostname)
+        let outgoingConnectionProxy = OutgoingConnectionProxy(
+            urlSession: URLSessionStub(
+                response: (Data(), createHTTPURLResponse(ip: .v4, statusCode: 503))
+            ), hostname: hostname)
 
         await XCTAssertThrowsErrorAsync(try await outgoingConnectionProxy.getIPV4(retryStrategy: .noRetry)) { _ in
             noIPv4Expectation.fulfill()
@@ -58,9 +60,10 @@ final class OutgoingConnectionProxyTests: XCTestCase {
     func testSuccessGettingIPV6() async throws {
         let ipv6Expectation = expectation(description: "Did receive IPv6")
 
-        let outgoingConnectionProxy = OutgoingConnectionProxy(urlSession: URLSessionStub(
-            response: (mockIPV6ConnectionData, createHTTPURLResponse(ip: .v6, statusCode: 200))
-        ), hostname: hostname)
+        let outgoingConnectionProxy = OutgoingConnectionProxy(
+            urlSession: URLSessionStub(
+                response: (mockIPV6ConnectionData, createHTTPURLResponse(ip: .v6, statusCode: 200))
+            ), hostname: hostname)
 
         let result = try await outgoingConnectionProxy.getIPV6(retryStrategy: .noRetry)
 
@@ -73,9 +76,10 @@ final class OutgoingConnectionProxyTests: XCTestCase {
     func testFailureGettingIPV6() async throws {
         let noIPv6Expectation = expectation(description: "Did not receive IPv6")
 
-        let outgoingConnectionProxy = OutgoingConnectionProxy(urlSession: URLSessionStub(
-            response: (mockIPV6ConnectionData, createHTTPURLResponse(ip: .v6, statusCode: 404))
-        ), hostname: hostname)
+        let outgoingConnectionProxy = OutgoingConnectionProxy(
+            urlSession: URLSessionStub(
+                response: (mockIPV6ConnectionData, createHTTPURLResponse(ip: .v6, statusCode: 404))
+            ), hostname: hostname)
 
         await XCTAssertThrowsErrorAsync(try await outgoingConnectionProxy.getIPV6(retryStrategy: .noRetry)) { _ in
             noIPv6Expectation.fulfill()

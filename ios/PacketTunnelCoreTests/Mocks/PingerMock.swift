@@ -3,16 +3,17 @@
 //  PacketTunnelCoreTests
 //
 //  Created by pronebird on 16/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadTypes
 import Network
+
 @testable import PacketTunnelCore
 
 /// Ping client mock that can be used to simulate network transmission errors and delays.
-class PingerMock: PingerProtocol {
+class PingerMock: PingerProtocol, @unchecked Sendable {
     typealias OutcomeDecider = (IPv4Address, UInt16) -> Outcome
 
     private let decideOutcome: OutcomeDecider

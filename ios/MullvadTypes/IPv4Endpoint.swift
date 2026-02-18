@@ -3,13 +3,13 @@
 //  MullvadTypes
 //
 //  Created by pronebird on 06/12/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import Network
 
-public struct IPv4Endpoint: Hashable, Equatable, Codable, CustomStringConvertible {
+public struct IPv4Endpoint: Hashable, Equatable, Codable, CustomStringConvertible, Sendable {
     public let ip: IPv4Address
     public let port: UInt16
 
@@ -26,7 +26,8 @@ public struct IPv4Endpoint: Hashable, Equatable, Codable, CustomStringConvertibl
         )
 
         if components.count == 2, let parsedIP = IPv4Address(String(components[0])),
-           let parsedPort = UInt16(components[1]) {
+            let parsedPort = UInt16(components[1])
+        {
             ip = parsedIP
             port = parsedPort
         } else {

@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-12-05.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import SwiftUI
@@ -14,34 +14,42 @@ struct SplitMainButton: View {
     var style: MainButtonStyle.Style
     var accessibilityId: AccessibilityIdentifier?
 
-    @State private var secondaryButtonWidth: CGFloat = 0
+    @State private var secondaryButtonSize: CGSize = .zero
+    @State private var primaryButtonSize: CGSize = .zero
 
     var primaryAction: () -> Void
     var secondaryAction: () -> Void
 
     var body: some View {
         HStack(spacing: 1) {
-            Button(action: primaryAction, label: {
-                HStack {
-                    Spacer()
-                    Text(text)
-                    Spacer()
+            Button(
+                action: primaryAction,
+                label: {
+                    HStack {
+                        Spacer()
+                        Text(text)
+                        Spacer()
+                    }
+                    .padding(.leading, secondaryButtonSize.width)
+                    .sizeOfView { primaryButtonSize = $0 }
                 }
-                .padding(.trailing, -secondaryButtonWidth)
-            })
+            )
             .ifLet(accessibilityId) { view, value in
                 view.accessibilityIdentifier(value.asString)
             }
 
-            Button(action: secondaryAction, label: {
-                Image(image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 24, height: 24)
-                    .padding(10)
-            })
-            .aspectRatio(1, contentMode: .fit)
-            .sizeOfView { secondaryButtonWidth = $0.width }
+            Button(
+                action: secondaryAction,
+                label: {
+                    Image(image)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(10)
+                        .frame(
+                            width: min(max(primaryButtonSize.height, 44), 60), height: max(primaryButtonSize.height, 44)
+                        )
+                        .sizeOfView { secondaryButtonSize = $0 }
+                })
         }
         .buttonStyle(MainButtonStyle(style))
         .cornerRadius(UIMetrics.MainButton.cornerRadius)

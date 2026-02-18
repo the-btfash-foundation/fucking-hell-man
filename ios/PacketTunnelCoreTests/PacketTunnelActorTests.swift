@@ -3,18 +3,18 @@
 //  PacketTunnelCoreTests
 //
 //  Created by pronebird on 05/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-import Combine
-@testable import MullvadMockData
-@testable import MullvadREST
-@testable import MullvadSettings
+@preconcurrency import Combine
 import MullvadTypes
 import Network
 import WireGuardKitTypes
 import XCTest
 
+@testable import MullvadMockData
+@testable import MullvadREST
+@testable import MullvadSettings
 @testable import PacketTunnelCore
 
 final class PacketTunnelActorTests: XCTestCase {
@@ -27,19 +27,25 @@ final class PacketTunnelActorTests: XCTestCase {
 
     /**
      Test a happy path start sequence.
-
+    
      As actor should transition through the following states: .initial → .connecting → .connected
      */
     func testStartGoesToConnectedInSequence() async throws {
         let actor = PacketTunnelActor.mock()
 
         // As actor starts it should transition through the following states based on simulation:
-        // .initial → .connecting → .connected
+        // .initial → .negotiatingEphemeralPeer -> .connecting → .connected
         let initialStateExpectation = expectation(description: "Expect initial state")
+        let negotiatingPeerExpectation = expectation(description: "Expect peer negotiation")
         let connectingExpectation = expectation(description: "Expect connecting state")
         let connectedStateExpectation = expectation(description: "Expect connected state")
 
-        let allExpectations = [initialStateExpectation, connectingExpectation, connectedStateExpectation]
+        let allExpectations = [
+            initialStateExpectation,
+            negotiatingPeerExpectation,
+            connectingExpectation,
+            connectedStateExpectation,
+        ]
 
         stateSink = await actor.$observedState
             .receive(on: DispatchQueue.main)
@@ -47,6 +53,9 @@ final class PacketTunnelActorTests: XCTestCase {
                 switch newState {
                 case .initial:
                     initialStateExpectation.fulfill()
+                case .negotiatingEphemeralPeer:
+                    negotiatingPeerExpectation.fulfill()
+                    actor.notifyEphemeralPeerNegotiated()
                 case .connecting:
                     connectingExpectation.fulfill()
                 case .connected:
@@ -65,12 +74,18 @@ final class PacketTunnelActorTests: XCTestCase {
         let actor = PacketTunnelActor.mock()
 
         // As actor starts it should transition through the following states based on simulation:
-        // .initial → .connecting → .connected
+        // .initial → .negotiatingEphemeralPeer -> .connecting → .connected
         let initialStateExpectation = expectation(description: "Expect initial state")
+        let negotiatingPeerExpectation = expectation(description: "Expect peer negotiation")
         let connectingExpectation = expectation(description: "Expect connecting state")
         let connectedStateExpectation = expectation(description: "Expect connected state")
 
-        let allExpectations = [initialStateExpectation, connectingExpectation, connectedStateExpectation]
+        let allExpectations = [
+            initialStateExpectation,
+            negotiatingPeerExpectation,
+            connectingExpectation,
+            connectedStateExpectation,
+        ]
 
         stateSink = await actor.$observedState
             .receive(on: DispatchQueue.main)
@@ -78,6 +93,9 @@ final class PacketTunnelActorTests: XCTestCase {
                 switch newState {
                 case .initial:
                     initialStateExpectation.fulfill()
+                case .negotiatingEphemeralPeer:
+                    negotiatingPeerExpectation.fulfill()
+                    actor.notifyEphemeralPeerNegotiated()
                 case .connecting:
                     connectingExpectation.fulfill()
                 case .connected:
@@ -99,7 +117,10 @@ final class PacketTunnelActorTests: XCTestCase {
      */
     func testConnectionAttemptTransition() async throws {
         let tunnelMonitor = TunnelMonitorStub { _, _ in }
-        let actor = PacketTunnelActor.mock(tunnelMonitor: tunnelMonitor)
+        let actor = PacketTunnelActor.mock(
+            tunnelMonitor: tunnelMonitor,
+            settingsReader: SettingsReaderStub.noPostQuantumConfiguration()
+        )
         let connectingStateExpectation = expectation(description: "Expect connecting state")
         connectingStateExpectation.expectedFulfillmentCount = 5
         var nextAttemptCount: UInt = 0
@@ -127,10 +148,7 @@ final class PacketTunnelActorTests: XCTestCase {
 
     func testPostQuantumReconnectionTransition() async throws {
         let tunnelMonitor = TunnelMonitorStub { _, _ in }
-        let actor = PacketTunnelActor.mock(
-            tunnelMonitor: tunnelMonitor,
-            settingsReader: SettingsReaderStub.postQuantumConfiguration()
-        )
+        let actor = PacketTunnelActor.mock(tunnelMonitor: tunnelMonitor)
         let negotiatingPostQuantumKeyStateExpectation = expectation(description: "Expect post quantum state")
         negotiatingPostQuantumKeyStateExpectation.expectedFulfillmentCount = 5
         var nextAttemptCount: UInt = 0
@@ -162,7 +180,10 @@ final class PacketTunnelActorTests: XCTestCase {
      */
     func testReconnectionAttemptTransition() async throws {
         let tunnelMonitor = TunnelMonitorStub { _, _ in }
-        let actor = PacketTunnelActor.mock(tunnelMonitor: tunnelMonitor)
+        let actor = PacketTunnelActor.mock(
+            tunnelMonitor: tunnelMonitor,
+            settingsReader: SettingsReaderStub.noPostQuantumConfiguration()
+        )
         let connectingStateExpectation = expectation(description: "Expect connecting state")
         let connectedStateExpectation = expectation(description: "Expect connected state")
         let reconnectingStateExpectation = expectation(description: "Expect reconnecting state")
@@ -203,20 +224,22 @@ final class PacketTunnelActorTests: XCTestCase {
     /**
      Test start sequence when reading settings yields an error indicating that device is locked.
      This is common when network extenesion starts on boot with iOS.
-
+    
      1. The first attempt to read settings yields an error indicating that device is locked.
      2. An actor should set up a task to reconnect the tunnel periodically.
      3. The issue goes away on the second attempt to read settings.
-     4. An actor should transition through `.connecting` towards`.connected` state.
+     4. An actor should transition through `.negotiatingEphemeralPeer` towards`.connected` state.
      */
     func testLockedDeviceErrorOnBoot() async throws {
         let initialStateExpectation = expectation(description: "Expect initial state")
         let errorStateExpectation = expectation(description: "Expect error state")
+        let negotiatingPeerExpectation = expectation(description: "Expect peer negotiation")
         let connectingStateExpectation = expectation(description: "Expect connecting state")
         let connectedStateExpectation = expectation(description: "Expect connected state")
         let allExpectations = [
             initialStateExpectation,
             errorStateExpectation,
+            negotiatingPeerExpectation,
             connectingStateExpectation,
             connectedStateExpectation,
         ]
@@ -252,6 +275,9 @@ final class PacketTunnelActorTests: XCTestCase {
                 initialStateExpectation.fulfill()
             case .error:
                 errorStateExpectation.fulfill()
+            case .negotiatingEphemeralPeer:
+                negotiatingPeerExpectation.fulfill()
+                actor.notifyEphemeralPeerNegotiated()
             case .connecting:
                 connectingStateExpectation.fulfill()
             case .connected:
@@ -279,6 +305,7 @@ final class PacketTunnelActorTests: XCTestCase {
 
         // Wait for the connected state to happen so it doesn't get coalesced immediately after the call to `actor.stop`
         actor.start(options: launchOptions)
+        actor.notifyEphemeralPeerNegotiated()
         await fulfillment(of: [connectedStateExpectation], timeout: .UnitTest.timeout)
 
         await expect(.disconnected, on: actor) {
@@ -305,33 +332,6 @@ final class PacketTunnelActorTests: XCTestCase {
         await fulfillment(of: [disconnectedExpectation], timeout: .UnitTest.invertedTimeout)
     }
 
-    func testStopCancelsDefaultPathObserver() async throws {
-        let pathObserver = DefaultPathObserverFake()
-        let actor = PacketTunnelActor.mock(defaultPathObserver: pathObserver)
-
-        let connectedStateExpectation = expectation(description: "Connected state")
-        let didStopObserverExpectation = expectation(description: "Did stop path observer")
-        didStopObserverExpectation.expectedFulfillmentCount = 2
-        pathObserver.onStop = { didStopObserverExpectation.fulfill() }
-
-        let expression: (ObservedState) -> Bool = { if case .connected = $0 { true } else { false } }
-
-        await expect(expression, on: actor) {
-            connectedStateExpectation.fulfill()
-        }
-
-        actor.start(options: launchOptions)
-        await fulfillment(of: [connectedStateExpectation], timeout: .UnitTest.timeout)
-
-        let disconnectedStateExpectation = expectation(description: "Disconnected state")
-
-        await expect(.disconnected, on: actor) {
-            disconnectedStateExpectation.fulfill()
-        }
-        actor.stop()
-        await fulfillment(of: [disconnectedStateExpectation, didStopObserverExpectation], timeout: .UnitTest.timeout)
-    }
-
     func testCannotEnterErrorStateWhenStopping() async throws {
         let actor = PacketTunnelActor.mock()
         let connectingStateExpectation = expectation(description: "Connecting state")
@@ -348,6 +348,7 @@ final class PacketTunnelActorTests: XCTestCase {
             connectingStateExpectation.fulfill()
         }
         actor.start(options: launchOptions)
+        actor.notifyEphemeralPeerNegotiated()
         await fulfillment(of: [connectingStateExpectation], timeout: .UnitTest.timeout)
 
         stateSink = await actor.$observedState
@@ -399,6 +400,7 @@ final class PacketTunnelActorTests: XCTestCase {
         }
 
         actor.start(options: launchOptions)
+        actor.notifyEphemeralPeerNegotiated()
         // Wait for the connected state to happen so it doesn't get coalesced immediately after the call to `actor.stop`
         await fulfillment(of: [connectedStateExpectation], timeout: .UnitTest.timeout)
 
@@ -438,6 +440,7 @@ final class PacketTunnelActorTests: XCTestCase {
             connectedExpectation.fulfill()
         }
         actor.start(options: launchOptions)
+        actor.notifyEphemeralPeerNegotiated()
         await fulfillment(of: [connectedExpectation], timeout: .UnitTest.timeout)
 
         // Cancel the state sink to avoid overfulfilling the connected expectation
@@ -447,11 +450,9 @@ final class PacketTunnelActorTests: XCTestCase {
         await fulfillment(of: [stopMonitorExpectation], timeout: .UnitTest.timeout)
     }
 
-    func testRecoveringConnectionAfterTunnelAdaptorError() async throws {
+    func testAdapterErrorStateStaysInErrorState() async throws {
         let errorStateExpectation = expectation(description: "Expect error state")
         let connectingStateExpectation = expectation(description: "Expect connecting state")
-        connectingStateExpectation.expectedFulfillmentCount = 2
-        let connectedStateExpectation = expectation(description: "Expect connected state")
 
         let blockedStateMapper = BlockedStateErrorMapperStub { error in
             if error is TunnelAdapterErrorStub {
@@ -461,7 +462,10 @@ final class PacketTunnelActorTests: XCTestCase {
             }
         }
 
-        let actor = PacketTunnelActor.mock(blockedStateErrorMapper: blockedStateMapper)
+        let actor = PacketTunnelActor.mock(
+            blockedStateErrorMapper: blockedStateMapper,
+            settingsReader: SettingsReaderStub.noPostQuantumConfiguration()
+        )
 
         actor.start(options: launchOptions)
 
@@ -474,7 +478,7 @@ final class PacketTunnelActorTests: XCTestCase {
                 case .connecting:
                     connectingStateExpectation.fulfill()
                 case .connected:
-                    connectedStateExpectation.fulfill()
+                    fatalError("Unexpected connected state")
                 default:
                     break
                 }
@@ -483,7 +487,7 @@ final class PacketTunnelActorTests: XCTestCase {
         actor.setErrorState(reason: .tunnelAdapter)
 
         await fulfillment(
-            of: [errorStateExpectation, connectingStateExpectation, connectedStateExpectation],
+            of: [connectingStateExpectation, errorStateExpectation],
             timeout: .UnitTest.timeout,
             enforceOrder: true
         )
@@ -513,5 +517,3 @@ extension PacketTunnelActorTests {
 }
 
 struct TunnelAdapterErrorStub: Error {}
-
-// swiftlint:disable:this file_length

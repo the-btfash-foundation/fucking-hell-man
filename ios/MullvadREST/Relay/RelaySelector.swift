@@ -3,13 +3,12 @@
 //  RelaySelector
 //
 //  Created by pronebird on 11/06/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
+import CoreLocation
 import MullvadSettings
 import MullvadTypes
-
-private let defaultPort: UInt16 = 443
 
 public enum RelaySelector {
     // MARK: - public
@@ -31,7 +30,8 @@ public enum RelaySelector {
     }
 
     static func pickRandomRelayByWeight<T: AnyRelay>(relays: [RelayWithLocation<T>])
-        -> RelayWithLocation<T>? {
+        -> RelayWithLocation<T>?
+    {
         rouletteSelection(relays: relays, weightFunction: { relayWithLocation in relayWithLocation.relay.weight })
     }
 
@@ -46,10 +46,11 @@ public enum RelaySelector {
 
         // Pick a random number in the range 1 - totalWeight. This chooses the relay with a
         // non-zero weight.
-        var i = (1 ... totalWeight).randomElement()!
+        var i = (1...totalWeight).randomElement()!
 
         let randomRelay = relays.first { relay -> Bool in
-            let (result, isOverflow) = i
+            let (result, isOverflow) =
+                i
                 .subtractingReportingOverflow(weightFunction(relay))
 
             i = isOverflow ? 0 : result
@@ -62,25 +63,16 @@ public enum RelaySelector {
         return randomRelay
     }
 
-    static func mapRelays<T: AnyRelay>(
-        relays: [T],
-        locations: [String: REST.ServerLocation]
-    ) -> [RelayWithLocation<T>] {
-        relays.compactMap { relay in
-            guard let serverLocation = locations[relay.location] else { return nil }
-            return makeRelayWithLocationFrom(serverLocation, relay: relay)
-        }
-    }
-
     /// Produce a list of `RelayWithLocation` items satisfying the given constraints
     static func applyConstraints<T: AnyRelay>(
         _ relayConstraint: RelayConstraint<UserSelectedRelays>,
         filterConstraint: RelayConstraint<RelayFilter>,
         daitaEnabled: Bool,
-        relays: [RelayWithLocation<T>]
+        relays: [RelayWithLocation<T>],
+        includeInactive: Bool = false
     ) throws -> [RelayWithLocation<T>] {
-        // Filter on active status, daita support, filter constraint and relay constraint.
-        var filteredRelays = try filterByActive(relays: relays)
+        // Filter on various settings and constraints.
+        var filteredRelays = includeInactive ? relays : try filterByActive(relays: relays)
         filteredRelays = try filterByFilterConstraint(relays: filteredRelays, constraint: filterConstraint)
         filteredRelays = try filterByLocationConstraint(relays: filteredRelays, constraint: relayConstraint)
         filteredRelays = try filterByDaita(relays: filteredRelays, daitaEnabled: daitaEnabled)
@@ -93,21 +85,56 @@ public enum RelaySelector {
         rawPortRanges: [[UInt16]],
         numberOfFailedAttempts: UInt
     ) -> UInt16? {
-        switch portConstraint {
+        return switch portConstraint {
         case let .only(port):
-            return port
-
+            port
         case .any:
-            // 1. First attempt should pick a random port.
-            // 2. The second should pick port 443.
-            // 3. Repeat steps 1 and 2.
-            let useDefaultPort = numberOfFailedAttempts.isOrdered(nth: 2, forEverySetOf: 2)
-
-            return useDefaultPort ? defaultPort : pickRandomPort(rawPortRanges: rawPortRanges)
+            pickRandomPort(rawPortRanges: rawPortRanges)
         }
     }
 
-    // MARK: - private
+    static func closestRelays(
+        to location: CLLocationCoordinate2D,
+        using relayWithLocations: [RelayWithLocation<some AnyRelay>]
+    ) -> [RelayWithDistance<some AnyRelay>] {
+        let relaysWithDistance = relayWithLocations.map {
+            return RelayWithDistance(
+                relay: $0.relay,
+                distance: Haversine.distance(
+                    location.latitude,
+                    location.longitude,
+                    $0.serverLocation.latitude,
+                    $0.serverLocation.longitude
+                )
+            )
+        }.sorted {
+            $0.distance < $1.distance
+        }.prefix(5)
+
+        return Array(relaysWithDistance)
+    }
+
+    static func randomCloseRelay(
+        to location: CLLocationCoordinate2D,
+        using relayWithLocations: [RelayWithLocation<some AnyRelay>]
+    ) -> AnyRelay? {
+        let relaysWithDistance = closestRelays(to: location, using: relayWithLocations)
+
+        var greatestDistance = 0.0
+        relaysWithDistance.forEach {
+            if $0.distance > greatestDistance {
+                greatestDistance = $0.distance
+            }
+        }
+
+        let closestRelay = rouletteSelection(
+            relays: Array(relaysWithDistance),
+            weightFunction: { relay in
+                UInt64(1 + greatestDistance - relay.distance)
+            })
+
+        return closestRelay?.relay ?? relaysWithDistance.randomElement()?.relay
+    }
 
     static func parseRawPortRanges(_ rawPortRanges: [[UInt16]]) -> [ClosedRange<UInt16>] {
         rawPortRanges.compactMap { inputRange -> ClosedRange<UInt16>? in
@@ -117,7 +144,7 @@ public enum RelaySelector {
             let endPort = inputRange[1]
 
             if startPort <= endPort {
-                return startPort ... endPort
+                return startPort...endPort
             } else {
                 return nil
             }
@@ -130,7 +157,7 @@ public enum RelaySelector {
             partialResult + closedRange.count
         }
 
-        guard var portIndex = (0 ..< portAmount).randomElement() else {
+        guard var portIndex = (0..<portAmount).randomElement() else {
             return nil
         }
 
@@ -147,24 +174,7 @@ public enum RelaySelector {
         return nil
     }
 
-    private static func makeRelayWithLocationFrom<T: AnyRelay>(
-        _ serverLocation: REST.ServerLocation,
-        relay: T
-    ) -> RelayWithLocation<T>? {
-        let locationComponents = relay.location.split(separator: "-")
-        guard locationComponents.count > 1 else { return nil }
-
-        let location = Location(
-            country: serverLocation.country,
-            countryCode: String(locationComponents[0]),
-            city: serverLocation.city,
-            cityCode: String(locationComponents[1]),
-            latitude: serverLocation.latitude,
-            longitude: serverLocation.longitude
-        )
-
-        return RelayWithLocation(relay: relay, serverLocation: location)
-    }
+    // MARK: - private
 
     private static func filterByActive<T: AnyRelay>(
         relays: [RelayWithLocation<T>]

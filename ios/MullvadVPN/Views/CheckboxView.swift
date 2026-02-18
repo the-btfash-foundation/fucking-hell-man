@@ -3,42 +3,35 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-06-05.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
 class CheckboxView: UIView {
-    private let backgroundView: UIView = {
-        let view = UIView()
-        view.backgroundColor = .white
-        view.layer.cornerRadius = 4
-        return view
+    private let checkboxSelectedView: UIImageView = {
+        UIImageView(image: UIImage.checkboxSelected)
     }()
 
-    private let checkmarkView: UIImageView = {
-        let imageView = UIImageView(image: UIImage(named: "IconTick"))
-        imageView.tintColor = .successColor
-        imageView.contentMode = .scaleAspectFit
-        imageView.alpha = 0
-        return imageView
+    private let checkboxUnselectedView: UIImageView = {
+        UIImageView(image: UIImage.checkboxUnselected)
     }()
 
     var isChecked = false {
         didSet {
-            checkmarkView.alpha = isChecked ? 1 : 0
+            checkboxSelectedView.alpha = isChecked ? 1 : 0
         }
     }
 
     init() {
         super.init(frame: .zero)
 
-        directionalLayoutMargins = .init(top: 4, leading: 4, bottom: 4, trailing: 4)
-
-        addConstrainedSubviews([backgroundView, checkmarkView]) {
-            backgroundView.pinEdgesToSuperview()
-            checkmarkView.pinEdgesToSuperviewMargins()
+        addConstrainedSubviews([checkboxSelectedView, checkboxUnselectedView]) {
+            checkboxSelectedView.pinEdgesToSuperview()
+            checkboxUnselectedView.pinEdgesToSuperview()
         }
+        checkboxSelectedView.adjustsImageSizeForAccessibilityContentSizeCategory = true
+        checkboxUnselectedView.adjustsImageSizeForAccessibilityContentSizeCategory = true
     }
 
     required init?(coder aDecoder: NSCoder) {

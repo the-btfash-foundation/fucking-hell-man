@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by Andrew Bulhak on 2024-07-08.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -12,7 +12,7 @@ import Network
 import PacketTunnelCore
 import WireGuardKit
 
-public final class TunnelPinger: PingerProtocol {
+public final class TunnelPinger: PingerProtocol, @unchecked Sendable {
     private var sequenceNumber: UInt16 = 0
     private let stateLock = NSLock()
     private let pingReceiveQueue: DispatchQueue

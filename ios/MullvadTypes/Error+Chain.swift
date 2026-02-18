@@ -3,7 +3,7 @@
 //  MullvadTypes
 //
 //  Created by pronebird on 23/09/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -24,14 +24,11 @@ extension Error {
 
     public func logFormatError() -> String {
         let nsError = self as NSError
-        var message = ""
+        let description =
+            (self as? CustomErrorDescriptionProtocol)?
+            .customErrorDescription ?? nsError.description
 
-        let description = (self as? CustomErrorDescriptionProtocol)?
-            .customErrorDescription ?? localizedDescription
-
-        message += "\(description) (domain = \(nsError.domain), code = \(nsError.code))"
-
-        return message
+        return description
     }
 
     private func getUnderlyingError() -> Error? {

@@ -2,57 +2,30 @@ import { Action, History as OriginalHistory, Location, LocationDescriptorObject 
 import { useHistory as useReactRouterHistory } from 'react-router';
 
 import { IHistoryObject, LocationState } from '../../shared/ipc-types';
+import { RoutePath } from '../../shared/routes';
 import { GeneratedRoutePath } from './routeHelpers';
-import { RoutePath } from './routes';
 
-export interface ITransitionSpecification {
-  name: string;
-  duration: number;
+export enum TransitionType {
+  show,
+  dismiss,
+  push,
+  pop,
+  none,
 }
 
-interface ITransitionMap {
-  [name: string]: ITransitionSpecification;
-}
-
-/**
- * Transition descriptors
- */
-export const transitions: ITransitionMap = {
-  show: {
-    name: 'slide-up',
-    duration: 450,
-  },
-  dismiss: {
-    name: 'slide-down',
-    duration: 450,
-  },
-  push: {
-    name: 'push',
-    duration: 450,
-  },
-  pop: {
-    name: 'pop',
-    duration: 450,
-  },
-  none: {
-    name: '',
-    duration: 0,
-  },
-};
-
-const transitionOpposites: Record<string, string> = {
-  'slide-up': 'slide-down',
-  'slide-down': 'slide-up',
-  push: 'pop',
-  pop: 'push',
-  '': '',
-};
-
-function oppositeTransition(transition: ITransitionSpecification): ITransitionSpecification {
-  return {
-    ...transition,
-    name: transitionOpposites[transition.name],
-  };
+function oppositeTransition(transition: TransitionType): TransitionType {
+  switch (transition) {
+    case TransitionType.show:
+      return TransitionType.dismiss;
+    case TransitionType.dismiss:
+      return TransitionType.none;
+    case TransitionType.push:
+      return TransitionType.pop;
+    case TransitionType.pop:
+      return TransitionType.none;
+    case TransitionType.none:
+      return TransitionType.none;
+  }
 }
 
 type LocationDescriptor = RoutePath | GeneratedRoutePath | LocationDescriptorObject<LocationState>;
@@ -60,7 +33,7 @@ type LocationDescriptor = RoutePath | GeneratedRoutePath | LocationDescriptorObj
 type LocationListener = (
   location: Location<LocationState>,
   action: Action,
-  transition: ITransitionSpecification,
+  transition: TransitionType,
 ) => void;
 
 export default class History {
@@ -82,14 +55,6 @@ export default class History {
     return history;
   }
 
-  public recordScrollPosition(position: [number, number]) {
-    this.location.state.scrollPosition = position;
-  }
-
-  public recordSectionExpandedState(id: string, expanded: boolean) {
-    this.location.state.expandedSections[id] = expanded;
-  }
-
   public get location(): Location<LocationState> {
     return this.entries[this.index];
   }
@@ -103,7 +68,7 @@ export default class History {
   }
 
   public push = (nextLocation: LocationDescriptor, nextState?: Partial<LocationState>) => {
-    const state = { transition: transitions.push, ...nextState };
+    const state = { transition: TransitionType.push, ...nextState };
     this.pushImpl(nextLocation, state);
     this.notify(state.transition);
   };
@@ -121,20 +86,7 @@ export default class History {
     this.index = 0;
     this.entries = [location];
 
-    this.notify(nextState?.transition ?? transitions.none);
-  };
-
-  public replaceRoot = (
-    replacementLocation: LocationDescriptor,
-    replacementState?: Partial<LocationState>,
-  ) => {
-    const location = this.createLocation(replacementLocation, replacementState);
-    this.lastAction = 'REPLACE';
-    this.entries.splice(0, 1, location);
-
-    if (this.index === 0) {
-      this.notify(replacementState?.transition ?? transitions.none);
-    }
+    this.notify(nextState?.transition ?? TransitionType.none);
   };
 
   public listen(callback: LocationListener) {
@@ -173,8 +125,14 @@ export default class History {
   public block(): never {
     throw Error('Not implemented');
   }
-  public replace(): never {
-    throw Error('Not implemented');
+
+  public replace(
+    replacementLocation: LocationDescriptor,
+    replacementState?: Partial<LocationState>,
+  ) {
+    const location = this.createLocation(replacementLocation, replacementState);
+    this.lastAction = 'REPLACE';
+    this.entries.splice(this.index, 1, location);
   }
   public go(): never {
     throw Error('Not implemented');
@@ -196,7 +154,7 @@ export default class History {
     this.entries.splice(this.index, this.entries.length - this.index, location);
   }
 
-  private popImpl(n = 1): ITransitionSpecification | undefined {
+  private popImpl(n = 1): TransitionType | undefined {
     if (this.canGo(-n)) {
       const transition = this.getPopTransition(n);
 
@@ -210,7 +168,7 @@ export default class History {
     }
   }
 
-  private notify(transition: ITransitionSpecification) {
+  private notify(transition: TransitionType) {
     this.listeners.forEach((listener) => listener(this.location, this.action, transition));
   }
 
@@ -250,12 +208,13 @@ export default class History {
     return {
       scrollPosition: state?.scrollPosition ?? [0, 0],
       expandedSections: state?.expandedSections ?? {},
-      transition: state?.transition ?? transitions.none,
+      transition: state?.transition ?? TransitionType.none,
+      options: state?.options,
     };
   }
 
   private getRandomKey() {
-    return Math.random().toString(36).substr(8);
+    return Math.random().toString(36).substring(8);
   }
 }
 

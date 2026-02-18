@@ -1,55 +1,48 @@
 import { useCallback, useState } from 'react';
 import { sprintf } from 'sprintf-js';
 
-import { colors, strings } from '../../../config.json';
-import { Ownership } from '../../../shared/daemon-rpc-types';
+import { strings } from '../../../shared/constants';
+import { ObfuscationType, Ownership } from '../../../shared/daemon-rpc-types';
 import { messages } from '../../../shared/gettext';
-import { IconButton } from '../../lib/components';
+import { RoutePath } from '../../../shared/routes';
+import { Button, FilterChip, Flex, IconButton, LabelTinySemiBold } from '../../lib/components';
+import { FlexColumn } from '../../lib/components/flex-column';
+import { View } from '../../lib/components/view';
 import { useRelaySettingsUpdater } from '../../lib/constraint-updater';
-import { daitaFilterActive, filterSpecialLocations } from '../../lib/filter-locations';
+import {
+  daitaFilterActive,
+  filterSpecialLocations,
+  lwoFilterActive,
+  quicFilterActive,
+} from '../../lib/filter-locations';
 import { useHistory } from '../../lib/history';
 import { formatHtml } from '../../lib/html-formatter';
 import { useNormalRelaySettings } from '../../lib/relay-settings-hooks';
-import { RoutePath } from '../../lib/routes';
 import { useSelector } from '../../redux/store';
 import { AppNavigationHeader } from '../';
 import * as Cell from '../cell';
-import { useFilteredProviders } from '../Filter';
-import ImageView from '../ImageView';
-import { BackAction } from '../KeyboardNavigation';
-import { Layout, SettingsContainer } from '../Layout';
+import { BackAction } from '../keyboard-navigation';
 import { NavigationContainer } from '../NavigationContainer';
 import { NavigationScrollbars } from '../NavigationScrollbars';
+import { SearchTextField } from '../search-text-field';
+import { useFilteredProviders } from '../views/filter/hooks';
 import CombinedLocationList, { CombinedLocationListProps } from './CombinedLocationList';
 import CustomLists from './CustomLists';
 import { useRelayListContext } from './RelayListContext';
 import { ScopeBarItem } from './ScopeBar';
 import { useScrollPositionContext } from './ScrollPositionContext';
-import {
-  useOnSelectBridgeLocation,
-  useOnSelectEntryLocation,
-  useOnSelectExitLocation,
-} from './select-location-hooks';
-import { LocationType, SpecialBridgeLocationType, SpecialLocation } from './select-location-types';
+import { useOnSelectEntryLocation, useOnSelectExitLocation } from './select-location-hooks';
+import { LocationType, SpecialLocation } from './select-location-types';
 import { useSelectLocationContext } from './SelectLocationContainer';
 import {
-  StyledClearFilterButton,
   StyledContent,
-  StyledDaitaSettingsButton,
-  StyledFilter,
-  StyledFilterRow,
   StyledNavigationBarAttachment,
   StyledScopeBar,
-  StyledSearchBar,
   StyledSelectionUnavailable,
   StyledSelectionUnavailableText,
 } from './SelectLocationStyles';
 import { SpacePreAllocationView } from './SpacePreAllocationView';
-import {
-  AutomaticLocationRow,
-  CustomBridgeLocationRow,
-  CustomExitLocationRow,
-} from './SpecialLocationList';
+import { CustomExitLocationRow } from './SpecialLocationList';
 
 export default function SelectLocation() {
   const history = useHistory();
@@ -62,27 +55,26 @@ export default function SelectLocation() {
   const relaySettings = useNormalRelaySettings();
   const ownership = relaySettings?.ownership ?? Ownership.any;
   const providers = relaySettings?.providers ?? [];
+  const multihop = relaySettings?.wireguard.useMultihop ?? false;
   const filteredProviders = useFilteredProviders(providers, ownership);
   const daita = useSelector((state) => state.settings.wireguard.daita?.enabled ?? false);
   const directOnly = useSelector((state) => state.settings.wireguard.daita?.directOnly ?? false);
-  const showDaitaFilter = daitaFilterActive(
-    daita,
-    directOnly,
-    locationType,
-    relaySettings?.tunnelProtocol ?? 'any',
-    relaySettings?.wireguard.useMultihop ?? false,
+  const quic = useSelector(
+    (state) => state.settings.obfuscationSettings.selectedObfuscation === ObfuscationType.quic,
   );
+  const lwo = useSelector(
+    (state) => state.settings.obfuscationSettings.selectedObfuscation === ObfuscationType.lwo,
+  );
+  const showQuicFilter = quicFilterActive(quic, locationType, multihop);
+  const showLwoFilter = lwoFilterActive(lwo, locationType, multihop);
+  const showDaitaFilter = daitaFilterActive(daita, directOnly, locationType, multihop);
 
-  const [searchValue, setSearchValue] = useState('');
+  const [searchValue, setSearchValue] = useState<string | undefined>(undefined);
 
   const onClose = useCallback(() => history.pop(), [history]);
   const onViewFilter = useCallback(() => history.push(RoutePath.filter), [history]);
 
-  const tunnelProtocol = relaySettings?.tunnelProtocol ?? 'any';
-  const bridgeState = useSelector((state) => state.settings.bridgeState);
-  const allowEntrySelection =
-    (tunnelProtocol === 'openvpn' && bridgeState === 'on') ||
-    (tunnelProtocol !== 'openvpn' && relaySettings?.wireguard.useMultihop);
+  const allowEntrySelection = relaySettings?.wireguard.useMultihop;
 
   const onClearProviders = useCallback(async () => {
     resetScrollPositions();
@@ -123,63 +115,62 @@ export default function SelectLocation() {
 
   const showOwnershipFilter = ownership !== Ownership.any;
   const showProvidersFilter = providers.length > 0;
-  const showFilters = showOwnershipFilter || showProvidersFilter || showDaitaFilter;
+  const showFilters =
+    showOwnershipFilter ||
+    showProvidersFilter ||
+    showDaitaFilter ||
+    showQuicFilter ||
+    showLwoFilter;
   return (
-    <BackAction action={onClose}>
-      <Layout>
-        <SettingsContainer>
-          <NavigationContainer>
-            <AppNavigationHeader
-              title={
-                // TRANSLATORS: Title label in navigation bar
-                messages.pgettext('select-location-nav', 'Select location')
-              }
-              titleVisible>
-              <IconButton
-                icon="icon-filter-round"
-                variant="secondary"
-                onClick={onViewFilter}
-                aria-label={messages.gettext('Filter')}
-              />
-            </AppNavigationHeader>
+    <View backgroundColor="darkBlue">
+      <BackAction action={onClose}>
+        <NavigationContainer>
+          <AppNavigationHeader
+            title={
+              // TRANSLATORS: Title label in navigation bar
+              messages.pgettext('select-location-nav', 'Select location')
+            }
+            titleVisible>
+            <IconButton
+              variant="secondary"
+              onClick={onViewFilter}
+              aria-label={messages.gettext('Filter')}>
+              <IconButton.Icon icon="filter-circle" />
+            </IconButton>
+          </AppNavigationHeader>
 
-            <StyledNavigationBarAttachment>
-              {allowEntrySelection && (
-                <>
-                  <StyledScopeBar selectedIndex={locationType} onChange={changeLocationType}>
-                    <ScopeBarItem>
-                      {messages.pgettext('select-location-view', 'Entry')}
-                    </ScopeBarItem>
-                    <ScopeBarItem>{messages.pgettext('select-location-view', 'Exit')}</ScopeBarItem>
-                  </StyledScopeBar>
-                </>
-              )}
+          <StyledNavigationBarAttachment>
+            {allowEntrySelection && (
+              <>
+                <StyledScopeBar selectedIndex={locationType} onChange={changeLocationType}>
+                  <ScopeBarItem>{messages.pgettext('select-location-view', 'Entry')}</ScopeBarItem>
+                  <ScopeBarItem>{messages.pgettext('select-location-view', 'Exit')}</ScopeBarItem>
+                </StyledScopeBar>
+              </>
+            )}
 
-              {locationType === LocationType.entry && daita && !directOnly ? null : (
-                <>
-                  {showFilters && (
-                    <StyledFilterRow>
+            {locationType === LocationType.entry && daita && !directOnly ? null : (
+              <>
+                {showFilters && (
+                  <Flex
+                    gap="small"
+                    alignItems="center"
+                    flexWrap="wrap"
+                    margin={{ horizontal: 'small', bottom: 'medium' }}>
+                    <LabelTinySemiBold>
                       {messages.pgettext('select-location-view', 'Filtered:')}
+                    </LabelTinySemiBold>
 
-                      {showOwnershipFilter && (
-                        <StyledFilter>
-                          {ownershipFilterLabel(ownership)}
-                          <StyledClearFilterButton
-                            aria-label={messages.gettext('Clear')}
-                            onClick={onClearOwnership}>
-                            <ImageView
-                              height={16}
-                              width={16}
-                              source="icon-close"
-                              tintColor={colors.white60}
-                              tintHoverColor={colors.white80}
-                            />
-                          </StyledClearFilterButton>
-                        </StyledFilter>
-                      )}
+                    {showOwnershipFilter && (
+                      <FilterChip aria-label={messages.gettext('Clear')} onClick={onClearOwnership}>
+                        <FilterChip.Text>{ownershipFilterLabel(ownership)}</FilterChip.Text>
+                        <FilterChip.Icon icon="cross" />
+                      </FilterChip>
+                    )}
 
-                      {showProvidersFilter && (
-                        <StyledFilter>
+                    {showProvidersFilter && (
+                      <FilterChip aria-label={messages.gettext('Clear')} onClick={onClearProviders}>
+                        <FilterChip.Text>
                           {sprintf(
                             messages.pgettext(
                               'select-location-view',
@@ -187,47 +178,88 @@ export default function SelectLocation() {
                             ),
                             { numberOfProviders: filteredProviders.length },
                           )}
-                          <StyledClearFilterButton
-                            aria-label={messages.gettext('Clear')}
-                            onClick={onClearProviders}>
-                            <ImageView
-                              height={16}
-                              width={16}
-                              source="icon-close"
-                              tintColor={colors.white60}
-                              tintHoverColor={colors.white80}
-                            />
-                          </StyledClearFilterButton>
-                        </StyledFilter>
-                      )}
+                        </FilterChip.Text>
+                        <FilterChip.Icon icon="cross" />
+                      </FilterChip>
+                    )}
 
-                      {showDaitaFilter && (
-                        <StyledFilter>
+                    {showDaitaFilter && (
+                      <FilterChip as="div">
+                        <FilterChip.Text>
                           {sprintf(
                             messages.pgettext('select-location-view', 'Setting: %(settingName)s'),
                             { settingName: 'DAITA' },
                           )}
-                        </StyledFilter>
-                      )}
-                    </StyledFilterRow>
-                  )}
+                        </FilterChip.Text>
+                      </FilterChip>
+                    )}
 
-                  <StyledSearchBar searchTerm={searchValue} onSearch={updateSearchTerm} />
-                </>
-              )}
-            </StyledNavigationBarAttachment>
+                    {showQuicFilter && (
+                      <FilterChip as="div">
+                        <FilterChip.Text>
+                          {sprintf(
+                            // TRANSLATORS: Label for indicator that shows that obfuscation is being used as a filter.
+                            // TRANSLATORS: Available placeholders:
+                            // TRANSLATORS: %(obfuscation)s - type of obfuscation in use
+                            messages.pgettext(
+                              'select-location-view',
+                              'Obfuscation: %(obfuscation)s',
+                            ),
+                            { obfuscation: strings.quic },
+                          )}
+                        </FilterChip.Text>
+                      </FilterChip>
+                    )}
 
-            <NavigationScrollbars ref={scrollViewRef}>
+                    {showLwoFilter && (
+                      <FilterChip as="div">
+                        <FilterChip.Text>
+                          {sprintf(
+                            // TRANSLATORS: Label for indicator that shows that obfuscation is being used as a filter.
+                            // TRANSLATORS: Available placeholders:
+                            // TRANSLATORS: %(obfuscation)s - type of obfuscation in use
+                            messages.pgettext(
+                              'select-location-view',
+                              'Obfuscation: %(obfuscation)s',
+                            ),
+                            { obfuscation: strings.lwo },
+                          )}
+                        </FilterChip.Text>
+                      </FilterChip>
+                    )}
+                  </Flex>
+                )}
+
+                <SearchTextField
+                  variant="secondary"
+                  value={searchValue}
+                  onValueChange={updateSearchTerm}>
+                  <SearchTextField.Icon icon="search" />
+                  <SearchTextField.Input
+                    autoFocus
+                    placeholder={
+                      // TRANSLATORS: Placeholder text for search field in select location view
+                      messages.gettext('Search locations or servers')
+                    }
+                  />
+                  <SearchTextField.ClearButton />
+                </SearchTextField>
+              </>
+            )}
+          </StyledNavigationBarAttachment>
+
+          <NavigationScrollbars ref={scrollViewRef}>
+            <View.Content>
               <SpacePreAllocationView ref={spacePreAllocationViewRef}>
                 <StyledContent>
                   <SelectLocationContent />
                 </StyledContent>
               </SpacePreAllocationView>
-            </NavigationScrollbars>
-          </NavigationContainer>
-        </SettingsContainer>
-      </Layout>
-    </BackAction>
+            </View.Content>
+          </NavigationScrollbars>
+        </NavigationContainer>
+      </BackAction>
+    </View>
   );
 }
 
@@ -248,13 +280,11 @@ function SelectLocationContent() {
   const { relayList, expandLocation, collapseLocation, onBeforeExpand } = useRelayListContext();
   const [onSelectExitRelay, onSelectExitSpecial] = useOnSelectExitLocation();
   const [onSelectEntryRelay, onSelectEntrySpecial] = useOnSelectEntryLocation();
-  const [onSelectBridgeRelay, onSelectBridgeSpecial] = useOnSelectBridgeLocation();
 
   const daita = useSelector((state) => state.settings.wireguard.daita?.enabled ?? false);
   const directOnly = useSelector((state) => state.settings.wireguard.daita?.directOnly ?? false);
 
   const relaySettings = useNormalRelaySettings();
-  const bridgeSettings = useSelector((state) => state.settings.bridgeSettings);
 
   const allowAddToCustomList = useSelector((state) => state.settings.customLists.length > 0);
 
@@ -290,7 +320,7 @@ function SelectLocationContent() {
         <NoSearchResult specialLocationsLength={specialLocations.length} />
       </>
     );
-  } else if (relaySettings?.tunnelProtocol !== 'openvpn') {
+  } else {
     if (daita && !directOnly && relaySettings?.wireguard.useMultihop) {
       return <DisabledEntrySelection />;
     }
@@ -311,44 +341,6 @@ function SelectLocationContent() {
           allowAddToCustomList={allowAddToCustomList}
         />
         <NoSearchResult specialLocationsLength={0} />
-      </>
-    );
-  } else {
-    // Add the "Automatic" item
-    const specialList: Array<SpecialLocation<SpecialBridgeLocationType>> = [
-      {
-        label: messages.pgettext('select-location-view', 'Custom bridge'),
-        value: SpecialBridgeLocationType.custom,
-        selected: bridgeSettings?.type === 'custom',
-        disabled: bridgeSettings?.custom === undefined,
-        component: CustomBridgeLocationRow,
-      },
-      {
-        label: messages.gettext('Automatic'),
-        value: SpecialBridgeLocationType.closestToExit,
-        selected: bridgeSettings?.type === 'normal' && bridgeSettings.normal?.location === 'any',
-        component: AutomaticLocationRow,
-      },
-    ];
-
-    const specialLocations = filterSpecialLocations(searchTerm, specialList);
-    return (
-      <>
-        <CustomLists selectedElementRef={selectedLocationRef} onSelect={onSelectBridgeRelay} />
-        <LocationList
-          key={locationType}
-          relayLocations={relayList}
-          specialLocations={specialLocations}
-          selectedElementRef={selectedLocationRef}
-          onSelectRelay={onSelectBridgeRelay}
-          onSelectSpecial={onSelectBridgeSpecial}
-          onExpand={expandLocation}
-          onCollapse={collapseLocation}
-          onWillExpand={onBeforeExpand}
-          onTransitionEnd={resetHeight}
-          allowAddToCustomList={allowAddToCustomList}
-        />
-        <NoSearchResult specialLocationsLength={specialLocations.length} />
       </>
     );
   }
@@ -419,7 +411,7 @@ function DisabledEntrySelection() {
   }, [push]);
 
   return (
-    <StyledSelectionUnavailable>
+    <FlexColumn gap="large" margin={{ horizontal: 'large', bottom: 'tiny' }}>
       <StyledSelectionUnavailableText>
         {sprintf(
           messages.pgettext(
@@ -429,11 +421,13 @@ function DisabledEntrySelection() {
           { daita: strings.daita, multihop, directOnly },
         )}
       </StyledSelectionUnavailableText>
-      <StyledDaitaSettingsButton onClick={navigateToDaitaSettings}>
-        {sprintf(messages.pgettext('select-location-view', 'Open %(daita)s settings'), {
-          daita: strings.daita,
-        })}
-      </StyledDaitaSettingsButton>
-    </StyledSelectionUnavailable>
+      <Button onClick={navigateToDaitaSettings}>
+        <Button.Text>
+          {sprintf(messages.pgettext('select-location-view', 'Open %(daita)s settings'), {
+            daita: strings.daita,
+          })}
+        </Button.Text>
+      </Button>
+    </FlexColumn>
   );
 }

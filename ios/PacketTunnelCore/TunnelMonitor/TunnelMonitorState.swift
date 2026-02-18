@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by Marco Nikic on 2024-02-06.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -156,8 +156,9 @@ struct TunnelMonitorState {
 
         let timeSinceLastPing = now.timeIntervalSince(lastRequestDate)
         if let lastReplyDate = pingStats.lastReplyDate,
-           lastRequestDate.timeIntervalSince(lastReplyDate) >= timings.heartbeatReplyTimeout,
-           timeSinceLastPing >= timings.pingDelay, !isHeartbeatSuspended {
+            lastRequestDate.timeIntervalSince(lastReplyDate) >= timings.heartbeatReplyTimeout,
+            timeSinceLastPing >= timings.pingDelay, !isHeartbeatSuspended
+        {
             return .retryHeartbeatPing
         }
 

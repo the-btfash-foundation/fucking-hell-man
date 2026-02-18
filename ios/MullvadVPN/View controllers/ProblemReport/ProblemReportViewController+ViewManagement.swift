@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Marco Nikic on 2024-02-09.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -28,10 +28,74 @@ extension ProblemReportViewController {
     func makeSubheaderLabel() -> UILabel {
         let textLabel = UILabel()
         textLabel.translatesAutoresizingMaskIntoConstraints = false
+        textLabel.font = .mullvadTinySemiBold
+        textLabel.adjustsFontForContentSizeCategory = true
         textLabel.numberOfLines = 0
         textLabel.textColor = .white
-        textLabel.text = Self.persistentViewModel.subheadLabelText
+        textLabel.text = ProblemReportViewModel.subheadLabelText
         return textLabel
+    }
+
+    func makeCheckboxStackView() -> UIStackView {
+        checkboxView = CheckboxView()
+        checkboxView.isUserInteractionEnabled = false
+        checkboxView.isChecked = false
+
+        let reduceAnonymityWarningView = ReduceAnonymityWarningView()
+        reduceAnonymityWarningView.isHidden = true
+        let userPrivacyLabel = UILabel()
+        userPrivacyLabel.font = .mullvadTiny
+        userPrivacyLabel.adjustsFontForContentSizeCategory = true
+        userPrivacyLabel.numberOfLines = 0
+        userPrivacyLabel.textColor = .white
+        userPrivacyLabel.text = ProblemReportViewModel.userPrivacyWarningText
+
+        let horizontalStackView = UIStackView()
+        horizontalStackView.axis = .horizontal
+        horizontalStackView.distribution = .fillEqually
+        horizontalStackView.spacing = 4
+        horizontalStackView.isUserInteractionEnabled = true
+        horizontalStackView.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(toggleCheckbox)))
+
+        let verticalStackView = UIStackView(arrangedSubviews: [horizontalStackView, reduceAnonymityWarningView])
+        verticalStackView.axis = .vertical
+        verticalStackView.spacing = 4
+        verticalStackView.isLayoutMarginsRelativeArrangement = true
+        verticalStackView.directionalLayoutMargins = .init(top: 12, leading: 0, bottom: 0, trailing: 0)
+        verticalStackView.translatesAutoresizingMaskIntoConstraints = false
+        verticalStackView.layer.borderColor = UIColor.primaryColor.cgColor
+        verticalStackView.layer.borderWidth = 1
+        verticalStackView.layer.cornerRadius = 4
+
+        NSLayoutConstraint.activate(
+            horizontalStackView.pinEdgesToSuperview(PinnableEdges([.leading(0), .trailing(0)])))
+        NSLayoutConstraint.activate(reduceAnonymityWarningView.pinEdgesToSuperviewMargins(.all().excluding(.top)))
+
+        horizontalStackView.addConstrainedSubviews([checkboxView, userPrivacyLabel]) {
+            checkboxView.pinEdgesToSuperviewMargins(PinnableEdges([.leading(10), .top(0)]))
+            userPrivacyLabel.leadingAnchor.constraint(equalTo: checkboxView.trailingAnchor, constant: 10)
+            userPrivacyLabel.pinEdgesToSuperviewMargins(PinnableEdges([.top(0), .trailing(0), .bottom(10)]))
+        }
+
+        let constraint = verticalStackView.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        NSLayoutConstraint.activate(
+            [constraint]
+        )
+
+        self.reduceAnonymityWarningView = reduceAnonymityWarningView
+
+        return verticalStackView
+    }
+
+    @objc func toggleCheckbox() {
+        checkboxView.isChecked.toggle()
+        self.didToggleIncludeAccountTokenInLogs(checkboxView.isChecked)
+
+        UIView.animate(withDuration: 0.2) { [weak self] in
+            guard let self else { return }
+            self.reduceAnonymityWarningView.isHidden = !self.checkboxView.isChecked
+        }
     }
 
     func makeEmailTextField() -> CustomTextField {
@@ -47,8 +111,9 @@ extension ProblemReportViewController {
         textField.borderStyle = .none
         textField.backgroundColor = .white
         textField.inputAccessoryView = emailAccessoryToolbar
-        textField.font = UIFont.systemFont(ofSize: 17)
-        textField.placeholder = Self.persistentViewModel.emailPlaceholderText
+        textField.font = .mullvadSmall
+        textField.adjustsFontForContentSizeCategory = true
+        textField.placeholder = ProblemReportViewModel.emailPlaceholderText
         return textField
     }
 
@@ -57,8 +122,9 @@ extension ProblemReportViewController {
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.backgroundColor = .white
         textView.inputAccessoryView = messageAccessoryToolbar
-        textView.font = UIFont.systemFont(ofSize: 17)
-        textView.placeholder = Self.persistentViewModel.messageTextViewPlaceholder
+        textView.font = .mullvadSmall
+        textView.adjustsFontForContentSizeCategory = true
+        textView.placeholder = ProblemReportViewModel.messageTextViewPlaceholder
         textView.contentInsetAdjustmentBehavior = .never
 
         return textView
@@ -90,7 +156,7 @@ extension ProblemReportViewController {
         let button = AppButton(style: .default)
         button.setAccessibilityIdentifier(.problemReportAppLogsButton)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.setTitle(Self.persistentViewModel.viewLogsButtonTitle, for: .normal)
+        button.setTitle(ProblemReportViewModel.viewLogsButtonTitle, for: .normal)
         button.addTarget(self, action: #selector(handleViewLogsButtonTap), for: .touchUpInside)
         return button
     }
@@ -99,7 +165,7 @@ extension ProblemReportViewController {
         let button = AppButton(style: .success)
         button.setAccessibilityIdentifier(.problemReportSendButton)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.setTitle(Self.persistentViewModel.sendLogsButtonTitle, for: .normal)
+        button.setTitle(ProblemReportViewModel.sendLogsButtonTitle, for: .normal)
         button.addTarget(self, action: #selector(handleSendButtonTap), for: .touchUpInside)
         return button
     }
@@ -107,6 +173,14 @@ extension ProblemReportViewController {
     func makeSubmissionOverlayView() -> ProblemReportSubmissionOverlayView {
         let overlay = ProblemReportSubmissionOverlayView()
         overlay.translatesAutoresizingMaskIntoConstraints = false
+
+        overlay.viewLogsButtonAction = { [weak self] in
+            self?.handleViewLogsButtonTap()
+        }
+
+        overlay.cancelButtonAction = { [weak self] in
+            self?.interactor.cancelSendingReport()
+        }
 
         overlay.editButtonAction = { [weak self] in
             self?.hideSubmissionOverlay()
@@ -121,12 +195,13 @@ extension ProblemReportViewController {
 
     func addConstraints() {
         activeMessageTextViewConstraints =
-            messageTextView.pinEdges(.all().excluding(.top), to: view) +
-            messageTextView.pinEdges(PinnableEdges([.top(0)]), to: view.safeAreaLayoutGuide)
+            messageTextView.pinEdges(.all().excluding(.top), to: view)
+            + messageTextView.pinEdges(PinnableEdges([.top(0)]), to: view.safeAreaLayoutGuide)
 
         inactiveMessageTextViewConstraints =
-            messageTextView.pinEdges(.all().excluding(.top), to: textFieldsHolder) +
-            [messageTextView.topAnchor.constraint(equalTo: emailTextField.bottomAnchor, constant: 12)]
+            messageTextView.pinEdges(.all().excluding(.top), to: textFieldsHolder) + [
+                messageTextView.topAnchor.constraint(equalTo: emailTextField.bottomAnchor, constant: 12)
+            ]
 
         textFieldsHolder.addSubview(emailTextField)
         textFieldsHolder.addSubview(messagePlaceholder)
@@ -134,6 +209,9 @@ extension ProblemReportViewController {
 
         scrollView.addSubview(containerView)
         containerView.addSubview(subheaderLabel)
+        if interactor.isUserLoggedIn() {
+            containerView.addSubview(includeAccountTokenCheckbox)
+        }
         containerView.addSubview(textFieldsHolder)
         containerView.addSubview(buttonsStackView)
 
@@ -145,8 +223,16 @@ extension ProblemReportViewController {
             textFieldsHolder.pinEdges(PinnableEdges([.leading(0), .trailing(0)]), to: containerView.layoutMarginsGuide)
             textFieldsHolder.topAnchor.constraint(equalTo: subheaderLabel.bottomAnchor, constant: 24)
 
-            buttonsStackView.pinEdges(.all().excluding(.top), to: containerView.layoutMarginsGuide)
-            buttonsStackView.topAnchor.constraint(equalTo: textFieldsHolder.bottomAnchor, constant: 18)
+            if interactor.isUserLoggedIn() {
+                includeAccountTokenCheckbox.pinEdges(
+                    PinnableEdges([.leading(0), .trailing(0)]), to: containerView.layoutMarginsGuide)
+                includeAccountTokenCheckbox.topAnchor.constraint(equalTo: textFieldsHolder.bottomAnchor, constant: 24)
+                buttonsStackView.pinEdges(.all().excluding(.top), to: containerView.layoutMarginsGuide)
+                buttonsStackView.topAnchor.constraint(equalTo: includeAccountTokenCheckbox.bottomAnchor, constant: 18)
+            } else {
+                buttonsStackView.pinEdges(.all().excluding(.top), to: containerView.layoutMarginsGuide)
+                buttonsStackView.topAnchor.constraint(equalTo: textFieldsHolder.bottomAnchor, constant: 18)
+            }
 
             emailTextField.pinEdges(.all().excluding(.bottom), to: textFieldsHolder)
 
@@ -228,19 +314,21 @@ extension ProblemReportViewController {
             messageTextView.contentInsetAdjustmentBehavior = .always
 
             // Animate constraints & rounded corners on the text view
-            animateDescriptionTextView(animations: {
-                // Turn off rounded corners as the text view fills in the entire view
-                self.messageTextView.roundCorners = false
+            animateDescriptionTextView(
+                animations: {
+                    // Turn off rounded corners as the text view fills in the entire view
+                    self.messageTextView.roundCorners = false
 
-                self.view.layoutIfNeeded()
-            }, completion: { _ in
-                self.isMessageTextViewExpanded = true
+                    self.view.layoutIfNeeded()
+                },
+                completion: { _ in
+                    self.isMessageTextViewExpanded = true
 
-                self.textViewKeyboardResponder?.updateContentInsets()
+                    self.textViewKeyboardResponder?.updateContentInsets()
 
-                // Tell accessibility engine to scan the new layout
-                UIAccessibility.post(notification: .layoutChanged, argument: nil)
-            })
+                    // Tell accessibility engine to scan the new layout
+                    UIAccessibility.post(notification: .layoutChanged, argument: nil)
+                })
 
         } else {
             // Re-enable the large title
@@ -251,23 +339,25 @@ extension ProblemReportViewController {
             NSLayoutConstraint.activate(inactiveMessageTextViewConstraints)
 
             // Animate constraints & rounded corners on the text view
-            animateDescriptionTextView(animations: {
-                // Turn on rounded corners as the text view returns back to where it was
-                self.messageTextView.roundCorners = true
+            animateDescriptionTextView(
+                animations: {
+                    // Turn on rounded corners as the text view returns back to where it was
+                    self.messageTextView.roundCorners = true
 
-                self.view.layoutIfNeeded()
-            }, completion: { _ in
-                // Revert the content adjustment behavior
-                self.messageTextView.contentInsetAdjustmentBehavior = .never
+                    self.view.layoutIfNeeded()
+                },
+                completion: { _ in
+                    // Revert the content adjustment behavior
+                    self.messageTextView.contentInsetAdjustmentBehavior = .never
 
-                // Add the text view inside of the scroll view
-                self.textFieldsHolder.addSubview(self.messageTextView)
+                    // Add the text view inside of the scroll view
+                    self.textFieldsHolder.addSubview(self.messageTextView)
 
-                self.isMessageTextViewExpanded = false
+                    self.isMessageTextViewExpanded = false
 
-                // Tell accessibility engine to scan the new layout
-                UIAccessibility.post(notification: .layoutChanged, argument: nil)
-            })
+                    // Tell accessibility engine to scan the new layout
+                    UIAccessibility.post(notification: .layoutChanged, argument: nil)
+                })
         }
     }
 

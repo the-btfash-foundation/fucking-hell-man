@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-11-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import SwiftUI
@@ -11,7 +11,8 @@ import SwiftUI
 extension View {
     /// Measures view size.
     func sizeOfView(_ onSizeChange: @escaping ((CGSize) -> Void)) -> some View {
-        return self
+        return
+            self
             .background {
                 GeometryReader { proxy in
                     Color.clear
@@ -24,8 +25,8 @@ extension View {
     }
 }
 
-private struct ViewSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
+private struct ViewSizeKey: PreferenceKey, Sendable {
+    nonisolated(unsafe) static var defaultValue: CGSize = .zero
 
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()

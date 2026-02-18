@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Andreas Lif on 2022-07-26.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -18,14 +18,11 @@ class OutOfTimeContentView: UIView {
 
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
-        label.text = NSLocalizedString(
-            "OUT_OF_TIME_TITLE",
-            tableName: "OutOfTime",
-            value: "Out of time",
-            comment: ""
-        )
-        label.font = UIFont.systemFont(ofSize: 32)
+        label.text = NSLocalizedString("Out of time", comment: "")
+        label.font = .mullvadLarge
+        label.adjustsFontForContentSizeCategory = true
         label.textColor = .white
+        label.numberOfLines = 0
         return label
     }()
 
@@ -33,19 +30,15 @@ class OutOfTimeContentView: UIView {
         let label = UILabel()
         label.textColor = .white
         label.numberOfLines = 0
+        label.adjustsFontForContentSizeCategory = true
         return label
     }()
 
     lazy var disconnectButton: AppButton = {
         let button = AppButton(style: .danger)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.alpha = 0
-        let localizedString = NSLocalizedString(
-            "OUT_OF_TIME_DISCONNECT_BUTTON",
-            tableName: "OutOfTime",
-            value: "Disconnect",
-            comment: ""
-        )
+        button.isHidden = true
+        let localizedString = NSLocalizedString("Disconnect", comment: "")
         button.setTitle(localizedString, for: .normal)
         return button
     }()
@@ -53,27 +46,20 @@ class OutOfTimeContentView: UIView {
     lazy var purchaseButton: InAppPurchaseButton = {
         let button = InAppPurchaseButton()
         button.translatesAutoresizingMaskIntoConstraints = false
-        let localizedString = NSLocalizedString(
-            "OUT_OF_TIME_PURCHASE_BUTTON",
-            tableName: "OutOfTime",
-            value: "Add 30 days time",
-            comment: ""
-        )
+        let localizedString = NSLocalizedString("Add time", comment: "")
         button.setTitle(localizedString, for: .normal)
+        button.setAccessibilityIdentifier(AccessibilityIdentifier.purchaseButton)
         return button
     }()
 
     lazy var restoreButton: AppButton = {
         let button = AppButton(style: .default)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.setTitle(NSLocalizedString(
-            "RESTORE_PURCHASES_BUTTON_TITLE",
-            tableName: "OutOfTime",
-            value: "Restore purchases",
-            comment: ""
-        ), for: .normal)
+        button.setTitle(NSLocalizedString("Restore purchases", comment: ""), for: .normal)
         return button
     }()
+
+    private let scrollView = UIScrollView()
 
     private lazy var topStackView: UIStackView = {
         let stackView = UIStackView(arrangedSubviews: [statusActivityView, titleLabel, bodyLabel])
@@ -89,7 +75,8 @@ class OutOfTimeContentView: UIView {
         )
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.axis = .vertical
-        stackView.spacing = UIMetrics.TableView.sectionSpacing
+        stackView.spacing = UIMetrics.interButtonSpacing
+        stackView.backgroundColor = .secondaryColor
         return stackView
     }()
 
@@ -98,7 +85,6 @@ class OutOfTimeContentView: UIView {
         setAccessibilityIdentifier(.outOfTimeView)
         translatesAutoresizingMaskIntoConstraints = false
         backgroundColor = .secondaryColor
-        directionalLayoutMargins = UIMetrics.contentLayoutMargins
         setUpSubviews()
     }
 
@@ -109,45 +95,57 @@ class OutOfTimeContentView: UIView {
     func enableDisconnectButton(_ enabled: Bool, animated: Bool) {
         disconnectButton.isEnabled = enabled
         UIView.animate(withDuration: animated ? 0.25 : 0) {
-            self.disconnectButton.alpha = enabled ? 1 : 0
+            self.disconnectButton.isHidden = !enabled
         }
+    }
+
+    func enablePurchaseButton(_ enabled: Bool) {
+        purchaseButton.isEnabled = enabled
     }
 
     // MARK: - Private Functions
 
     func setUpSubviews() {
-        addSubview(topStackView)
-        addSubview(bottomStackView)
-        configureConstraints()
-    }
+        scrollView.addConstrainedSubviews([topStackView]) {
+            topStackView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .leading(0),
+                    .trailing(0),
+                ]))
 
-    func configureConstraints() {
-        NSLayoutConstraint.activate([
-            topStackView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -20),
+            topStackView.pinEdgesToSuperview(
+                PinnableEdges([
+                    .top(0),
+                    .bottom(0),
+                ]))
+        }
 
-            topStackView.leadingAnchor.constraint(
-                equalTo: layoutMarginsGuide.leadingAnchor
-            ),
-            topStackView.trailingAnchor.constraint(
-                equalTo: layoutMarginsGuide.trailingAnchor
-            ),
+        addConstrainedSubviews([scrollView, bottomStackView]) {
+            scrollView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .top(UIMetrics.contentLayoutMargins.top),
+                    .leading(0),
+                    .trailing(0),
+                ]))
 
-            bottomStackView.leadingAnchor.constraint(
-                equalTo: layoutMarginsGuide.leadingAnchor
-            ),
-            bottomStackView.trailingAnchor.constraint(
-                equalTo: layoutMarginsGuide.trailingAnchor
-            ),
-            bottomStackView.bottomAnchor.constraint(
-                equalTo: layoutMarginsGuide.bottomAnchor
-            ),
-        ])
+            bottomStackView.pinEdgesToSuperviewMargins(
+                PinnableEdges([
+                    .leading(UIMetrics.padding8),
+                    .trailing(UIMetrics.padding8),
+                    .bottom(UIMetrics.contentLayoutMargins.bottom),
+                ]))
+
+            bottomStackView.topAnchor.constraint(
+                equalTo: scrollView.bottomAnchor,
+                constant: UIMetrics.contentLayoutMargins.top
+            )
+        }
     }
 
     func setBodyLabelText(_ text: String) {
         bodyLabel.attributedText = NSAttributedString(
             markdownString: text,
-            options: MarkdownStylingOptions(font: .systemFont(ofSize: 17))
+            options: MarkdownStylingOptions(font: .mullvadSmall)
         )
     }
 }

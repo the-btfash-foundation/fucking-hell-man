@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Marco Nikic on 2023-09-08.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -20,11 +20,11 @@ protocol VPNTunnelProviderManagerProtocol: Equatable {
 
     init()
 
-    func loadFromPreferences(completionHandler: @escaping (Error?) -> Void)
-    func saveToPreferences(completionHandler: ((Error?) -> Void)?)
-    func removeFromPreferences(completionHandler: ((Error?) -> Void)?)
+    func loadFromPreferences(completionHandler: @escaping @Sendable (Error?) -> Void)
+    func saveToPreferences(completionHandler: (@Sendable (Error?) -> Void)?)
+    func removeFromPreferences(completionHandler: (@Sendable (Error?) -> Void)?)
 
-    static func loadAllFromPreferences(completionHandler: @escaping ([SelfType]?, Error?) -> Void)
+    static func loadAllFromPreferences(completionHandler: @escaping @Sendable ([SelfType]?, Error?) -> Void)
 }
 
 protocol VPNConnectionProtocol: NSObject {

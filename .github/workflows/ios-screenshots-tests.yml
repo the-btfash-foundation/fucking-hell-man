@@ -8,7 +8,7 @@ on:
       - main
     paths:
       - .github/workflows/ios.yml
-      - ios/.swiftformat
+      - ios/.swift-format
       - ios/**/*.swift
       - ios/**/*.xctestplan
   workflow_dispatch:
@@ -19,45 +19,24 @@ jobs:
   test:
     if: github.event.pull_request.merged || github.event_name == 'workflow_dispatch'
     name: Screenshot tests
-    runs-on: macos-13-xlarge
+    runs-on: macos-15-xlarge
     env:
       SOURCE_PACKAGES_PATH: .spm
       TEST_ACCOUNT: ${{ secrets.IOS_TEST_ACCOUNT_NUMBER }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure cache
-        uses: actions/cache@v3
-        with:
-          path: ios/${{ env.SOURCE_PACKAGES_PATH }}
-          key: ${{ runner.os }}-spm-${{ hashFiles('ios/**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-
+      - name: Setup project
+        uses: ./.github/actions/ios/setup-project-toolchain
 
-      - name: Setup go-lang
-        uses: actions/setup-go@v3
-        with:
-          go-version: 1.21.13
+      - name: Copy relay list
+        run: cp MullvadREST/Assets/relays-test-data.json MullvadREST/Assets/relays.json
+        working-directory: ios
 
-      - name: Set up yeetd to workaround XCode being slow in CI
+      - name: Add test account to config
         run: |
-          wget https://github.com/biscuitehh/yeetd/releases/download/1.0/yeetd-normal.pkg
-          sudo installer -pkg yeetd-normal.pkg -target /
-          yeetd &
-      - name: Configure Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '15.0.1'
-      - name: Configure Rust
-        run: |
-          rustup default stable
-          rustup update stable
-          rustup target add aarch64-apple-ios-sim
-
-      - name: Configure Xcode project
-        run: |
-          for file in *.xcconfig.template ; do cp $file ${file//.template/} ; done
           sed -i "" \
             "/HAS_TIME_ACCOUNT_NUMBER =/ s#= .*#= 1234123412341234#" \
             UITests.xcconfig
@@ -68,23 +47,13 @@ jobs:
           brew update
           brew install zip
 
-      - name: Install xcbeautify
-        run: |
-          brew update
-          brew install xcbeautify
-
-      - name: Install protobuf
-        run: |
-          brew update
-          brew install protobuf
-
       - name: Run screenshot tests
         run: |
           set -o pipefail && env NSUnbufferedIO=YES xcodebuild \
             -project MullvadVPN.xcodeproj \
-            -scheme MullvadVPN \
+            -scheme MullvadVPNScreenshotTests \
             -testPlan MullvadVPNScreenshots \
-            -destination "platform=iOS Simulator,name=iPhone 15" \
+            -destination "platform=iOS Simulator,name=iPhone 16" \
             -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
             -disableAutomaticPackageResolution \
             -resultBundlePath xcode-test-report \
@@ -92,6 +61,7 @@ jobs:
         working-directory: ios/
 
       - name: Archive test report
+        if: always()
         run: zip -r test-report.zip ios/xcode-test-report.xcresult
 
       - name: Store test report artifact

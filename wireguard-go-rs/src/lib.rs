@@ -6,19 +6,24 @@
 //!
 //! The [`Tunnel`] type provides a safe Rust wrapper around the C FFI.
 
-#![cfg(unix)]
-
-use core::{
-    ffi::{c_char, CStr},
-    mem::{ManuallyDrop, MaybeUninit},
-    slice,
-};
-use util::OnDrop;
+use core::ffi::{CStr, c_char};
+use core::mem::ManuallyDrop;
+use core::slice;
+use talpid_types::drop_guard::on_drop;
 use zeroize::Zeroize;
 
-mod util;
+#[cfg(target_os = "android")]
+use std::os::fd::BorrowedFd;
 
-pub type Fd = std::os::unix::io::RawFd;
+#[cfg(not(target_os = "windows"))]
+use std::os::fd::{IntoRawFd, OwnedFd};
+
+#[cfg(target_os = "windows")]
+use core::mem::MaybeUninit;
+#[cfg(target_os = "windows")]
+use std::ffi::CString;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
 
 pub type WgLogLevel = u32;
 
@@ -26,14 +31,20 @@ pub type LoggingContext = u64;
 pub type LoggingCallback =
     unsafe extern "system" fn(level: WgLogLevel, msg: *const c_char, context: LoggingContext);
 
-// Make symbols from maybenot-ffi visible to wireguard-go
-#[cfg(daita)]
+// Make symbols from maybenot-ffi visible to wireguard-go, on the platforms where
+// wireguard-go is statically linked into this crate.
+#[cfg(all(daita, any(target_os = "linux", target_os = "macos")))]
 use maybenot_ffi as _;
 
 /// A wireguard-go tunnel
 pub struct Tunnel {
     /// wireguard-go handle to the tunnel.
     handle: i32,
+
+    #[cfg(target_os = "windows")]
+    assigned_name: CString,
+    #[cfg(target_os = "windows")]
+    luid: NET_LUID_LH,
 }
 
 // NOTE: Must be kept in sync with libwg.go
@@ -70,23 +81,26 @@ impl Tunnel {
     /// for the tunnel device and logging. For targets other than android, this also takes an MTU
     /// value.
     ///
-    /// The `logging_callback` let's you provide a Rust function that receives any logging output
+    /// The `logging_callback` lets you provide a Rust function that receives any logging output
     /// from wireguard-go. `logging_context` is a value that will be passed to each invocation of
     /// `logging_callback`.
+    #[cfg(not(target_os = "windows"))]
     pub fn turn_on(
         #[cfg(not(target_os = "android"))] mtu: isize,
         settings: &CStr,
-        device: Fd,
+        device: OwnedFd,
         logging_callback: Option<LoggingCallback>,
         logging_context: LoggingContext,
     ) -> Result<Self, Error> {
-        // SAFETY: pointer is valid for the the lifetime of this function
+        // SAFETY:
+        // - pointer is valid for the lifetime of `wgTurnOn`.
+        // - OwnedFd asserts that fd is open, and into_raw_fd will transfer ownership to Go.
         let code = unsafe {
             ffi::wgTurnOn(
                 #[cfg(not(target_os = "android"))]
                 mtu,
                 settings.as_ptr(),
-                device,
+                device.into_raw_fd(), // Transfer ownership of the fd to Go
                 logging_callback,
                 logging_context,
             )
@@ -94,6 +108,51 @@ impl Tunnel {
 
         result_from_code(code)?;
         Ok(Tunnel { handle: code })
+    }
+
+    /// Creates a new wireguard tunnel, uses the specific interface name, and file descriptors
+    /// for the tunnel device and logging.
+    ///
+    /// The `logging_callback` let's you provide a Rust function that receives any logging output
+    /// from wireguard-go. `logging_context` is a value that will be passed to each invocation of
+    /// `logging_callback`.
+    #[cfg(target_os = "windows")]
+    pub fn turn_on(
+        interface_name: &CStr,
+        mtu: u16,
+        settings: &CStr,
+        logging_callback: Option<LoggingCallback>,
+        logging_context: LoggingContext,
+    ) -> Result<Self, Error> {
+        // FIXME: use reasonable length
+        let mut assigned_name = [0u8; 128];
+        let mut luid = MaybeUninit::uninit();
+
+        // SAFETY: pointers are valid for the lifetime of this function
+        let code = unsafe {
+            ffi::wgTurnOn(
+                interface_name.as_ptr(),
+                assigned_name.as_mut_ptr() as *mut i8,
+                assigned_name.len(),
+                // SAFETY: This is a union of a u64 and `NET_LUID_LH_0`
+                luid.as_mut_ptr() as *mut u64,
+                mtu,
+                settings.as_ptr(),
+                logging_callback,
+                logging_context,
+            )
+        };
+
+        result_from_code(code)?;
+
+        let assigned_name = CStr::from_bytes_until_nul(&assigned_name).unwrap();
+
+        Ok(Tunnel {
+            handle: code,
+            assigned_name: assigned_name.to_owned(),
+            // SAFETY: wgTurnOn succeeded and the LUID is guaranteed to be initialized by wgTurnOn
+            luid: unsafe { luid.assume_init() },
+        })
     }
 
     /// Stop the wireguard tunnel. This also happens automatically if the [`Tunnel`] is dropped.
@@ -105,10 +164,22 @@ impl Tunnel {
         result_from_code(code)
     }
 
+    /// Tunnel interface name
+    #[cfg(target_os = "windows")]
+    pub fn name(&self) -> &str {
+        self.assigned_name.to_str().expect("non-UTF8 name")
+    }
+
+    /// Tunnel interface LUID
+    #[cfg(target_os = "windows")]
+    pub fn luid(&self) -> &NET_LUID_LH {
+        &self.luid
+    }
+
     /// Special function for android multihop since that behavior is different from desktop
     /// and android non-multihop.
     ///
-    /// The `logging_callback` let's you provide a Rust function that receives any logging output
+    /// The `logging_callback` lets you provide a Rust function that receives any logging output
     /// from wireguard-go. `logging_context` is a value that will be passed to each invocation of
     /// `logging_callback`.
     #[cfg(target_os = "android")]
@@ -116,17 +187,19 @@ impl Tunnel {
         exit_settings: &CStr,
         entry_settings: &CStr,
         private_ip: &CStr,
-        device: Fd,
+        device: OwnedFd,
         logging_callback: Option<LoggingCallback>,
         logging_context: LoggingContext,
     ) -> Result<Self, Error> {
-        // SAFETY: pointer is valid for the the lifetime of this function
+        // SAFETY:
+        // - pointers are valid for the lifetime of `wgTurnOnMultihop`.
+        // - OwnedFd asserts that fd is open, and into_raw_fd will transfer ownership to Go.
         let code = unsafe {
             ffi::wgTurnOnMultihop(
                 exit_settings.as_ptr(),
                 entry_settings.as_ptr(),
                 private_ip.as_ptr(),
-                device,
+                device.into_raw_fd(), // Transfer ownership of the fd to Go
                 logging_callback,
                 logging_context,
             )
@@ -156,7 +229,7 @@ impl Tunnel {
         let config_len = config.to_bytes().len();
 
         // execute cleanup code on Drop to make sure that it happens even if `f` panics
-        let on_drop = OnDrop::new(|| {
+        let on_drop = on_drop(|| {
             {
                 // SAFETY:
                 // we checked for null, and wgGetConfig promises that this is a valid cstr.
@@ -214,16 +287,22 @@ impl Tunnel {
 
     /// Get the file descriptor of the tunnel IPv4 socket.
     #[cfg(target_os = "android")]
-    pub fn get_socket_v4(&self) -> Fd {
-        // SAFETY: self.handle is a valid pointer to an active wireguard-go tunnel.
-        unsafe { ffi::wgGetSocketV4(self.handle) }
+    pub fn get_socket_v4(&self) -> BorrowedFd<'_> {
+        // SAFETY:
+        // - self.handle is a valid pointer to an active wireguard-go tunnel.
+        // - file descriptor won't be closed until wgTurnOff is called,
+        //   which can't happen while `self` is borrowed.
+        unsafe { BorrowedFd::borrow_raw(ffi::wgGetSocketV4(self.handle)) }
     }
 
     /// Get the file descriptor of the tunnel IPv6 socket.
     #[cfg(target_os = "android")]
-    pub fn get_socket_v6(&self) -> Fd {
-        // SAFETY: self.handle is a valid pointer to an active wireguard-go tunnel.
-        unsafe { ffi::wgGetSocketV6(self.handle) }
+    pub fn get_socket_v6(&self) -> BorrowedFd<'_> {
+        // SAFETY:
+        // - self.handle is a valid pointer to an active wireguard-go tunnel.
+        // - file descriptor won't be closed until wgTurnOff is called,
+        //   which can't happen while `self` is borrowed.
+        unsafe { BorrowedFd::borrow_raw(ffi::wgGetSocketV6(self.handle)) }
     }
 }
 
@@ -236,23 +315,11 @@ impl Drop for Tunnel {
     }
 }
 
-/// Check whether `machines` contains a valid, LF-separated maybenot machines. Return an error
-/// otherwise.
-pub fn validate_maybenot_machines(machines: &CStr) -> Result<(), Error> {
-    use maybenot_ffi::MaybenotResult;
-
-    let mut framework = MaybeUninit::uninit();
-    // SAFETY: `machines` is a null-terminated string, and `&mut framework` is a valid pointer
-    let result =
-        unsafe { maybenot_ffi::maybenot_start(machines.as_ptr(), 0.0, 0.0, &mut framework) };
-
-    if result as u32 == MaybenotResult::Ok as u32 {
-        // SAFETY: `maybenot_start` succeeded, so `framework` points to a valid framework
-        unsafe { maybenot_ffi::maybenot_stop(framework.assume_init()) };
-        Ok(())
-    } else {
-        Err(Error::Other)
-    }
+/// Rebind WireGuard endpoint sockets. When the default interface changes, this needs to be called
+/// so that the UDP socket can be rebound to use the new interface
+#[cfg(target_os = "windows")]
+pub fn update_bind() {
+    unsafe { ffi::wgUpdateBind() }
 }
 
 fn result_from_code(code: i32) -> Result<(), Error> {
@@ -276,20 +343,44 @@ impl Error {
 }
 
 mod ffi {
-    use super::{Fd, LoggingCallback, LoggingContext};
+    use super::{LoggingCallback, LoggingContext};
     use core::ffi::{c_char, c_void};
 
-    extern "C" {
+    #[cfg(not(target_os = "windows"))]
+    use std::os::fd::RawFd;
+
+    unsafe extern "C" {
         /// Creates a new wireguard tunnel, uses the specific interface name, and file descriptors
         /// for the tunnel device and logging. For targets other than android, this also takes an
         /// MTU value.
         ///
         /// Positive return values are tunnel handles for this specific wireguard tunnel instance.
         /// Negative return values signify errors.
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         pub fn wgTurnOn(
-            #[cfg(not(target_os = "android"))] mtu: isize,
+            mtu: isize,
             settings: *const c_char,
-            fd: Fd,
+            fd: RawFd,
+            logging_callback: Option<LoggingCallback>,
+            logging_context: LoggingContext,
+        ) -> i32;
+
+        #[cfg(target_os = "android")]
+        pub fn wgTurnOn(
+            settings: *const c_char,
+            fd: RawFd,
+            logging_callback: Option<LoggingCallback>,
+            logging_context: LoggingContext,
+        ) -> i32;
+
+        #[cfg(target_os = "windows")]
+        pub fn wgTurnOn(
+            desired_name: *const c_char,
+            assigned_name: *mut c_char,
+            assigned_name_size: usize,
+            assigned_luid: *mut u64,
+            mtu: u16,
+            settings: *const c_char,
             logging_callback: Option<LoggingCallback>,
             logging_context: LoggingContext,
         ) -> i32;
@@ -304,7 +395,7 @@ mod ffi {
             exit_settings: *const c_char,
             entry_settings: *const c_char,
             private_ip: *const c_char,
-            fd: Fd,
+            fd: RawFd,
             logging_callback: Option<LoggingCallback>,
             logging_context: LoggingContext,
         ) -> i32;
@@ -357,10 +448,14 @@ mod ffi {
 
         /// Get the file descriptor of the tunnel IPv4 socket.
         #[cfg(target_os = "android")]
-        pub fn wgGetSocketV4(handle: i32) -> Fd;
+        pub fn wgGetSocketV4(handle: i32) -> RawFd;
 
         /// Get the file descriptor of the tunnel IPv6 socket.
         #[cfg(target_os = "android")]
-        pub fn wgGetSocketV6(handle: i32) -> Fd;
+        pub fn wgGetSocketV6(handle: i32) -> RawFd;
+
+        /// Rebind endpoint sockets
+        #[cfg(target_os = "windows")]
+        pub fn wgUpdateBind();
     }
 }

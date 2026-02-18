@@ -3,21 +3,19 @@
 //  PacketTunnelCore
 //
 //  Created by Andrew Bulhak on 2024-05-22.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadTypes
+import Network
 import WireGuardKitTypes
 
 extension PacketTunnelActor {
     ///  A structure encoding an effect; each event will yield zero or more of those, which can then be sequentially executed.
-    enum Effect: Equatable {
-        case startDefaultPathObserver
-        case stopDefaultPathObserver
-        case startTunnelMonitor
+    enum Effect: Equatable, Sendable {
         case stopTunnelMonitor
-        case updateTunnelMonitorPath(NetworkPath)
+        case updateTunnelMonitorPath(Network.NWPath.Status)
         case startConnection(NextRelays)
         case restartConnection(NextRelays, ActorReconnectReason)
 
@@ -35,11 +33,8 @@ extension PacketTunnelActor {
         // We cannot synthesise Equatable on Effect because NetworkPath is a protocol which cannot be easily made Equatable, so we need to do this for now.
         static func == (lhs: PacketTunnelActor.Effect, rhs: PacketTunnelActor.Effect) -> Bool {
             return switch (lhs, rhs) {
-            case (.startDefaultPathObserver, .startDefaultPathObserver): true
-            case (.stopDefaultPathObserver, .stopDefaultPathObserver): true
-            case (.startTunnelMonitor, .startTunnelMonitor): true
             case (.stopTunnelMonitor, .stopTunnelMonitor): true
-            case let (.updateTunnelMonitorPath(lp), .updateTunnelMonitorPath(rp)): lp.status == rp.status
+            case let (.updateTunnelMonitorPath(lp), .updateTunnelMonitorPath(rp)): lp == rp
             case let (.startConnection(nr0), .startConnection(nr1)): nr0 == nr1
             case let (.restartConnection(nr0, rr0), .restartConnection(nr1, rr1)): nr0 == nr1 && rr0 == rr1
             case let (.reconnect(nr0), .reconnect(nr1)): nr0 == nr1
@@ -54,15 +49,13 @@ extension PacketTunnelActor {
         }
     }
 
-    struct Reducer {
+    struct Reducer: Sendable {
         static func reduce(_ state: inout State, _ event: Event) -> [Effect] {
             switch event {
             case let .start(options):
                 guard case .initial = state else { return [] }
                 return [
-                    .startDefaultPathObserver,
-                    .startTunnelMonitor,
-                    .startConnection(options.selectedRelays.map { .preSelected($0) } ?? .random),
+                    .startConnection(options.selectedRelays.map { .preSelected($0) } ?? .random)
                 ]
             case .stop:
                 return subreducerForStop(&state)
@@ -87,9 +80,12 @@ extension PacketTunnelActor {
 
             case let .networkReachability(defaultPath):
                 let newReachability = defaultPath.networkReachability
-                state.mutateAssociatedData { $0.networkReachability = newReachability }
-                return [.updateTunnelMonitorPath(defaultPath)]
-
+                let reachabilityChanged = state.associatedData?.networkReachability != newReachability
+                if reachabilityChanged {
+                    state.mutateAssociatedData { $0.networkReachability = newReachability }
+                    return [.updateTunnelMonitorPath(defaultPath)]
+                }
+                return []
             case let .ephemeralPeerNegotiationStateChanged(configuration, reconfigurationSemaphore):
                 return [.reconfigureForEphemeralPeer(configuration, reconfigurationSemaphore)]
 
@@ -104,17 +100,15 @@ extension PacketTunnelActor {
             //  a call of the reducer produces one state transition and a sequence of effects. In the app, a stop transitions to .disconnecting, shuts down various processes, and finally transitions to .disconnected. We currently do this by having an effect which acknowledges the completion of disconnection and just sets the state. This is a bit messy, and could possibly do with some rethinking.
             switch state {
             case let .connected(connState), let .connecting(connState), let .reconnecting(connState),
-                 let .negotiatingEphemeralPeer(connState, _):
+                let .negotiatingEphemeralPeer(connState, _):
                 state = .disconnecting(connState)
                 return [
                     .stopTunnelMonitor,
-                    .stopDefaultPathObserver,
                     .stopTunnelAdapter,
                     .setDisconnectedState,
                 ]
             case .error:
                 return [
-                    .stopDefaultPathObserver,
                     .stopTunnelAdapter,
                     .setDisconnectedState,
                 ]

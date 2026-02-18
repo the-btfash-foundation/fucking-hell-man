@@ -1,11 +1,15 @@
 import fs from 'fs';
-import { GetTextTranslation, po } from 'gettext-parser';
+import { type GetTextTranslation, po } from 'gettext-parser';
 import path from 'path';
 
-const LOCALES_DIR = path.join('locales');
+import {
+  type AllowedTag,
+  type AllowedVoidTag,
+  translations,
+} from '../src/shared/constants/translations.ts';
+const { allowedTags, allowedVoidTags } = translations;
 
-const ALLOWED_TAGS = ['b', 'br'];
-const ALLOWED_VOID_TAGS = ['br'];
+const LOCALES_DIR = path.join('locales');
 
 // Make sure to report these strings to crowdin. View this as a temporary escape
 // hatch, not a permanent solution.
@@ -69,6 +73,14 @@ function checkFormatSpecifiers(translation: GetTextTranslation): boolean {
     .every((result) => result);
 }
 
+function isAllowedTag(tag: string): tag is AllowedTag {
+  return allowedTags.some((allowedTag) => tag === allowedTag);
+}
+
+function isAllowedVoidTag(tag: string): tag is AllowedVoidTag {
+  return allowedVoidTags.some((allowedTag) => tag === allowedTag);
+}
+
 function checkHtmlTagsImpl(value: string): { correct: boolean; amount: number } {
   const tagsRegexp = new RegExp('<.*?>', 'g');
   const tags = value.match(tagsRegexp) ?? [];
@@ -82,12 +94,12 @@ function checkHtmlTagsImpl(value: string): { correct: boolean; amount: number } 
     const endTag = tag.startsWith('/');
     tag = endTag ? tag.slice(1) : selfClosing ? tag.slice(0, -1).trim() : tag;
 
-    if (!ALLOWED_TAGS.includes(tag)) {
+    if (!isAllowedTag(tag)) {
       console.error(`Tag "<${tag}>" not allowed: "${value}"`);
       return { correct: false, amount: NaN };
     }
 
-    if (!ALLOWED_VOID_TAGS.includes(tag)) {
+    if (!isAllowedVoidTag(tag)) {
       if (endTag) {
         // End tags require a matching start tag.
         if (tag !== tagStack.pop()) {

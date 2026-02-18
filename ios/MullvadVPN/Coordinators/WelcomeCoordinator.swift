@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2023-06-28.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadREST
@@ -15,7 +15,6 @@ final class WelcomeCoordinator: Coordinator, Poppable, Presenting {
     private let navigationController: RootContainerViewController
     private let storePaymentManager: StorePaymentManager
     private let tunnelManager: TunnelManager
-    private let inAppPurchaseInteractor: InAppPurchaseInteractor
     private let accountsProxy: RESTAccountHandling
 
     private var viewController: WelcomeViewController?
@@ -37,24 +36,15 @@ final class WelcomeCoordinator: Coordinator, Poppable, Presenting {
         self.storePaymentManager = storePaymentManager
         self.tunnelManager = tunnelManager
         self.accountsProxy = accountsProxy
-        self.inAppPurchaseInteractor = InAppPurchaseInteractor(storePaymentManager: storePaymentManager)
     }
 
     func start(animated: Bool) {
         let interactor = WelcomeInteractor(
-            storePaymentManager: storePaymentManager,
             tunnelManager: tunnelManager
         )
 
         interactor.didAddMoreCredit = { [weak self] in
-            guard let self else { return }
-            let coordinator = SetupAccountCompletedCoordinator(navigationController: navigationController)
-            coordinator.didFinish = { [weak self] coordinator in
-                coordinator.removeFromParent()
-                self?.didFinish?()
-            }
-            addChild(coordinator)
-            coordinator.start(animated: true)
+            self?.showSetupAccountCompleted()
         }
 
         let controller = WelcomeViewController(interactor: interactor)
@@ -65,52 +55,44 @@ final class WelcomeCoordinator: Coordinator, Poppable, Presenting {
         navigationController.pushViewController(controller, animated: animated)
     }
 
+    func showSetupAccountCompleted() {
+        let coordinator = SetupAccountCompletedCoordinator(navigationController: navigationController)
+        coordinator.didFinish = { [weak self] coordinator in
+            coordinator.removeFromParent()
+            self?.didFinish?()
+        }
+        addChild(coordinator)
+        coordinator.start(animated: true)
+    }
+
     func popFromNavigationStack(animated: Bool, completion: (() -> Void)?) {
         guard let viewController,
-              let index = navigationController.viewControllers.firstIndex(of: viewController)
+            let index = navigationController.viewControllers.firstIndex(of: viewController)
         else {
             completion?()
             return
         }
         navigationController.setViewControllers(
-            Array(navigationController.viewControllers[0 ..< index]),
+            Array(navigationController.viewControllers[0..<index]),
             animated: animated,
             completion: completion
         )
     }
 }
 
-extension WelcomeCoordinator: WelcomeViewControllerDelegate {
-    func didRequestToShowInfo(controller: WelcomeViewController) {
-        let message = NSLocalizedString(
-            "WELCOME_DEVICE_CONCEPT_TEXT_DIALOG",
-            tableName: "Welcome",
-            value:
-            """
-            This is the name assigned to the device. Each device logged in on a \
-            Mullvad account gets a unique name that helps \
-            you identify it when you manage your devices in the app or on the website.
-            You can have up to 5 devices logged in on one Mullvad account.
-            If you log out, the device and the device name is removed. \
-            When you log back in again, the device will get a new name.
-            """,
-            comment: ""
-        )
+extension WelcomeCoordinator: @preconcurrency WelcomeViewControllerDelegate {
+    func didRequestToShowFailToFetchProducts(controller: WelcomeViewController) {
+        let message = NSLocalizedString("Failed to load products, please try again", comment: "")
 
         let presentation = AlertPresentation(
-            id: "welcome-device-name-alert",
+            id: "welcome-failed-to-fetch-products-alert",
             icon: .info,
             message: message,
             buttons: [
                 AlertAction(
-                    title: NSLocalizedString(
-                        "WELCOME_DEVICE_NAME_DIALOG_OK_ACTION",
-                        tableName: "Welcome",
-                        value: "Got it!",
-                        comment: ""
-                    ),
+                    title: NSLocalizedString("Got it!", comment: ""),
                     style: .default
-                ),
+                )
             ]
         )
 
@@ -118,63 +100,53 @@ extension WelcomeCoordinator: WelcomeViewControllerDelegate {
         presenter.showAlert(presentation: presentation, animated: true)
     }
 
-    func didRequestToPurchaseCredit(controller: WelcomeViewController, accountNumber: String, product: SKProduct) {
-        navigationController.enableHeaderBarButtons(false)
+    func didRequestToShowInfo(controller: WelcomeViewController) {
+        let message = [
+            NSLocalizedString(
+                "This is the name assigned to the device. Each device logged in on a "
+                    + "Mullvad account gets a unique name that helps "
+                    + "you identify it when you manage your devices in the app or on the website.",
+                comment: ""
+            ),
+            NSLocalizedString(
+                "You can have up to 5 devices logged in on one Mullvad account.",
+                comment: ""
+            ),
+            NSLocalizedString(
+                "If you log out, the device and the device name is removed. "
+                    + "When you log back in again, the device will get a new name.",
+                comment: ""
+            ),
+        ].joinedParagraphs(lineBreaks: 1)
 
-        let coordinator = InAppPurchaseCoordinator(
-            navigationController: navigationController,
-            interactor: inAppPurchaseInteractor
+        let presentation = AlertPresentation(
+            id: "welcome-device-name-alert",
+            icon: .info,
+            message: message,
+            buttons: [
+                AlertAction(
+                    title: NSLocalizedString("Got it!", comment: ""),
+                    style: .default
+                )
+            ]
         )
 
-        inAppPurchaseInteractor.viewControllerDelegate = viewController
-
-        coordinator.didFinish = { [weak self] coordinator in
-            guard let self else { return }
-            navigationController.enableHeaderBarButtons(true)
-            coordinator.removeFromParent()
-            didFinish?()
-        }
-
-        coordinator.didCancel = { [weak self] coordinator in
-            self?.navigationController.enableHeaderBarButtons(true)
-            coordinator.removeFromParent()
-        }
-
-        addChild(coordinator)
-
-        coordinator.start(accountNumber: accountNumber, product: product)
+        let presenter = AlertPresenter(context: self)
+        presenter.showAlert(presentation: presentation, animated: true)
     }
 
-    func didRequestToRedeemVoucher(controller: WelcomeViewController) {
-        let coordinator = CreateAccountVoucherCoordinator(
-            navigationController: navigationController,
-            interactor: RedeemVoucherInteractor(
-                tunnelManager: tunnelManager,
-                accountsProxy: accountsProxy,
-                verifyVoucherAsAccount: true
-            )
+    func didRequestToViewPurchaseOptions(
+        accountNumber: String
+    ) {
+        let coordinator = InAppPurchaseCoordinator(
+            storePaymentManager: storePaymentManager,
+            accountNumber: accountNumber,
+            paymentAction: .purchase
         )
-
-        coordinator.didCancel = { [weak self] coordinator in
-            guard let self = self else { return }
-            navigationController.popViewController(animated: true)
-            coordinator.removeFromParent()
+        coordinator.didFinish = { coordinator in
+            coordinator.dismiss(animated: true)
         }
-
-        coordinator.didFinish = { [weak self] coordinator in
-            guard let self else { return }
-            coordinator.removeFromParent()
-            didFinish?()
-        }
-
-        coordinator.didLogout = { [weak self] coordinator, accountNumber in
-            guard let self else { return }
-            coordinator.removeFromParent()
-            didLogout?(accountNumber)
-        }
-
-        addChild(coordinator)
-
         coordinator.start()
+        presentChild(coordinator, animated: true)
     }
 }

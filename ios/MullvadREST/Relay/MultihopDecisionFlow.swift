@@ -3,7 +3,7 @@
 //  MullvadREST
 //
 //  Created by Jon Petersson on 2024-06-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -48,14 +48,18 @@ struct OneToOne: MultihopDecisionFlow {
             throw NoRelaysSatisfyingConstraintsError(.entryEqualsExit)
         }
 
-        let exitMatch = try relayPicker.findBestMatch(from: exitCandidates, useObfuscatedPortIfAvailable: false)
+        let exitMatch = try relayPicker.findBestMatch(from: exitCandidates, applyObfuscatedIps: false)
         let entryMatch = try relayPicker.findBestMatch(
             from: entryCandidates,
             closeTo: daitaAutomaticRouting ? exitMatch.location : nil,
-            useObfuscatedPortIfAvailable: true
+            applyObfuscatedIps: true,
         )
 
-        return SelectedRelays(entry: entryMatch, exit: exitMatch, retryAttempt: relayPicker.connectionAttemptCount)
+        return SelectedRelays(
+            entry: entryMatch,
+            exit: exitMatch,
+            retryAttempt: relayPicker.connectionAttemptCount
+        )
     }
 
     func canHandle(entryCandidates: [RelayCandidate], exitCandidates: [RelayCandidate]) -> Bool {
@@ -92,19 +96,18 @@ struct OneToMany: MultihopDecisionFlow {
             )
         }
 
-        guard !daitaAutomaticRouting else {
-            return try ManyToOne(next: next, relayPicker: relayPicker)
-                .pick(entryCandidates: entryCandidates, exitCandidates: exitCandidates, daitaAutomaticRouting: true)
-        }
-
-        let entryMatch = try multihopPicker.findBestMatch(from: entryCandidates, useObfuscatedPortIfAvailable: true)
+        let entryMatch = try multihopPicker.findBestMatch(from: entryCandidates, applyObfuscatedIps: true)
         let exitMatch = try multihopPicker.exclude(
             relay: entryMatch,
             from: exitCandidates,
-            useObfuscatedPortIfAvailable: false
+            applyObfuscatedIps: false,
         )
 
-        return SelectedRelays(entry: entryMatch, exit: exitMatch, retryAttempt: relayPicker.connectionAttemptCount)
+        return SelectedRelays(
+            entry: entryMatch,
+            exit: exitMatch,
+            retryAttempt: relayPicker.connectionAttemptCount
+        )
     }
 
     func canHandle(entryCandidates: [RelayCandidate], exitCandidates: [RelayCandidate]) -> Bool {
@@ -141,15 +144,22 @@ struct ManyToOne: MultihopDecisionFlow {
             )
         }
 
-        let exitMatch = try multihopPicker.findBestMatch(from: exitCandidates, useObfuscatedPortIfAvailable: false)
+        let exitMatch = try multihopPicker.findBestMatch(
+            from: exitCandidates,
+            applyObfuscatedIps: false,
+        )
         let entryMatch = try multihopPicker.exclude(
             relay: exitMatch,
             from: entryCandidates,
             closeTo: daitaAutomaticRouting ? exitMatch.location : nil,
-            useObfuscatedPortIfAvailable: true
+            applyObfuscatedIps: true
         )
 
-        return SelectedRelays(entry: entryMatch, exit: exitMatch, retryAttempt: relayPicker.connectionAttemptCount)
+        return SelectedRelays(
+            entry: entryMatch,
+            exit: exitMatch,
+            retryAttempt: relayPicker.connectionAttemptCount
+        )
     }
 
     func canHandle(entryCandidates: [RelayCandidate], exitCandidates: [RelayCandidate]) -> Bool {
@@ -186,15 +196,19 @@ struct ManyToMany: MultihopDecisionFlow {
             )
         }
 
-        let exitMatch = try multihopPicker.findBestMatch(from: exitCandidates, useObfuscatedPortIfAvailable: false)
+        let exitMatch = try multihopPicker.findBestMatch(from: exitCandidates, applyObfuscatedIps: false)
         let entryMatch = try multihopPicker.exclude(
             relay: exitMatch,
             from: entryCandidates,
             closeTo: daitaAutomaticRouting ? exitMatch.location : nil,
-            useObfuscatedPortIfAvailable: true
+            applyObfuscatedIps: true
         )
 
-        return SelectedRelays(entry: entryMatch, exit: exitMatch, retryAttempt: relayPicker.connectionAttemptCount)
+        return SelectedRelays(
+            entry: entryMatch,
+            exit: exitMatch,
+            retryAttempt: relayPicker.connectionAttemptCount
+        )
     }
 
     func canHandle(entryCandidates: [RelayCandidate], exitCandidates: [RelayCandidate]) -> Bool {

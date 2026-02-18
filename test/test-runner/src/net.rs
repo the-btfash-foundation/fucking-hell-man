@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use nix::net::if_::if_nametoindex;
 use socket2::SockAddr;
 #[cfg(target_os = "macos")]
 use std::{ffi::CString, num::NonZeroU32};
@@ -23,9 +25,13 @@ pub async fn send_tcp(
 
     if let Some(iface) = bind_interface {
         #[cfg(target_os = "macos")]
-        let interface_index = unsafe {
-            let name = CString::new(iface).unwrap();
-            let index = libc::if_nametoindex(name.as_bytes_with_nul().as_ptr() as _);
+        let interface_index = {
+            let interface = CString::new(iface).expect("CString::new failed");
+            let index = if_nametoindex(interface.as_ref()).map_err(|error| {
+                test_rpc::Error::Other(format!(
+                    "Failed to get index of network interface {interface:?}: {error:?}"
+                ))
+            })?;
             NonZeroU32::new(index).ok_or_else(|| {
                 log::error!("Invalid interface index");
                 test_rpc::Error::SendTcp
@@ -90,9 +96,13 @@ pub async fn send_udp(
 
     if let Some(iface) = bind_interface {
         #[cfg(target_os = "macos")]
-        let interface_index = unsafe {
-            let name = CString::new(iface).unwrap();
-            let index = libc::if_nametoindex(name.as_bytes_with_nul().as_ptr() as _);
+        let interface_index = {
+            let interface = CString::new(iface).expect("CString::new failed");
+            let index = if_nametoindex(interface.as_ref()).map_err(|error| {
+                test_rpc::Error::Other(format!(
+                    "Failed to get index of network interface {interface:?}: {error:?}"
+                ))
+            })?;
             NonZeroU32::new(index).ok_or_else(|| {
                 log::error!("Invalid interface index");
                 test_rpc::Error::SendUdp
@@ -141,7 +151,7 @@ pub async fn send_ping(
     interface: Option<&str>,
     size: usize,
 ) -> Result<(), test_rpc::Error> {
-    use surge_ping::{Client, Config, PingIdentifier, PingSequence, ICMP};
+    use surge_ping::{Client, Config, ICMP, PingIdentifier, PingSequence};
 
     const IPV4_HEADER_SIZE: usize = 20;
     const ICMP_HEADER_SIZE: usize = 8;
@@ -179,12 +189,11 @@ pub fn get_interface_ip(interface: &str) -> Result<IpAddr, test_rpc::Error> {
         test_rpc::Error::Syscall
     })?;
     for addr in addrs {
-        if addr.interface_name == interface {
-            if let Some(address) = addr.address {
-                if let Some(sockaddr) = address.as_sockaddr_in() {
-                    return Ok(IpAddr::V4(sockaddr.ip()));
-                }
-            }
+        if addr.interface_name == interface
+            && let Some(address) = addr.address
+            && let Some(sockaddr) = address.as_sockaddr_in()
+        {
+            return Ok(IpAddr::V4(sockaddr.ip()));
         }
     }
 
@@ -292,6 +301,7 @@ pub fn get_interface_mtu(interface_name: &str) -> Result<u16, test_rpc::Error> {
     )
     .map_err(|e| test_rpc::Error::Io(e.to_string()))?;
 
+    // SAFETY: ifreq is a C struct, these can safely be zeroed.
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
     if interface_name.len() >= ifr.ifr_name.len() {
         panic!("Interface '{interface_name}' name too long")
@@ -301,14 +311,14 @@ pub fn get_interface_mtu(interface_name: &str) -> Result<u16, test_rpc::Error> {
     unsafe {
         std::ptr::copy_nonoverlapping(
             interface_name.as_ptr() as *const libc::c_char,
-            &mut ifr.ifr_name as *mut _,
+            ifr.ifr_name.as_mut_ptr(),
             interface_name.len(),
         )
     };
 
     // TODO: define SIOCGIFMTU for macos
     // SAFETY: SIOCGIFMTU expects an ifreq, and the socket is valid
-    if unsafe { libc::ioctl(sock.as_raw_fd(), libc::SIOCGIFMTU, &mut ifr) } < 0 {
+    if unsafe { libc::ioctl(sock.as_raw_fd(), libc::SIOCGIFMTU as libc::Ioctl, &mut ifr) } < 0 {
         let e = std::io::Error::last_os_error();
 
         log::error!("{}", e);

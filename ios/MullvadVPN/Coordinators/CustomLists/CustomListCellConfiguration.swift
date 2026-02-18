@@ -3,13 +3,14 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-02-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import MullvadTypes
 import UIKit
 
+@MainActor
 struct CustomListCellConfiguration {
     let tableView: UITableView
     let subject: CurrentValueSubject<CustomListViewModel, Never>
@@ -84,7 +85,7 @@ struct CustomListCellConfiguration {
     }
 
     private func configureLocations(_ cell: UITableViewCell, itemIdentifier: CustomListItemIdentifier) {
-        var contentConfiguration = UIListContentConfiguration.mullvadValueCell(tableStyle: tableView.style)
+        var contentConfiguration = ListCellContentConfiguration()
 
         contentConfiguration.text = itemIdentifier.text
         cell.contentConfiguration = contentConfiguration

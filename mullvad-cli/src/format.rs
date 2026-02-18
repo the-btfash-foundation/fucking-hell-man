@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use mullvad_types::{
-    auth_failed::AuthFailed, features::FeatureIndicators, location::GeoIpLocation,
+    auth_failed::AuthFailed,
+    features::{FeatureIndicator, FeatureIndicators},
+    location::GeoIpLocation,
     states::TunnelState,
 };
 use talpid_types::{
@@ -12,15 +14,9 @@ use talpid_types::{
 
 #[macro_export]
 macro_rules! print_option {
-    ($value:expr $(,)?) => {{
-        println!("{:<4}{:<24}{}", "", "", $value,)
-    }};
-    ($option:literal, $value:expr $(,)?) => {{
-        println!("{:<4}{:<24}{}", "", concat!($option, ":"), $value,)
-    }};
-    ($option:expr, $value:expr $(,)?) => {{
-        println!("{:<4}{:<24}{}", "", format!("{}:", $option), $value,)
-    }};
+    ($value:expr_2021 $(,)?) => {{ println!("{:<4}{:<24}{}", "", "", $value,) }};
+    ($option:literal, $value:expr_2021 $(,)?) => {{ println!("{:<4}{:<24}{}", "", concat!($option, ":"), $value,) }};
+    ($option:expr_2021, $value:expr_2021 $(,)?) => {{ println!("{:<4}{:<24}{}", "", format!("{}:", $option), $value,) }};
 }
 
 pub fn print_state(state: &TunnelState, previous_state: Option<&TunnelState>, verbose: bool) {
@@ -152,23 +148,14 @@ fn connection_information(
     verbose: bool,
 ) -> HashMap<&'static str, Option<String>> {
     let mut info: HashMap<&'static str, Option<String>> = HashMap::new();
-    let endpoint_fmt =
-        endpoint.map(|endpoint| format_relay_connection(endpoint, location, verbose));
+
+    let endpoint_fmt = endpoint
+        .map(|endpoint| format_relay_connection(endpoint, location, verbose, &feature_indicators));
     info.insert("Relay", endpoint_fmt);
     let tunnel_interface_fmt = endpoint
         .filter(|_| verbose)
         .and_then(|endpoint| endpoint.tunnel_interface.clone());
     info.insert("Tunnel interface", tunnel_interface_fmt);
-
-    let bridge_type_fmt = endpoint
-        .filter(|_| verbose)
-        .and_then(|endpoint| endpoint.proxy)
-        .map(|bridge| bridge.proxy_type.to_string());
-    info.insert("Bridge type", bridge_type_fmt);
-    let tunnel_type_fmt = endpoint
-        .filter(|_| verbose)
-        .map(|endpoint| endpoint.tunnel_type.to_string());
-    info.insert("Tunnel type", tunnel_type_fmt);
 
     info.insert("Visible location", location.map(format_location));
     let features_fmt = feature_indicators
@@ -194,7 +181,7 @@ fn print_connection_info(
     for (name, value) in current_info
         .into_iter()
         // Hack that puts important items first, e.g. "Relay"
-        .sorted_by_key(|(name, _)| name.len())
+        .sorted_by_key(|(name, _)| ( name.len(), name.to_owned() ))
     {
         let previous_value = previous_info.get(name).and_then(|i| i.clone());
         match (value, previous_value) {
@@ -211,15 +198,15 @@ fn print_connection_info(
 }
 
 pub fn format_location(location: &GeoIpLocation) -> String {
-    let mut formatted_location = location.country.to_string();
+    let mut formatted_location = location.country.clone();
     if let Some(city) = &location.city {
-        formatted_location.push_str(&format!(", {}", city));
+        formatted_location.push_str(&format!(", {city}"));
     }
     if let Some(ipv4) = location.ipv4 {
-        formatted_location.push_str(&format!(". IPv4: {}", ipv4));
+        formatted_location.push_str(&format!(". IPv4: {ipv4}"));
     }
     if let Some(ipv6) = location.ipv6 {
-        formatted_location.push_str(&format!(", IPv6: {}", ipv6));
+        formatted_location.push_str(&format!(", IPv6: {ipv6}"));
     }
     formatted_location
 }
@@ -228,46 +215,76 @@ fn format_relay_connection(
     endpoint: &TunnelEndpoint,
     location: Option<&GeoIpLocation>,
     verbose: bool,
+    feature_indicators: &Option<&FeatureIndicators>,
 ) -> String {
     let first_hop = endpoint.entry_endpoint.as_ref().map(|entry| {
-        let endpoint = format_endpoint(
+        let endpoint = format_endpoints(
             location.and_then(|l| l.entry_hostname.as_deref()),
             // Check if we *actually* want to print an obfuscator endpoint ..
             match endpoint.obfuscation {
-                Some(ref obfuscation) => &obfuscation.endpoint,
-                _ => entry,
+                Some(ref info) => info.get_endpoints(),
+                _ => vec![*entry],
             },
             verbose,
         );
-        format!(" via {endpoint}")
+        // If DAITA has automatically selected a multihop entry endpoint, we should clarify that
+        match feature_indicators {
+            Some(f)
+                if f.active_features()
+                    .contains(&FeatureIndicator::DaitaMultihop) =>
+            {
+                format!(" via {endpoint} (multihop enabled to support DAITA)")
+            }
+            Some(f)
+                if f.active_features().contains(&FeatureIndicator::Multihop)
+                    && f.active_features().contains(&FeatureIndicator::Daita) =>
+            {
+                format!(" via {endpoint} (multihop entry overriden by DAITA)")
+            }
+            _ => format!(" via {endpoint}"),
+        }
     });
 
-    let bridge = endpoint.proxy.as_ref().map(|proxy| {
-        let proxy_endpoint = format_endpoint(
-            location.and_then(|l| l.bridge_hostname.as_deref()),
-            &proxy.endpoint,
-            verbose,
-        );
-
-        format!(" via {proxy_endpoint}")
-    });
-
-    let exit_endpoint = format_endpoint(
+    let exit_endpoint = format_endpoints(
         location.and_then(|l| l.hostname.as_deref()),
         // Check if we *actually* want to print an obfuscator endpoint ..
         // The obfuscator information should be printed for the exit relay if multihop is disabled
-        match (endpoint.obfuscation, &first_hop) {
-            (Some(ref obfuscation), None) => &obfuscation.endpoint,
-            _ => &endpoint.endpoint,
+        match (&endpoint.obfuscation, &first_hop) {
+            (Some(obfuscation), None) => obfuscation.get_endpoints(),
+            _ => vec![endpoint.endpoint],
         },
         verbose,
     );
 
     format!(
-        "{exit_endpoint}{first_hop}{bridge}",
+        "{exit_endpoint}{first_hop}",
         first_hop = first_hop.unwrap_or_default(),
-        bridge = bridge.unwrap_or_default(),
     )
+}
+
+fn format_endpoints(
+    hostname: Option<&str>,
+    endpoints: impl AsRef<[Endpoint]>,
+    verbose: bool,
+) -> String {
+    let endpoints = endpoints.as_ref();
+    if endpoints.len() == 1 {
+        return format_endpoint(hostname, &endpoints[0], verbose);
+    }
+
+    let mut endpoints_str = String::new();
+    for (i, endpoint) in endpoints.iter().enumerate() {
+        if i > 0 {
+            endpoints_str.push_str(" | ");
+        }
+        endpoints_str.push_str(&endpoint.to_string());
+    }
+
+    match (hostname, verbose) {
+        (Some(hostname), true) => format!("{hostname} ({endpoints_str})"),
+        (None, _) => endpoints_str,
+        (Some(hostname), false) => hostname.to_string(),
+    }
 }
 
 fn format_endpoint(hostname: Option<&str>, endpoint: &Endpoint, verbose: bool) -> String {

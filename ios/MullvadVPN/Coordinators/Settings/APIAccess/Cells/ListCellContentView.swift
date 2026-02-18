@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-01-25.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -13,6 +13,7 @@ class ListCellContentView: UIView, UIContentView, UITextFieldDelegate {
     private var textLabel = UILabel()
     private var secondaryTextLabel = UILabel()
     private var tertiaryTextLabel = UILabel()
+    private var containerView = UIStackView()
 
     var configuration: UIContentConfiguration {
         get {
@@ -20,7 +21,8 @@ class ListCellContentView: UIView, UIContentView, UITextFieldDelegate {
         }
         set {
             guard let newConfiguration = newValue as? ListCellContentConfiguration,
-                  actualConfiguration != newConfiguration else { return }
+                actualConfiguration != newConfiguration
+            else { return }
 
             let previousConfiguration = actualConfiguration
             actualConfiguration = newConfiguration
@@ -38,7 +40,7 @@ class ListCellContentView: UIView, UIContentView, UITextFieldDelegate {
     init(configuration: ListCellContentConfiguration) {
         actualConfiguration = configuration
 
-        super.init(frame: CGRect(x: 0, y: 0, width: 100, height: 0))
+        super.init(frame: .zero)
 
         configureSubviews()
         addSubviews()
@@ -55,31 +57,52 @@ class ListCellContentView: UIView, UIContentView, UITextFieldDelegate {
         configureLayoutMargins()
     }
 
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        DispatchQueue.main.async {
+            self.updateAxisIfNeeded()
+        }
+    }
+
+    private func updateAxisIfNeeded() {
+        let newAxis: NSLayoutConstraint.Axis = containerView.isOverflowed ? .vertical : .horizontal
+        guard newAxis != containerView.axis else { return }
+        containerView.axis = newAxis
+        invalidateIntrinsicContentSize()
+    }
+
     private func configureTextLabel() {
         let textProperties = actualConfiguration.textProperties
 
         textLabel.font = textProperties.font
+        textLabel.adjustsFontForContentSizeCategory = true
         textLabel.textColor = textProperties.color
-
+        textLabel.numberOfLines = 0
         textLabel.text = actualConfiguration.text
+        textLabel.isHidden = actualConfiguration.text == nil
     }
 
     private func configureSecondaryTextLabel() {
         let textProperties = actualConfiguration.secondaryTextProperties
 
         secondaryTextLabel.font = textProperties.font
+        secondaryTextLabel.adjustsFontForContentSizeCategory = true
         secondaryTextLabel.textColor = textProperties.color
-
+        secondaryTextLabel.numberOfLines = 0
         secondaryTextLabel.text = actualConfiguration.secondaryText
+        secondaryTextLabel.isHidden = actualConfiguration.secondaryText == nil
     }
 
     private func configureTertiaryTextLabel() {
         let textProperties = actualConfiguration.tertiaryTextProperties
 
         tertiaryTextLabel.font = textProperties.font
+        tertiaryTextLabel.adjustsFontForContentSizeCategory = true
         tertiaryTextLabel.textColor = textProperties.color
+        tertiaryTextLabel.numberOfLines = 0
 
         tertiaryTextLabel.text = actualConfiguration.tertiaryText
+        tertiaryTextLabel.isHidden = actualConfiguration.tertiaryText == nil
     }
 
     private func configureLayoutMargins() {
@@ -90,14 +113,13 @@ class ListCellContentView: UIView, UIContentView, UITextFieldDelegate {
         let leadingTextContainer = UIStackView(arrangedSubviews: [textLabel, tertiaryTextLabel])
         leadingTextContainer.axis = .vertical
 
-        addConstrainedSubviews([leadingTextContainer, secondaryTextLabel]) {
-            leadingTextContainer.pinEdgesToSuperviewMargins(.all().excluding(.trailing))
-            leadingTextContainer.centerYAnchor.constraint(equalTo: centerYAnchor)
-            secondaryTextLabel.pinEdgesToSuperviewMargins(.all().excluding(.leading))
-            secondaryTextLabel.leadingAnchor.constraint(
-                greaterThanOrEqualToSystemSpacingAfter: leadingTextContainer.trailingAnchor,
-                multiplier: 1
-            )
+        secondaryTextLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        containerView.addArrangedSubview(leadingTextContainer)
+        containerView.addArrangedSubview(secondaryTextLabel)
+
+        addConstrainedSubviews([containerView]) {
+            containerView.pinEdgesToSuperviewMargins(.all())
         }
     }
 }

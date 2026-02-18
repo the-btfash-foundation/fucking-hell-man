@@ -1,6 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import React from 'react';
-import styled from 'styled-components';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   CustomProxy,
@@ -11,23 +9,24 @@ import {
   Socks5RemoteCustomProxy,
 } from '../../shared/daemon-rpc-types';
 import { messages } from '../../shared/gettext';
+import { Button, Flex } from '../lib/components';
+import { FlexRow } from '../lib/components/flex-row';
+import { Switch } from '../lib/components/switch';
 import { IpAddress } from '../lib/ip';
 import { useEffectEvent } from '../lib/utility-hooks';
-import * as Cell from './cell';
 import { SettingsForm, useSettingsFormSubmittable } from './cell/SettingsForm';
 import { SettingsGroup } from './cell/SettingsGroup';
 import { SettingsRadioGroup } from './cell/SettingsRadioGroup';
-import { SettingsRow } from './cell/SettingsRow';
+import { IndentedRowProps, SettingsRow } from './cell/SettingsRow';
 import { SettingsSelect, SettingsSelectItem } from './cell/SettingsSelect';
-import { SettingsNumberInput, SettingsTextInput } from './cell/SettingsTextInput';
 import {
-  SmallButton,
-  SmallButtonColor,
-  SmallButtonGroup,
-  SmallButtonGroupStart,
-} from './SmallButton';
+  SettingsNumberInput,
+  SettingsTextInput,
+  SettingsTextInputProps,
+} from './cell/SettingsTextInput';
 
 interface ProxyFormContext {
+  isNew: boolean;
   proxy?: CustomProxy;
   setProxy: (proxy: CustomProxy) => void;
   onSave: () => void;
@@ -36,6 +35,9 @@ interface ProxyFormContext {
 }
 
 const proxyFormContext = React.createContext<ProxyFormContext>({
+  get isNew(): boolean {
+    throw new Error('Missing ProxyFromContext provider');
+  },
   get proxy(): CustomProxy {
     throw new Error('Missing ProxyFromContext provider');
   },
@@ -64,6 +66,7 @@ function ProxyFormContextProvider(props: React.PropsWithChildren<ProxyFormContex
   const { onSave: propsOnSave } = props;
 
   const [proxy, setProxy] = useState<CustomProxy | undefined>(props.proxy);
+  const isNew = props.proxy === undefined;
 
   const onSave = useCallback(() => {
     if (proxy !== undefined) {
@@ -72,8 +75,8 @@ function ProxyFormContextProvider(props: React.PropsWithChildren<ProxyFormContex
   }, [proxy, propsOnSave]);
 
   const value = useMemo(
-    () => ({ proxy, setProxy, onSave, onCancel: props.onCancel, onDelete: props.onDelete }),
-    [proxy, onSave, props.onCancel, props.onDelete],
+    () => ({ isNew, proxy, setProxy, onSave, onCancel: props.onCancel, onDelete: props.onDelete }),
+    [isNew, proxy, onSave, props.onCancel, props.onDelete],
   );
 
   return <proxyFormContext.Provider value={value}>{props.children}</proxyFormContext.Provider>;
@@ -84,7 +87,7 @@ export function ProxyForm(props: ProxyFormContextProviderProps) {
     <ProxyFormContextProvider {...props}>
       <SettingsForm>
         <ProxyFormInner />
-        <ProxyFormButtons new={props.proxy === undefined} />
+        <ProxyFormButtons />
       </SettingsForm>
     </ProxyFormContextProvider>
   );
@@ -106,12 +109,13 @@ const namedProxyFormContext = React.createContext<NamedProxyFormContext>({
 
 interface NamedProxyFormContainerProps
   extends Omit<ProxyFormContextProviderProps, 'proxy' | 'onSave'> {
+  children?: React.ReactNode;
   proxy?: NamedCustomProxy;
   onSave: (proxy: NamedCustomProxy) => void;
 }
 
 export function NamedProxyForm(props: NamedProxyFormContainerProps) {
-  const { onSave, ...otherProps } = props;
+  const { children, onSave, ...otherProps } = props;
 
   const [name, setName] = useState<string>(props.proxy?.name ?? '');
 
@@ -129,66 +133,61 @@ export function NamedProxyForm(props: NamedProxyFormContainerProps) {
   return (
     <namedProxyFormContext.Provider value={nameContextValue}>
       <ProxyFormContextProvider {...otherProps} onSave={save}>
-        <SettingsForm>
-          <ProxyFormNameField />
-          <ProxyFormInner />
-          <ProxyFormButtons new={props.proxy === undefined} />
-        </SettingsForm>
+        <SettingsForm>{children}</SettingsForm>
       </ProxyFormContextProvider>
     </namedProxyFormContext.Provider>
   );
 }
 
-function ProxyFormNameField() {
+type ProxyFormNameFieldProps = {
+  inputProps?: Partial<SettingsTextInputProps>;
+  rowProps?: Partial<IndentedRowProps>;
+};
+
+export function ProxyFormNameField(props: ProxyFormNameFieldProps) {
   const { name, setName } = useContext(namedProxyFormContext);
 
   return (
-    <SettingsRow label={messages.gettext('Name')}>
-      <SettingsTextInput
-        defaultValue={name}
-        placeholder={messages.pgettext('api-access-methods-view', 'Enter name')}
-        onUpdate={setName}
-      />
-    </SettingsRow>
+    <SettingsGroup>
+      <SettingsRow label={messages.gettext('Name')} {...props?.rowProps}>
+        <SettingsTextInput
+          defaultValue={name}
+          placeholder={messages.pgettext('api-access-methods-view', 'Enter name')}
+          onUpdate={setName}
+          {...props?.inputProps}
+        />
+      </SettingsRow>
+    </SettingsGroup>
   );
 }
 
-interface ProxyFormButtonsProps {
-  new: boolean;
-}
-
-// TODO: Temporary fix, should be replaced with a flex or shared component
-const ActionGroup = styled.div({
-  display: 'flex',
-  gap: '12px',
-});
-
-export function ProxyFormButtons(props: ProxyFormButtonsProps) {
-  const { onSave, onCancel, onDelete } = useContext(proxyFormContext);
+export function ProxyFormButtons() {
+  const { isNew, onSave, onCancel, onDelete } = useContext(proxyFormContext);
 
   // Contains form submittability to know whether or not to enable the Add/Save button.
   const formSubmittable = useSettingsFormSubmittable();
-
   return (
-    <SmallButtonGroup>
-      {onDelete !== undefined && (
-        <SmallButtonGroupStart>
-          <SmallButton color={SmallButtonColor.red} onClick={onDelete}>
-            {messages.gettext('Delete')}
-          </SmallButton>
-        </SmallButtonGroupStart>
+    <Flex margin={{ horizontal: 'medium', top: 'large' }} justifyContent="space-between">
+      {onDelete !== undefined ? (
+        <Button width="fit" variant="destructive" onClick={onDelete}>
+          <Button.Text>{messages.gettext('Delete')}</Button.Text>
+        </Button>
+      ) : (
+        <div />
       )}
-      <ActionGroup>
-        <SmallButton onClick={onCancel}>{messages.gettext('Cancel')}</SmallButton>
-        <SmallButton onClick={onSave} disabled={!formSubmittable}>
-          {props.new ? messages.gettext('Add') : messages.gettext('Save')}
-        </SmallButton>
-      </ActionGroup>
-    </SmallButtonGroup>
+      <FlexRow gap="small">
+        <Button width="fit" onClick={onCancel}>
+          <Button.Text>{messages.gettext('Cancel')}</Button.Text>
+        </Button>
+        <Button onClick={onSave} disabled={!formSubmittable}>
+          <Button.Text>{isNew ? messages.gettext('Add') : messages.gettext('Save')}</Button.Text>
+        </Button>
+      </FlexRow>
+    </Flex>
   );
 }
 
-function ProxyFormInner() {
+export function ProxyFormInner() {
   const { proxy, setProxy } = useContext(proxyFormContext);
 
   // Available custom proxies
@@ -223,9 +222,11 @@ function ProxyFormInner() {
 
   return (
     <>
-      <SettingsRow label={messages.gettext('Type')}>
-        <SettingsSelect defaultValue={type} onUpdate={setType} items={types} />
-      </SettingsRow>
+      <SettingsGroup>
+        <SettingsRow label={messages.gettext('Type')}>
+          <SettingsSelect defaultValue={type} onUpdate={setType} items={types} />
+        </SettingsRow>
+      </SettingsGroup>
 
       {type === 'shadowsocks' && (
         <EditShadowsocks
@@ -301,6 +302,11 @@ function EditShadowsocks(props: EditProxyProps<ShadowsocksCustomProxy>) {
   );
 
   // Report back to form component with the proxy values when all required values are set.
+  // These lint rules are disabled for now because the react plugin for eslint does
+  // not understand that useEffectEvent should not be added to the dependency array.
+  // Enable these rules again when eslint can lint useEffectEvent properly.
+  // eslint-disable-next-line react-compiler/react-compiler
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => onUpdate(ip, port, password, cipher), [ip, port, password, cipher]);
 
   return (
@@ -380,6 +386,11 @@ function EditSocks5Remote(props: EditProxyProps<Socks5RemoteCustomProxy>) {
   );
 
   // Report back to form component with the proxy values when all required values are set.
+  // These lint rules are disabled for now because the react plugin for eslint does
+  // not understand that useEffectEvent should not be added to the dependency array.
+  // Enable these rules again when eslint can lint useEffectEvent properly.
+  // eslint-disable-next-line react-compiler/react-compiler
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => onUpdate(ip, port, username, password), [ip, port, username, password]);
 
   return (
@@ -413,7 +424,9 @@ function EditSocks5Remote(props: EditProxyProps<Socks5RemoteCustomProxy>) {
       </SettingsRow>
 
       <SettingsRow label={messages.pgettext('api-access-methods-view', 'Authentication')}>
-        <Cell.Switch isOn={authentication} onChange={setAuthentication} />
+        <Switch checked={authentication} onCheckedChange={setAuthentication}>
+          <Switch.Input />
+        </Switch>
       </SettingsRow>
 
       {authentication && (
@@ -476,6 +489,11 @@ function EditSocks5Local(props: EditProxyProps<Socks5LocalCustomProxy>) {
 
   useEffect(
     () => onUpdate(remoteIp, remotePort, localPort, remoteTransportProtocol),
+    // These lint rules are disabled for now because the react plugin for eslint does
+    // not understand that useEffectEvent should not be added to the dependency array.
+    // Enable these rules again when eslint can lint useEffectEvent properly.
+    // eslint-disable-next-line react-compiler/react-compiler
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [remoteIp, remotePort, localPort, remoteTransportProtocol],
   );
 

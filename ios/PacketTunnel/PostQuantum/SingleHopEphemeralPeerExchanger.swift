@@ -3,7 +3,7 @@
 //  PacketTunnel
 //
 //  Created by Mojgan on 2024-07-15.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadREST
@@ -41,14 +41,16 @@ struct SingleHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
     }
 
     func start() async {
-        await onUpdateConfiguration(.single(EphemeralPeerRelayConfiguration(
-            relay: exit,
-            configuration: EphemeralPeerConfiguration(
-                privateKey: devicePrivateKey,
-                allowedIPs: [IPAddressRange(from: "\(LocalNetworkIPs.gatewayAddress.rawValue)/32")!],
-                daitaParameters: nil
-            )
-        )))
+        await onUpdateConfiguration(
+            .single(
+                EphemeralPeerRelayConfiguration(
+                    relay: exit,
+                    configuration: EphemeralPeerConfiguration(
+                        privateKey: devicePrivateKey,
+                        allowedIPs: [IPAddressRange(from: "\(LocalNetworkIPs.gatewayAddressIpV4.rawValue)/32")!],
+                        daitaParameters: nil
+                    )
+                )))
         keyExchanger.startNegotiation(
             with: devicePrivateKey,
             enablePostQuantum: enablePostQuantum,
@@ -57,18 +59,20 @@ struct SingleHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
     }
 
     public func receiveEphemeralPeerPrivateKey(_ ephemeralKey: PrivateKey, daitaParameters: DaitaV2Parameters?) async {
-        await onUpdateConfiguration(.single(EphemeralPeerRelayConfiguration(
-            relay: exit,
-            configuration: EphemeralPeerConfiguration(
-                privateKey: ephemeralKey,
-                preSharedKey: nil,
-                allowedIPs: [
-                    IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV4.rawValue)/0")!,
-                    IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV6.rawValue)/0")!,
-                ],
-                daitaParameters: daitaParameters
-            )
-        )))
+        await onUpdateConfiguration(
+            .single(
+                EphemeralPeerRelayConfiguration(
+                    relay: exit,
+                    configuration: EphemeralPeerConfiguration(
+                        privateKey: ephemeralKey,
+                        preSharedKey: nil,
+                        allowedIPs: [
+                            IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV4.rawValue)/0")!,
+                            IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV6.rawValue)/0")!,
+                        ],
+                        daitaParameters: daitaParameters
+                    )
+                )))
         self.onFinish()
     }
 
@@ -77,18 +81,20 @@ struct SingleHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
         ephemeralKey: WireGuardKitTypes.PrivateKey,
         daitaParameters: DaitaV2Parameters?
     ) async {
-        await onUpdateConfiguration(.single(EphemeralPeerRelayConfiguration(
-            relay: exit,
-            configuration: EphemeralPeerConfiguration(
-                privateKey: ephemeralKey,
-                preSharedKey: preSharedKey,
-                allowedIPs: [
-                    IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV4.rawValue)/0")!,
-                    IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV6.rawValue)/0")!,
-                ],
-                daitaParameters: daitaParameters
-            )
-        )))
+        await onUpdateConfiguration(
+            .single(
+                EphemeralPeerRelayConfiguration(
+                    relay: exit,
+                    configuration: EphemeralPeerConfiguration(
+                        privateKey: ephemeralKey,
+                        preSharedKey: preSharedKey,
+                        allowedIPs: [
+                            IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV4.rawValue)/0")!,
+                            IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV6.rawValue)/0")!,
+                        ],
+                        daitaParameters: daitaParameters
+                    )
+                )))
         self.onFinish()
     }
 }

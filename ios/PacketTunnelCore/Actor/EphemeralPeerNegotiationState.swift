@@ -3,14 +3,14 @@
 //  PacketTunnelCore
 //
 //  Created by Mojgan on 2024-07-16.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadREST
 import MullvadTypes
-import WireGuardKitTypes
+@preconcurrency import WireGuardKitTypes
 
-public enum EphemeralPeerNegotiationState: Equatable {
+public enum EphemeralPeerNegotiationState: Equatable, Sendable {
     case single(EphemeralPeerRelayConfiguration)
     case multi(entry: EphemeralPeerRelayConfiguration, exit: EphemeralPeerRelayConfiguration)
 
@@ -26,7 +26,7 @@ public enum EphemeralPeerNegotiationState: Equatable {
     }
 }
 
-public struct EphemeralPeerRelayConfiguration: Equatable, CustomDebugStringConvertible {
+public struct EphemeralPeerRelayConfiguration: Equatable, CustomDebugStringConvertible, Sendable {
     public let relay: SelectedRelay
     public let configuration: EphemeralPeerConfiguration
 
@@ -40,7 +40,7 @@ public struct EphemeralPeerRelayConfiguration: Equatable, CustomDebugStringConve
     }
 }
 
-public struct EphemeralPeerConfiguration: Equatable, CustomDebugStringConvertible {
+public struct EphemeralPeerConfiguration: Equatable, CustomDebugStringConvertible, Sendable {
     public let privateKey: PrivateKey
     public let preSharedKey: PreSharedKey?
     public let allowedIPs: [IPAddressRange]
@@ -60,9 +60,10 @@ public struct EphemeralPeerConfiguration: Equatable, CustomDebugStringConvertibl
 
     public var debugDescription: String {
         var string = "{ private key : \(privateKey),"
-        string += preSharedKey.flatMap {
-            "preShared key: \($0), "
-        } ?? ""
+        string +=
+            preSharedKey.flatMap {
+                "preShared key: \($0), "
+            } ?? ""
         string += ", allowedIPs: \(allowedIPs) }"
         return string
     }

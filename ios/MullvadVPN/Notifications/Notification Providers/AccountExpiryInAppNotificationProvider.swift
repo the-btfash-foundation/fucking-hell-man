@@ -3,14 +3,16 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 12/12/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadSettings
 import MullvadTypes
 
-final class AccountExpiryInAppNotificationProvider: NotificationProvider, InAppNotificationProvider {
+final class AccountExpiryInAppNotificationProvider: NotificationProvider, InAppNotificationProvider,
+    @unchecked Sendable
+{
     private var accountExpiry = AccountExpiry()
     private var tunnelObserver: TunnelBlockObserver?
     private var timer: DispatchSourceTimer?
@@ -38,6 +40,10 @@ final class AccountExpiryInAppNotificationProvider: NotificationProvider, InAppN
         .accountExpiryInAppNotification
     }
 
+    override var priority: NotificationPriority {
+        .high
+    }
+
     // MARK: - InAppNotificationProvider
 
     var notificationDescriptor: InAppNotificationDescriptor? {
@@ -49,11 +55,11 @@ final class AccountExpiryInAppNotificationProvider: NotificationProvider, InAppN
             identifier: identifier,
             style: .warning,
             title: durationText,
-            body: NSAttributedString(string: NSLocalizedString(
-                "ACCOUNT_EXPIRY_IN_APP_NOTIFICATION_BODY",
-                value: "You can add more time via the account view or website to continue using the VPN.",
-                comment: "Title for in-app notification, displayed within the last X days until account expiry."
-            ))
+            body: NSAttributedString(
+                string: NSLocalizedString(
+                    "You can add more time via the account view or website to continue using the VPN.",
+                    comment: ""
+                ))
         )
     }
 
@@ -111,11 +117,6 @@ extension AccountExpiryInAppNotificationProvider {
             )
         else { return nil }
 
-        return String(format: NSLocalizedString(
-            "ACCOUNT_EXPIRY_IN_APP_NOTIFICATION_TITLE",
-            tableName: "AccountExpiry",
-            value: "%@ left on this account",
-            comment: "Message for in-app notification, displayed within the last X days until account expiry."
-        ), duration).uppercased()
+        return String(format: NSLocalizedString("%@ left on this account", comment: ""), duration).uppercased()
     }
 }

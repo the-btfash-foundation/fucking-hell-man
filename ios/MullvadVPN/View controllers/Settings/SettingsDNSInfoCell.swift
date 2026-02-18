@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-07-07.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -15,14 +15,15 @@ class SettingsDNSInfoCell: UITableViewCell {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
 
         backgroundColor = .secondaryColor
-        contentView.directionalLayoutMargins = UIMetrics.SettingsCell.layoutMargins
+        contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(UIMetrics.SettingsRowView.footerLayoutMargins)
 
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.textColor = UIColor.Cell.titleTextColor
+        titleLabel.textColor = UIColor.TableSection.footerTextColor
         titleLabel.numberOfLines = 0
 
         contentView.addConstrainedSubviews([titleLabel]) {
-            titleLabel.pinEdgesToSuperviewMargins()
+            titleLabel.pinEdgesToSuperviewMargins(.all())
         }
     }
 

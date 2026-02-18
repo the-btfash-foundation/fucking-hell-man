@@ -3,14 +3,14 @@
 //  MullvadVPN
 //
 //  Created by Marco Nikic on 2023-08-08.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadLogging
 import MullvadTypes
 
-public enum SettingsMigrationResult {
+public enum SettingsMigrationResult: Sendable {
     /// Nothing to migrate.
     case nothing
 
@@ -35,14 +35,14 @@ public struct MigrationManager {
     /// and writes back to `store` when settings are updated.
     ///
     /// In order to avoid migration happening from both the VPN and the host processes at the same time,
-    /// a non existant file path is used as a lock to synchronize access between the processes.
+    /// a non existent file path is used as a lock to synchronize access between the processes.
     /// This file is accessed by `NSFileCoordinator` in order to prevent multiple processes accessing at the same time.
     /// - Parameters:
     ///   - store: The store to from which settings are read and written to.
     ///   - migrationCompleted: Completion handler called with a migration result.
     public func migrateSettings(
         store: SettingsStore,
-        migrationCompleted: @escaping (SettingsMigrationResult) -> Void
+        migrationCompleted: @escaping @Sendable (SettingsMigrationResult) -> Void
     ) {
         let fileCoordinator = NSFileCoordinator(filePresenter: nil)
         var error: NSError?
@@ -69,7 +69,8 @@ public struct MigrationManager {
             } catch .itemNotFound as KeychainError {
                 migrationCompleted(.nothing)
             } catch let couldNotReadKeychainError as KeychainError
-                where couldNotReadKeychainError == .interactionNotAllowed {
+                where couldNotReadKeychainError == .interactionNotAllowed
+            {
                 migrationCompleted(.failure(couldNotReadKeychainError))
             } catch {
                 resetStoreHandler(.failure(error))
@@ -79,7 +80,7 @@ public struct MigrationManager {
 
     private func upgradeSettingsToLatestVersion(
         store: SettingsStore,
-        migrationCompleted: @escaping (SettingsMigrationResult) -> Void
+        migrationCompleted: @escaping @Sendable (SettingsMigrationResult) -> Void
     ) throws {
         let parser = SettingsParser(decoder: JSONDecoder(), encoder: JSONEncoder())
         let settingsData = try store.read(key: SettingsKey.settings)
@@ -92,10 +93,12 @@ public struct MigrationManager {
 
         // Corrupted settings version (i.e. negative values, or downgrade from a future version) should fail
         guard var savedSchema = SchemaVersion(rawValue: settingsVersion) else {
-            migrationCompleted(.failure(UnsupportedSettingsVersionError(
-                storedVersion: settingsVersion,
-                currentVersion: SchemaVersion.current
-            )))
+            migrationCompleted(
+                .failure(
+                    UnsupportedSettingsVersionError(
+                        storedVersion: settingsVersion,
+                        currentVersion: SchemaVersion.current
+                    )))
             return
         }
 

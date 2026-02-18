@@ -31,7 +31,12 @@ NOTARIZE="false"
 # If a macOS or Windows build should create an installer artifact working on both
 # x86 and arm64
 UNIVERSAL="true"
-
+# Use gotatun instead of wireguard-go.
+GOTATUN="false"
+# Enable GotaTun by default on macOS.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    GOTATUN="true"
+fi
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --optimize) OPTIMIZE="true";;
@@ -44,6 +49,7 @@ while [[ "$#" -gt 0 ]]; do
             fi
             UNIVERSAL="true"
             ;;
+        --gotatun) GOTATUN="true";;
         *)
             log_error "Unknown parameter: $1"
             exit 1
@@ -74,6 +80,7 @@ fi
 
 NPM_PACK_ARGS+=(--host-target-triple "$HOST")
 
+
 if [[ "$UNIVERSAL" == "true" ]]; then
     if [[ -n ${TARGETS:-""} ]]; then
         log_error "'TARGETS' and '--universal' cannot be specified simultaneously."
@@ -101,20 +108,37 @@ fi
 if [[ "$OPTIMIZE" == "true" ]]; then
     CARGO_ARGS+=(--release)
     RUST_BUILD_MODE="release"
-    CPP_BUILD_MODE="Release"
     NPM_PACK_ARGS+=(--release)
 else
     RUST_BUILD_MODE="debug"
     NPM_PACK_ARGS+=(--no-compression)
+fi
+# The cargo builds that are part of the C++ builds only enforce `--locked` when built
+# in release mode. And we must enforce `--locked` for all signed builds. So we enable
+# release mode if either optimizations or signing is enabled.
+if [[ "$OPTIMIZE" == "true" || "$SIGN" == "true" ]]; then
+    CPP_BUILD_MODE="Release"
+else
     CPP_BUILD_MODE="Debug"
 fi
 
-if [[ "$SIGN" == "true" ]]; then
-    if [[ $(git diff --shortstat 2> /dev/null | tail -n1) != "" ]]; then
+function assert_clean_working_directory {
+    if [[ -n "$(git status --porcelain)" ]]; then
         log_error "Dirty working directory!"
-        log_error "Will only build a signed app in a clean working directory"
+        log_error "Release builds are not allowed on dirty working directories!"
         exit 1
     fi
+}
+
+if [[ "$SIGN" == "true" ]]; then
+    # Refuse to build signed builds on dirty working directories. Prevents release builds
+    # from being built from potentially modified code/assets.
+    assert_clean_working_directory
+
+    # Will not allow an outdated lockfile when building with signatures
+    # (The build servers should never build without --locked for
+    # reproducibility and supply chain security)
+    CARGO_ARGS+=(--locked)
 
     if [[ "$(uname -s)" == "Darwin" ]]; then
         log_info "Configuring environment for signing of binaries"
@@ -156,9 +180,6 @@ fi
 if [[ "$IS_RELEASE" == "true" ]]; then
     log_info "Removing old Rust build artifacts..."
     cargo clean
-
-    # Will not allow an outdated lockfile in releases
-    CARGO_ARGS+=(--locked)
 else
     # Allow dev builds to override which API server to use at runtime.
     CARGO_ARGS+=(--features api-override)
@@ -224,17 +245,23 @@ function build {
     if [[ -n $specified_target ]]; then
         cargo_target_arg+=(--target="$specified_target")
     fi
+
+    local cargo_features=()
+    if [[ "$GOTATUN" == "false" ]]; then
+        cargo_features+=(--features wireguard-go)
+    fi
+
     local cargo_crates_to_build=(
         -p mullvad-daemon --bin mullvad-daemon
         -p mullvad-cli --bin mullvad
         -p mullvad-setup --bin mullvad-setup
         -p mullvad-problem-report --bin mullvad-problem-report
-        -p talpid-openvpn-plugin --lib
     )
     if [[ ("$(uname -s)" == "Linux") ]]; then
         cargo_crates_to_build+=(-p mullvad-exclude --bin mullvad-exclude)
     fi
-    cargo build "${cargo_target_arg[@]}" "${CARGO_ARGS[@]}" "${cargo_crates_to_build[@]}"
+
+    cargo build "${cargo_target_arg[@]}" "${cargo_features[@]}" "${CARGO_ARGS[@]}" "${cargo_crates_to_build[@]}"
 
     ################################################################################
     # Move binaries to correct locations in dist-assets
@@ -246,7 +273,6 @@ function build {
             mullvad-daemon
             mullvad
             mullvad-problem-report
-            libtalpid_openvpn_plugin.dylib
             mullvad-setup
         )
     elif [[ ("$(uname -s)" == "Linux") ]]; then
@@ -254,7 +280,6 @@ function build {
             mullvad-daemon
             mullvad
             mullvad-problem-report
-            libtalpid_openvpn_plugin.so
             mullvad-setup
             mullvad-exclude
         )
@@ -263,9 +288,15 @@ function build {
             mullvad-daemon.exe
             mullvad.exe
             mullvad-problem-report.exe
-            talpid_openvpn_plugin.dll
             mullvad-setup.exe
         )
+        if [[ "$GOTATUN" == "false" ]]; then
+            BINARIES+=(
+                libwg.dll
+                maybenot_ffi.dll
+            )
+            NPM_PACK_ARGS+=(--wggo)
+        fi
     fi
 
     if [[ -n $specified_target ]]; then
@@ -290,28 +321,15 @@ function build {
             sign_win "$destination"
         fi
     done
-
-    if [[ "$current_target" == "aarch64-pc-windows-msvc" ]]; then
-        # We ship x64 OpenVPN with ARM64, so we need an x64 talpid-openvpn-plugin
-        # to include in the package.
-        local source="$CARGO_TARGET_DIR/x86_64-pc-windows-msvc/$RUST_BUILD_MODE/talpid_openvpn_plugin.dll"
-        local destination
-        if [[ -n "$specified_target" ]]; then
-            destination="dist-assets/$specified_target/talpid_openvpn_plugin.dll"
-        else
-            destination="dist-assets/talpid_openvpn_plugin.dll"
-        fi
-
-        log_info "Workaround: building x64 talpid-openvpn-plugin"
-        cargo build --target x86_64-pc-windows-msvc "${CARGO_ARGS[@]}" -p talpid-openvpn-plugin --lib
-        cp "$source" "$destination"
-        if [[ "$SIGN" == "true" ]]; then
-            sign_win "$destination"
-        fi
-    fi
 }
 
 if [[ "$(uname -s)" == "MINGW"* ]]; then
+    if [[ "$IS_RELEASE" == "true" ]]; then
+        ./build-windows-modules.sh clean
+    else
+        echo "Will NOT clean intermediate files in ./windows/**/bin/ in dev builds"
+    fi
+
     for t in "${TARGETS[@]:-"$HOST"}"; do
         case "${t:-"$HOST"}" in
             x86_64-pc-windows-msvc) CPP_BUILD_TARGET=x64;;
@@ -323,7 +341,7 @@ if [[ "$(uname -s)" == "MINGW"* ]]; then
         esac
 
         log_header "Building C++ code in $CPP_BUILD_MODE mode for $CPP_BUILD_TARGET"
-        CPP_BUILD_MODES=$CPP_BUILD_MODE CPP_BUILD_TARGETS=$CPP_BUILD_TARGET IS_RELEASE=$IS_RELEASE ./build-windows-modules.sh
+        CPP_BUILD_MODES=$CPP_BUILD_MODE CPP_BUILD_TARGETS=$CPP_BUILD_TARGET ./build-windows-modules.sh
 
         if [[ "$SIGN" == "true" ]]; then
             CPP_BINARIES=(
@@ -361,13 +379,15 @@ else
 fi
 
 log_info "Updating relays.json..."
-cargo run --bin relay_list "${CARGO_ARGS[@]}" > build/relays.json
+cargo run -p mullvad-api --bin relay_list "${CARGO_ARGS[@]}" > build/relays.json
 
 
 log_header "Installing JavaScript dependencies"
 
-pushd desktop/packages/mullvad-vpn
+pushd desktop
 npm ci --no-audit --no-fund
+
+pushd packages/mullvad-vpn
 
 log_header "Packing Mullvad VPN $PRODUCT_VERSION artifact(s)"
 
@@ -377,6 +397,15 @@ case "$(uname -s)" in
     MINGW*)     npm run pack:win -- "${NPM_PACK_ARGS[@]}";;
 esac
 popd
+popd
+
+# When signing is enabled, we check that the working directory is clean before building,
+# further up. Now verify that this is still true. The build process should never make the
+# working directory dirty.
+# This could for example happen if lockfiles are outdated, and the build process updates them.
+if [[ "$SIGN" == "true" ]]; then
+    assert_clean_working_directory
+fi
 
 # sign installer on Windows
 if [[ "$SIGN" == "true" && "$(uname -s)" == "MINGW"* ]]; then
@@ -397,6 +426,7 @@ if [[ "$UNIVERSAL" == "true" && "$(uname -s)" == "MINGW"* ]]; then
         --arm64-installer "$SCRIPT_DIR/dist/"*"$PRODUCT_VERSION"_arm64.exe \
         "${WIN_PACK_ARGS[@]}"
     if [[ "$SIGN" == "true" ]]; then
+        assert_clean_working_directory
         sign_win "dist/MullvadVPN-${PRODUCT_VERSION}.exe"
     fi
 fi

@@ -3,7 +3,7 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 14/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -58,6 +58,8 @@ public struct BlockedStateErrorMapper: BlockedStateErrorMapperProtocol {
                 .noRelaysSatisfyingDaitaConstraints
             case .noObfuscatedRelaysFound:
                 .noRelaysSatisfyingObfuscationSettings
+            case .invalidPort:
+                .noRelaysSatisfyingPortConstraints
             default:
                 .noRelaysSatisfyingConstraints
             }

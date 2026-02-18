@@ -3,7 +3,7 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 12/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -26,9 +26,9 @@ final class DeviceChecker {
 
     /**
      Start device diagnostics to determine the reason why the tunnel is not functional.
-
+    
      This involves the following steps:
-
+    
      1. Fetch account and device data.
      2. Check account validity and whether it has enough time left.
      3. Verify that current device is registered with backend and that both device and backend point to the same public

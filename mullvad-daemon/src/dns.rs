@@ -1,6 +1,8 @@
-use mullvad_types::settings::{DnsOptions, DnsState};
 use std::net::{IpAddr, Ipv4Addr};
-use talpid_core::{dns::DnsConfig, firewall::is_local_address};
+
+use mullvad_types::settings::{DnsOptions, DnsState};
+use talpid_core::firewall::is_local_address;
+use talpid_dns::DnsConfig;
 
 /// When we want to block certain contents with the help of DNS server side,
 /// we compute the resolver IP to use based on these constants. The last
@@ -54,8 +56,9 @@ pub fn addresses_from_options(options: &DnsOptions) -> DnsConfig {
                 .custom_options
                 .addresses
                 .iter()
+                .copied()
                 // Private IP ranges should not be tunneled
-                .partition(|&addr| is_local_address(addr));
+                .partition(|addr| is_local_address(*addr));
             DnsConfig::from_addresses(&tunnel_config, &non_tunnel_config)
         }
     }
@@ -65,7 +68,7 @@ pub fn addresses_from_options(options: &DnsOptions) -> DnsConfig {
 mod test {
     use crate::dns::addresses_from_options;
     use mullvad_types::settings::{CustomDnsOptions, DefaultDnsOptions, DnsOptions, DnsState};
-    use talpid_core::dns::DnsConfig;
+    use talpid_dns::DnsConfig;
 
     #[test]
     fn test_default_dns() {

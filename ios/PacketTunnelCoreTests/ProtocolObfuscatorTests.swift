@@ -3,92 +3,82 @@
 //  PacketTunnelCoreTests
 //
 //  Created by Marco Nikic on 2023-11-21.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
+import Network
+import XCTest
+
+@testable import MullvadREST
 @testable import MullvadSettings
 @testable import MullvadTypes
-import Network
 @testable import PacketTunnelCore
-import XCTest
 
 final class ProtocolObfuscatorTests: XCTestCase {
     var obfuscator: ProtocolObfuscator<TunnelObfuscationStub>!
-    var endpoint: MullvadEndpoint!
 
     override func setUpWithError() throws {
+        obfuscator = ProtocolObfuscator<TunnelObfuscationStub>()
+    }
+
+    private func makeEndpoint(obfuscation: ObfuscationMethod) throws -> SelectedEndpoint {
         let address = try XCTUnwrap(IPv4Address("1.2.3.4"))
         let gateway = try XCTUnwrap(IPv4Address("5.6.7.8"))
         let v4Endpoint = IPv4Endpoint(ip: address, port: 56)
 
-        obfuscator = ProtocolObfuscator<TunnelObfuscationStub>()
-
-        endpoint = MullvadEndpoint(
-            ipv4Relay: v4Endpoint,
+        return SelectedEndpoint(
+            socketAddress: .ipv4(v4Endpoint),
             ipv4Gateway: gateway,
             ipv6Gateway: .any,
-            publicKey: Data()
+            publicKey: Data(),
+            obfuscation: obfuscation
         )
     }
 
-    func testObfuscateOffDoesNotChangeEndpoint() {
-        let settings = settings(.off, obfuscationPort: .automatic)
-        let nonObfuscatedEndpoint = obfuscator.obfuscate(endpoint, settings: settings)
+    func testObfuscateOffDoesNotChangeEndpoint() throws {
+        let endpoint = try makeEndpoint(obfuscation: .off)
+        let nonObfuscated = obfuscator.obfuscate(endpoint)
 
-        XCTAssertEqual(endpoint, nonObfuscatedEndpoint)
+        XCTAssertEqual(endpoint, nonObfuscated.endpoint)
     }
 
     func testObfuscateUdpOverTcp() throws {
-        let settings = settings(.udpOverTcp, obfuscationPort: .automatic)
-        let obfuscatedEndpoint = obfuscator.obfuscate(endpoint, settings: settings)
+        let endpoint = try makeEndpoint(obfuscation: .udpOverTcp)
+        let obfuscated = obfuscator.obfuscate(endpoint)
         let obfuscationProtocol = try XCTUnwrap(obfuscator.tunnelObfuscator as? TunnelObfuscationStub)
 
-        validate(obfuscatedEndpoint, against: obfuscationProtocol)
+        validate(obfuscated.endpoint, against: obfuscationProtocol)
     }
 
     func testObfuscateShadowsocks() throws {
-        let settings = settings(.shadowsocks, obfuscationPort: .automatic)
-        let obfuscatedEndpoint = obfuscator.obfuscate(endpoint, settings: settings)
+        let endpoint = try makeEndpoint(obfuscation: .shadowsocks)
+        let obfuscated = obfuscator.obfuscate(endpoint)
         let obfuscationProtocol = try XCTUnwrap(obfuscator.tunnelObfuscator as? TunnelObfuscationStub)
 
-        validate(obfuscatedEndpoint, against: obfuscationProtocol)
+        validate(obfuscated.endpoint, against: obfuscationProtocol)
     }
 
-    func testObfuscateAutomatic() throws {
-        let settings = settings(.automatic, obfuscationPort: .automatic)
+    func testObfuscateQuic() throws {
+        let endpoint = try makeEndpoint(obfuscation: .quic(hostname: "test.mullvad.net", token: "token"))
+        let obfuscated = obfuscator.obfuscate(endpoint)
+        let obfuscationProtocol = try XCTUnwrap(obfuscator.tunnelObfuscator as? TunnelObfuscationStub)
 
-        try (UInt(0) ... 3).forEach { attempt in
-            let obfuscatedEndpoint = obfuscator.obfuscate(endpoint, settings: settings, retryAttempts: attempt)
-
-            switch attempt {
-            case 0, 1:
-                XCTAssertEqual(endpoint, obfuscatedEndpoint)
-            case 2, 3:
-                let obfuscationProtocol = try XCTUnwrap(obfuscator.tunnelObfuscator as? TunnelObfuscationStub)
-                validate(obfuscatedEndpoint, against: obfuscationProtocol)
-            default:
-                XCTExpectFailure("Should not end up here, test setup is wrong")
-            }
-        }
+        validate(obfuscated.endpoint, against: obfuscationProtocol)
     }
+
 }
 
 extension ProtocolObfuscatorTests {
     private func validate(
-        _ obfuscatedEndpoint: MullvadEndpoint,
+        _ obfuscatedEndpoint: SelectedEndpoint,
         against obfuscationProtocol: TunnelObfuscationStub
     ) {
-        XCTAssertEqual(obfuscatedEndpoint.ipv4Relay.ip, .loopback)
-        XCTAssertEqual(obfuscatedEndpoint.ipv4Relay.port, obfuscationProtocol.localUdpPort)
-    }
 
-    private func settings(
-        _ obfuscationState: WireGuardObfuscationState,
-        obfuscationPort: WireGuardObfuscationUdpOverTcpPort
-    ) -> LatestTunnelSettings {
-        LatestTunnelSettings(wireGuardObfuscation: WireGuardObfuscationSettings(
-            state: obfuscationState,
-            udpOverTcpPort: obfuscationPort
-        ))
+        guard case let .ipv4(ipv4Endpoint) = obfuscatedEndpoint.socketAddress else {
+            XCTFail("Expected IPv4 endpoint after obfuscation")
+            return
+        }
+        XCTAssertEqual(ipv4Endpoint.ip, .loopback)
+        XCTAssertEqual(ipv4Endpoint.port, obfuscationProtocol.localUdpPort)
     }
 }

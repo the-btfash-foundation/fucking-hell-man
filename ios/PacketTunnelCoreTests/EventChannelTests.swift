@@ -3,13 +3,14 @@
 //  PacketTunnelCoreTests
 //
 //  Created by pronebird on 27/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //  Formerly known as CommandChannelTests
 //
 
+import XCTest
+
 @testable import MullvadMockData
 @testable import PacketTunnelCore
-import XCTest
 
 final class EventChannelTests: XCTestCase {
     func testCoalescingReconnect() async {
@@ -90,7 +91,9 @@ extension AsyncSequence {
 
 /// Simplified version of `Event` that can be used in tests and easily compared against.
 enum SimplifiedEvent: Equatable {
-    case start, stop, reconnect(NextRelays), switchKey, other
+    case start, stop
+    case reconnect(NextRelays)
+    case switchKey, other
 }
 
 extension PacketTunnelActor.Event {

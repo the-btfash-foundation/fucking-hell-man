@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use mullvad_management_interface::MullvadProxyClient;
 use mullvad_types::access_method::{AccessMethod, AccessMethodSetting};
 use talpid_types::net::proxy::CustomProxy;
@@ -31,8 +31,6 @@ pub enum ApiAccess {
     ///
     /// Selecting "Direct" will connect to the Mullvad API without going through any proxy. This
     /// connection use https and is therefore encrypted.
-    ///
-    /// Selecting "Mullvad Bridges" respects your current bridge settings
     Use(SelectItem),
     /// Try to reach the Mullvad API using a specific access method
     Test(SelectItem),
@@ -234,7 +232,7 @@ impl ApiAccess {
         let current = rpc.get_current_api_access_method().await?;
         let mut access_method_formatter = pp::ApiAccessMethodFormatter::new(&current);
         access_method_formatter.settings.write_enabled = false;
-        println!("{}", access_method_formatter);
+        println!("{access_method_formatter}");
         Ok(())
     }
 
@@ -246,7 +244,7 @@ impl ApiAccess {
             .await?
             .get(item.as_array_index()?)
             .cloned()
-            .ok_or(anyhow!(format!("Access method {} does not exist", item)))
+            .ok_or(anyhow!(format!("Access method {item} does not exist")))
     }
 }
 
@@ -466,7 +464,7 @@ mod pp {
                     let formatter = CustomProxyFormatter {
                         custom_proxy: method,
                     };
-                    write!(f, "{}", formatter)?;
+                    write!(f, "{formatter}")?;
                     Ok(())
                 }
             }

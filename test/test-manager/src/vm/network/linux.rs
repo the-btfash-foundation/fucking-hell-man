@@ -1,24 +1,31 @@
-use ipnetwork::Ipv4Network;
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use std::{
     ffi::OsStr,
     io,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    ops::RangeInclusive,
     process::Stdio,
     str::FromStr,
-    sync::LazyLock,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
 };
 
-/// (Contained) test subnet for the test runner: 172.29.1.1/24
-pub static TEST_SUBNET: LazyLock<Ipv4Network> =
-    LazyLock::new(|| Ipv4Network::new(Ipv4Addr::new(172, 29, 1, 1), 24).unwrap());
-/// Range of IPs returned by the DNS server: TEST_SUBNET_DHCP_FIRST to TEST_SUBNET_DHCP_LAST
-pub const TEST_SUBNET_DHCP_FIRST: Ipv4Addr = Ipv4Addr::new(172, 29, 1, 2);
-/// Range of IPs returned by the DNS server: TEST_SUBNET_DHCP_FIRST to TEST_SUBNET_DHCP_LAST
-pub const TEST_SUBNET_DHCP_LAST: Ipv4Addr = Ipv4Addr::new(172, 29, 1, 128);
+/// (Contained) IPv4 subnet for the test runner: 172.29.1.1/24
+pub const TEST_SUBNET_IPV4: Ipv4Network =
+    Ipv4Network::new_checked(Ipv4Addr::new(172, 29, 1, 1), 24).unwrap();
+
+/// IPv4 range returned by the DHCP server.
+pub const TEST_SUBNET_IPV4_DHCP: RangeInclusive<Ipv4Addr> =
+    Ipv4Addr::new(172, 29, 1, 2)..=Ipv4Addr::new(172, 29, 1, 128);
+
+/// IPv6 subnet for the test runner. "0xfd multest"
+pub const TEST_SUBNET_IPV6: Ipv6Network = Ipv6Network::new_checked(
+    Ipv6Addr::new(0xfd6d, 0x756c, 0x7465, 0x7374, 0, 0, 0, 1),
+    64,
+)
+.unwrap();
 
 /// Bridge interface on the host
 pub(crate) const BRIDGE_NAME: &str = "br-mullvadtest";
@@ -39,17 +46,14 @@ data_encoding_macro::base64_array!(
 );
 
 /// Port of the wireguard remote peer as defined in `setup-network.sh`.
-#[allow(dead_code)]
 pub const CUSTOM_TUN_REMOTE_REAL_PORT: u16 = 51820;
 /// Tunnel address of the wireguard local peer as defined in `setup-network.sh`.
 pub const CUSTOM_TUN_LOCAL_TUN_ADDR: Ipv4Addr = Ipv4Addr::new(192, 168, 15, 2);
 /// Tunnel address of the wireguard remote peer as defined in `setup-network.sh`.
 pub const CUSTOM_TUN_REMOTE_TUN_ADDR: Ipv4Addr = Ipv4Addr::new(192, 168, 15, 1);
 /// Gateway (and default DNS resolver) of the wireguard tunnel.
-#[allow(dead_code)]
 pub const CUSTOM_TUN_GATEWAY: Ipv4Addr = CUSTOM_TUN_REMOTE_TUN_ADDR;
 /// Gateway of the non-tunnel interface.
-#[allow(dead_code)]
 pub(super) const NON_TUN_GATEWAY: Ipv4Addr = Ipv4Addr::new(172, 29, 1, 1);
 /// Name of the wireguard interface on the host
 pub const CUSTOM_TUN_INTERFACE_NAME: &str = "wg-relay0";
@@ -97,26 +101,44 @@ struct DhcpProcHandle {
     _pid_file: async_tempfile::TempFile,
 }
 
+/// IPv6-support in `rootlesskit` is experimental, and addresses are not automatically assigned.
+/// This function will assigned an IPv6 address to the TAP interface, and set up routes.
+async fn fix_ipv6() -> Result<()> {
+    let tap = "tap0"; // TAP-device that connects to slirp2netns
+    let addr = "fd00::1337/64"; // our address within the slirp2netns subnet
+    let gateway = "fd00::2"; // slirp2netns gateway
+    let _dns = "fd00::3"; // slirp2netns dns
+
+    run_ip_cmd(["-6", "addr", "add", addr, "dev", tap]).await?;
+    run_ip_cmd(["-6", "route", "add", "default", "via", gateway, "dev", tap]).await?;
+    Ok(())
+}
+
 /// Create a bridge network and hosts
 pub async fn setup_test_network() -> Result<NetworkHandle> {
+    fix_ipv6().await?;
+
     enable_forwarding().await?;
 
-    let test_subnet = TEST_SUBNET.to_string();
+    let test_subnet_v4 = TEST_SUBNET_IPV4.to_string();
+    let test_subnet_v6 = TEST_SUBNET_IPV6.to_string();
 
-    log::debug!("Create bridge network: dev {BRIDGE_NAME}, net {test_subnet}");
+    log::debug!("Create bridge network: dev {BRIDGE_NAME}, net {test_subnet_v4}");
 
     run_ip_cmd(["link", "add", BRIDGE_NAME, "type", "bridge"]).await?;
-    run_ip_cmd(["addr", "add", "dev", BRIDGE_NAME, &test_subnet]).await?;
+    run_ip_cmd(["addr", "add", "dev", BRIDGE_NAME, &test_subnet_v4]).await?;
+    run_ip_cmd(["addr", "add", "dev", BRIDGE_NAME, &test_subnet_v6]).await?;
     run_ip_cmd(["link", "set", "dev", BRIDGE_NAME, "up"]).await?;
 
     log::debug!("Masquerade traffic from bridge to internet");
 
     run_nft(&format!(
         "
-table ip mullvad_test_nat {{
+table inet mullvad_test_nat {{
     chain POSTROUTING {{
         type nat hook postrouting priority srcnat; policy accept;
-        ip saddr {test_subnet} ip daddr != {test_subnet} counter masquerade
+        ip  saddr {test_subnet_v4} ip  daddr != {test_subnet_v4} counter masquerade
+        ip6 saddr {test_subnet_v6} ip6 daddr != {test_subnet_v6} counter masquerade
     }}
 }}"
     ))
@@ -163,12 +185,11 @@ impl NetworkHandle {
                 .captures(&line)
                 .and_then(|cap| cap.get(1))
                 .map(|addr| addr.as_str())
+                && let Ok(parsed_addr) = IpAddr::from_str(addr)
             {
-                if let Ok(parsed_addr) = IpAddr::from_str(addr) {
-                    log::debug!("Captured DHCPACK: {}", parsed_addr);
-                    found_addr = Some(parsed_addr);
-                    break;
-                }
+                log::debug!("Captured DHCPACK: {}", parsed_addr);
+                found_addr = Some(parsed_addr);
+                break;
             }
         }
 
@@ -189,22 +210,34 @@ impl NetworkHandle {
     }
 }
 
+/// Run dnsmasq as a DHCP server.
+///
+/// dnsmasq will serve IPv4 addresses within the range [TEST_SUBNET_IPV4_DHCP] using regular DHCP.
+/// It will also advertise SLAAC for IPv6 within [TEST_SUBNET_IPV6].
 async fn start_dnsmasq() -> Result<DhcpProcHandle> {
-    // dnsmasq -i BRIDGE_NAME -F TEST_SUBNET_DHCP_FIRST,TEST_SUBNET_DHCP_LAST ...
-    let mut cmd = Command::new("dnsmasq");
+    let dnsmasq = "/usr/sbin/dnsmasq";
+    let mut cmd = Command::new(dnsmasq);
 
     cmd.kill_on_drop(true);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
     cmd.args([
+        "--conf-file=/dev/null",
         "--bind-interfaces",
-        "-C",
-        "/dev/null",
-        "-i",
-        BRIDGE_NAME,
-        "-F",
-        &format!("{},{}", TEST_SUBNET_DHCP_FIRST, TEST_SUBNET_DHCP_LAST),
+        &format!("--interface={BRIDGE_NAME}"),
+        // IPv4
+        &format!(
+            "--dhcp-range={},{}",
+            TEST_SUBNET_IPV4_DHCP.start(),
+            TEST_SUBNET_IPV4_DHCP.end(),
+        ),
+        // IPv6
+        &format!(
+            "--dhcp-range={prefix},slaac,{prefix_len}",
+            prefix = TEST_SUBNET_IPV6.ip(),
+            prefix_len = TEST_SUBNET_IPV6.prefix()
+        ),
         "--no-hosts",
         "--keep-in-foreground",
         "--log-facility=-",
@@ -314,11 +347,9 @@ where
 }
 
 pub async fn run_nft(input: &str) -> Result<()> {
-    let mut cmd = Command::new("nft");
-    cmd.args(["-f", "-"]);
-
-    cmd.stdin(Stdio::piped());
-
+    let nft = "/usr/sbin/nft";
+    let mut cmd = Command::new(nft);
+    cmd.args(["-f", "-"]).stdin(Stdio::piped());
     let mut child = cmd.spawn().map_err(Error::NftStart)?;
     let mut stdin = child.stdin.take().unwrap();
 
@@ -337,11 +368,15 @@ pub async fn run_nft(input: &str) -> Result<()> {
 }
 
 async fn enable_forwarding() -> Result<()> {
-    let mut cmd = Command::new("sysctl");
-    cmd.arg("net.ipv4.ip_forward=1");
-    let output = cmd.output().await.map_err(Error::SysctlStart)?;
-    if !output.status.success() {
-        return Err(Error::SysctlFailed(output.status.code().unwrap()));
-    }
+    let sysctl = "/usr/sbin/sysctl";
+    let run = async |cmd: &mut Command| {
+        let exit_status = cmd.output().await.map_err(Error::SysctlStart)?.status;
+        match exit_status.success() {
+            true => Ok(()),
+            false => Err(Error::SysctlFailed(exit_status.code().unwrap())),
+        }
+    };
+    run(Command::new(sysctl).arg("net.ipv4.ip_forward=1")).await?;
+    run(Command::new(sysctl).arg("net.ipv6.conf.all.forwarding=1")).await?;
     Ok(())
 }

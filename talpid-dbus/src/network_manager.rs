@@ -3,7 +3,7 @@ use super::systemd_resolved;
 pub use dbus::arg::{RefArg, Variant};
 use dbus::{
     arg,
-    blocking::{stdintf::org_freedesktop_dbus::Properties, Proxy, SyncConnection},
+    blocking::{Proxy, SyncConnection, stdintf::org_freedesktop_dbus::Properties},
     message::MatchRule,
 };
 use std::{
@@ -13,8 +13,8 @@ use std::{
     net::IpAddr,
     path::Path,
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -70,7 +70,7 @@ pub enum Error {
     MatchDBusTypeError(#[from] dbus::arg::TypeMismatchError),
 
     #[error(
-        "NM is configured to manage DNS via systemd-resolved but systemd-resolved is not managing /etc/resolv.conf: {0}",
+        "NM is configured to manage DNS via systemd-resolved but systemd-resolved is not managing /etc/resolv.conf: {0}"
     )]
     SystemdResolvedNotManagingResolvconf(systemd_resolved::Error),
 
@@ -428,7 +428,9 @@ impl NetworkManager {
         };
 
         if !verify_etc_resolv_conf_contents() {
-            log::debug!("/etc/resolv.conf differs from reference resolv.conf, therefore NM is not managing DNS");
+            log::debug!(
+                "/etc/resolv.conf differs from reference resolv.conf, therefore NM is not managing DNS"
+            );
             return Err(Error::NetworkManagerNotManagingDns);
         }
 
@@ -527,9 +529,9 @@ impl NetworkManager {
         for (top_key, map) in settings.iter() {
             let mut inner_dict = HashMap::<String, Variant<Box<dyn RefArg>>>::new();
             for (key, variant) in map.iter() {
-                inner_dict.insert(key.to_string(), Variant(variant.0.box_clone()));
+                inner_dict.insert(key.clone(), Variant(variant.0.box_clone()));
             }
-            settings_backup.insert(top_key.to_string(), inner_dict);
+            settings_backup.insert(top_key.clone(), inner_dict);
         }
 
         // Update the DNS config
@@ -558,10 +560,10 @@ impl NetworkManager {
             Self::update_dns_config(&mut settings, "ipv6", v6_dns);
         }
 
-        if let Some(wg_config) = settings.get_mut("wireguard") {
-            if !wg_config.contains_key("fwmark") {
-                log::error!("WireGuard config doesn't contain the firewall mark");
-            }
+        if let Some(wg_config) = settings.get_mut("wireguard")
+            && !wg_config.contains_key("fwmark")
+        {
+            log::error!("WireGuard config doesn't contain the firewall mark");
         }
 
         self.reapply_settings(&device_path, settings, version_id)?;

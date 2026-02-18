@@ -3,15 +3,16 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 31/05/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadLogging
-import UserNotifications
+import MullvadTypes
+@preconcurrency import UserNotifications
 
 final class NotificationManager: NotificationProviderDelegate {
-    private lazy var logger = Logger(label: "NotificationManager")
+    private let logger = Logger(label: "NotificationManager")
     private var _notificationProviders: [NotificationProvider] = []
     private var inAppNotificationDescriptors: [InAppNotificationDescriptor] = []
 
@@ -30,7 +31,7 @@ final class NotificationManager: NotificationProviderDelegate {
                 newNotificationProvider.delegate = self
             }
 
-            _notificationProviders = newNotificationProviders
+            _notificationProviders = newNotificationProviders.sorted { $0.priority > $1.priority }
         }
     }
 
@@ -48,7 +49,7 @@ final class NotificationManager: NotificationProviderDelegate {
         }
     }
 
-    static let shared = NotificationManager()
+    nonisolated(unsafe) static let shared = NotificationManager()
 
     private init() {}
 
@@ -91,14 +92,15 @@ final class NotificationManager: NotificationProviderDelegate {
             withIdentifiers: deliveredRequestIdentifiersToRemove
         )
 
-        requestNotificationPermissions { granted in
-            guard granted else { return }
-
+        let logger = self.logger
+        Task {
+            let isAllowed = await UNUserNotificationCenter.isAllowed
+            guard isAllowed else { return }
             for newRequest in newSystemNotificationRequests {
-                notificationCenter.add(newRequest) { error in
-                    guard let error else { return }
-
-                    self.logger.error(
+                do {
+                    try await notificationCenter.add(newRequest)
+                } catch {
+                    logger.error(
                         error: error,
                         message: "Failed to add notification request with identifier \(newRequest.identifier)."
                     )
@@ -117,55 +119,21 @@ final class NotificationManager: NotificationProviderDelegate {
     func handleSystemNotificationResponse(_ response: UNNotificationResponse) {
         dispatchPrecondition(condition: .onQueue(.main))
 
-        guard let sourceProvider = notificationProviders.first(where: { notificationProvider in
-            guard let notificationProvider = notificationProvider as? SystemNotificationProvider else { return false }
-
-            return response.notification.request.identifier == notificationProvider.identifier.domainIdentifier
-        }) else {
+        let requestIdentifier = response.notification.request.identifier.split(separator: ".").last
+        guard let sourceProvider = NotificationProviderIdentifier(rawValue: String(requestIdentifier ?? "")) else {
             logger.warning(
-                "Received response with request identifier: \(response.notification.request.identifier) that didn't map to any notification provider"
+                "Received response with request identifier: \(requestIdentifier ?? "-") that didn't map to any notification provider"
             )
             return
         }
 
         let notificationResponse = NotificationResponse(
-            providerIdentifier: sourceProvider.identifier,
+            providerIdentifier: sourceProvider,
             actionIdentifier: response.actionIdentifier,
             systemResponse: response
         )
 
         delegate?.notificationManager(self, didReceiveResponse: notificationResponse)
-    }
-
-    // MARK: - Private
-
-    private func requestNotificationPermissions(completion: @escaping (Bool) -> Void) {
-        let authorizationOptions: UNAuthorizationOptions = [.alert, .sound, .provisional]
-        let userNotificationCenter = UNUserNotificationCenter.current()
-
-        userNotificationCenter.getNotificationSettings { notificationSettings in
-            switch notificationSettings.authorizationStatus {
-            case .notDetermined:
-                userNotificationCenter.requestAuthorization(options: authorizationOptions) { granted, error in
-                    if let error {
-                        self.logger.error(
-                            error: error,
-                            message: "Failed to obtain user notifications authorization"
-                        )
-                    }
-                    completion(granted)
-                }
-
-            case .authorized, .provisional:
-                completion(true)
-
-            case .denied, .ephemeral:
-                fallthrough
-
-            @unknown default:
-                completion(false)
-            }
-        }
     }
 
     // MARK: - NotificationProviderDelegate
@@ -179,29 +147,28 @@ final class NotificationManager: NotificationProviderDelegate {
 
             if notificationProvider.shouldRemovePendingRequests {
                 notificationCenter.removePendingNotificationRequests(withIdentifiers: [
-                    notificationProvider.identifier.domainIdentifier,
+                    notificationProvider.identifier.domainIdentifier
                 ])
             }
 
             if notificationProvider.shouldRemoveDeliveredRequests {
                 notificationCenter.removeDeliveredNotifications(withIdentifiers: [
-                    notificationProvider.identifier.domainIdentifier,
+                    notificationProvider.identifier.domainIdentifier
                 ])
             }
 
+            let logger = self.logger
             if let request = notificationProvider.notificationRequest {
-                requestNotificationPermissions { granted in
-                    guard granted else { return }
-
-                    notificationCenter.add(request) { error in
-                        if let error {
-                            self.logger.error(
-                                """
-                                Failed to add notification request with identifier \
-                                \(request.identifier). Error: \(error.localizedDescription)
-                                """
-                            )
-                        }
+                Task { @MainActor in
+                    guard await UNUserNotificationCenter.isAllowed else { return }
+                    do {
+                        try await notificationCenter.add(request)
+                    } catch {
+                        logger.error(
+                            """
+                            Failed to add notification request with identifier \
+                            \(request.identifier). Error: \(error.description)
+                            """)
                     }
                 }
             }
@@ -215,7 +182,8 @@ final class NotificationManager: NotificationProviderDelegate {
             var newNotificationDescriptors = inAppNotificationDescriptors
 
             if let replaceNotificationDescriptor = notificationProvider.notificationDescriptor {
-                newNotificationDescriptors = notificationProviders
+                newNotificationDescriptors =
+                    notificationProviders
                     .compactMap { notificationProvider -> InAppNotificationDescriptor? in
                         if replaceNotificationDescriptor.identifier == notificationProvider.identifier {
                             return replaceNotificationDescriptor

@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-09.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import XCTest
@@ -18,6 +18,7 @@ class AccountTests: LoggedOutUITestCase {
     func testCreateAccount() throws {
         LoginPage(app)
             .tapCreateAccountButton()
+            .tryConfirmAccountCreation()
 
         // Verify welcome page is shown and get account number from it
         let accountNumber = WelcomePage(app).getAccountNumber()
@@ -25,13 +26,41 @@ class AccountTests: LoggedOutUITestCase {
         mullvadAPIWrapper.deleteAccount(accountNumber)
     }
 
-    func testDeleteAccount() throws {
-        let accountNumber = createTemporaryAccountWithoutTime()
+    func testCreateAccountWithLastUsedAccount() throws {
+        // Setup
+        let temporaryAccountNumber = createTemporaryAccountWithoutTime()
+
+        // Teardown
+        addTeardownBlock {
+            self.mullvadAPIWrapper.deleteAccount(temporaryAccountNumber)
+        }
 
         LoginPage(app)
             .tapAccountNumberTextField()
-            .enterText(accountNumber)
+            .enterText(temporaryAccountNumber)
             .tapAccountNumberSubmitButton()
+
+        OutOfTimePage(app)
+
+        HeaderBar(app)
+            .tapAccountButton()
+
+        AccountPage(app)
+            .tapLogOutButton()
+
+        LoginPage(app)
+            .tapCreateAccountButton()
+            .confirmAccountCreation()
+
+        // Verify welcome page is shown and get account number from it
+        let accountNumber = WelcomePage(app).getAccountNumber()
+
+        self.mullvadAPIWrapper.deleteAccount(accountNumber)
+    }
+
+    func testDeleteAccount() throws {
+        let accountNumber = createTemporaryAccountWithoutTime()
+        login(accountNumber: accountNumber)
 
         OutOfTimePage(app)
 
@@ -42,6 +71,7 @@ class AccountTests: LoggedOutUITestCase {
             .tapDeleteAccountButton()
 
         AccountDeletionPage(app)
+            .tapTextField()
             .enterText(String(accountNumber.suffix(4)))
             .tapDeleteAccountButton()
 
@@ -53,6 +83,68 @@ class AccountTests: LoggedOutUITestCase {
             .verifyFailIconShown()
     }
 
+    func testCanNotRemoveCurrentDevice() throws {
+        // Setup
+        let temporaryAccountNumber = createTemporaryAccountWithoutTime()
+
+        // Teardown
+        addTeardownBlock {
+            self.mullvadAPIWrapper.deleteAccount(temporaryAccountNumber)
+        }
+
+        login(accountNumber: temporaryAccountNumber)
+
+        OutOfTimePage(app)
+
+        HeaderBar(app)
+            .tapAccountButton()
+
+        AccountPage(app)
+            .tapDeviceManagementButton()
+
+        DeviceManagementPage(app)
+            .verifyCurrentDeviceExists()
+            .verifyCurrentDeviceCannotBeRemoved()
+    }
+
+    func testRemoveOtherDevice() throws {
+        let otherDevicesCount = 2
+        // Setup
+        let temporaryAccountNumber = createTemporaryAccountWithoutTime()
+        mullvadAPIWrapper.addDevices(otherDevicesCount, account: temporaryAccountNumber)
+
+        // Teardown
+        addTeardownBlock {
+            self.mullvadAPIWrapper.deleteAccount(temporaryAccountNumber)
+        }
+
+        LoginPage(app)
+            .tapAccountNumberTextField()
+            .enterText(temporaryAccountNumber)
+            .tapAccountNumberSubmitButton()
+
+        OutOfTimePage(app)
+
+        HeaderBar(app)
+            .tapAccountButton()
+
+        AccountPage(app)
+            .tapDeviceManagementButton()
+
+        DeviceManagementPage(app)
+            .waitForDeviceList()
+            .verifyRemovableDeviceCount(otherDevicesCount)
+            .tapRemoveDeviceButton(cellIndex: 1)
+
+        DeviceManagementLogOutDeviceConfirmationAlert(app)
+            .tapYesLogOutDeviceButton()
+
+        DeviceManagementPage(app)
+            .waitForDeviceList()
+            .waitForNoLoading()
+            .verifyRemovableDeviceCount(otherDevicesCount - 1)
+    }
+
     /// Verify logging in works. Will retry x number of times since login request sometimes time out.
     func testLogin() throws {
         let hasTimeAccountNumber = getAccountWithTime()
@@ -61,21 +153,7 @@ class AccountTests: LoggedOutUITestCase {
             self.deleteTemporaryAccountWithTime(accountNumber: hasTimeAccountNumber)
         }
 
-        var successIconShown = false
-        var retryCount = 0
-        let maxRetryCount = 3
-
-        let loginPage = LoginPage(app)
-            .tapAccountNumberTextField()
-            .enterText(hasTimeAccountNumber)
-
-        repeat {
-            successIconShown = loginPage
-                .tapAccountNumberSubmitButton()
-                .getSuccessIconShown()
-
-            retryCount += 1
-        } while successIconShown == false && retryCount < maxRetryCount
+        login(accountNumber: hasTimeAccountNumber)
 
         HeaderBar(app)
             .verifyDeviceLabelShown()
@@ -87,7 +165,7 @@ class AccountTests: LoggedOutUITestCase {
             .enterText("0000000000000000")
             .tapAccountNumberSubmitButton()
             .verifyFailIconShown()
-            .waitForPageToBeShown() // Verify still on login page
+            .waitForPageToBeShown()  // Verify still on login page
     }
 
     func testLoginToAccountWithTooManyDevices() throws {
@@ -106,12 +184,15 @@ class AccountTests: LoggedOutUITestCase {
             .tapAccountNumberSubmitButton()
 
         DeviceManagementPage(app)
-            .tapRemoveDeviceButton(cellIndex: 0)
+            .waitForDeviceList()
+            .tapRemoveDeviceButton(cellIndex: 1)
 
         DeviceManagementLogOutDeviceConfirmationAlert(app)
             .tapYesLogOutDeviceButton()
 
         DeviceManagementPage(app)
+            .waitForDeviceList()
+            .waitForNoLoading()
             .tapContinueWithLoginButton()
 
         // First taken back to login page and automatically being logged in
@@ -135,7 +216,6 @@ class AccountTests: LoggedOutUITestCase {
 
         AccountPage(app)
             .tapLogOutButton()
-            .waitForLogoutSpinnerToDisappear()
 
         LoginPage(app)
 

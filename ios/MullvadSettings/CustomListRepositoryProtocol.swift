@@ -3,12 +3,13 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2024-01-25.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import Foundation
 import MullvadTypes
+
 public protocol CustomListRepositoryProtocol {
     /// Save a custom list. If the list doesn't already exist, it must have a unique name.
     /// - Parameter list: a custom list.

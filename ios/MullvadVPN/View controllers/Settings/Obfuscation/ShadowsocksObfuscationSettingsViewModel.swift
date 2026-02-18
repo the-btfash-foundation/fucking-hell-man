@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Andrew Bulhak on 2024-11-07.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -30,7 +30,8 @@ class MockShadowsocksObfuscationSettingsViewModel: ShadowsocksObfuscationSetting
 class TunnelShadowsocksObfuscationSettingsViewModel: TunnelObfuscationSettingsWatchingObservableObject<
     WireGuardObfuscationShadowsocksPort
 >,
-    ShadowsocksObfuscationSettingsViewModel {
+ShadowsocksObfuscationSettingsViewModel
+{
     init(tunnelManager: TunnelManager) {
         super.init(
             tunnelManager: tunnelManager,

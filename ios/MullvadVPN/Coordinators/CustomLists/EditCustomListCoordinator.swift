@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-02-15.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -12,10 +12,6 @@ import Routing
 import UIKit
 
 class EditCustomListCoordinator: Coordinator, Presentable, Presenting {
-    enum FinishAction {
-        case save, delete
-    }
-
     let navigationController: UINavigationController
     let customListInteractor: CustomListInteractorProtocol
     let customList: CustomList
@@ -29,7 +25,7 @@ class EditCustomListCoordinator: Coordinator, Presentable, Presenting {
         navigationController
     }
 
-    var didFinish: ((EditCustomListCoordinator, FinishAction, CustomList) -> Void)?
+    var didFinish: ((EditCustomListCoordinator, CustomList) -> Void)?
     var didCancel: ((EditCustomListCoordinator) -> Void)?
 
     init(
@@ -42,12 +38,13 @@ class EditCustomListCoordinator: Coordinator, Presentable, Presenting {
         self.customListInteractor = customListInteractor
         self.customList = customList
         self.nodes = nodes
-        self.subject = CurrentValueSubject(CustomListViewModel(
-            id: customList.id,
-            name: customList.name,
-            locations: customList.locations,
-            tableSections: [.name, .editLocations, .deleteList]
-        ))
+        self.subject = CurrentValueSubject(
+            CustomListViewModel(
+                id: customList.id,
+                name: customList.name,
+                locations: customList.locations,
+                tableSections: [.name, .editLocations, .deleteList]
+            ))
     }
 
     func start() {
@@ -58,12 +55,7 @@ class EditCustomListCoordinator: Coordinator, Presentable, Presenting {
         )
         controller.delegate = self
 
-        controller.navigationItem.title = NSLocalizedString(
-            "CUSTOM_LIST_NAVIGATION_TITLE",
-            tableName: "CustomLists",
-            value: subject.value.name,
-            comment: ""
-        )
+        controller.navigationItem.title = subject.value.name
 
         navigationController.interactivePopGestureRecognizer?.delegate = self
         navigationController.pushViewController(controller, animated: true)
@@ -97,12 +89,7 @@ class EditCustomListCoordinator: Coordinator, Presentable, Presenting {
 
     private func presentUnsavedChangesDialog() {
         let message = NSMutableAttributedString(
-            markdownString: NSLocalizedString(
-                "CUSTOM_LISTS_UNSAVED_CHANGES_PROMPT",
-                tableName: "CustomLists",
-                value: "You have unsaved changes.",
-                comment: ""
-            ),
+            markdownString: NSLocalizedString("You have unsaved changes.", comment: ""),
             options: MarkdownStylingOptions(font: .preferredFont(forTextStyle: .body))
         )
 
@@ -112,24 +99,14 @@ class EditCustomListCoordinator: Coordinator, Presentable, Presenting {
             attributedMessage: message,
             buttons: [
                 AlertAction(
-                    title: NSLocalizedString(
-                        "CUSTOM_LISTS_DISCARD_CHANGES_BUTTON",
-                        tableName: "CustomLists",
-                        value: "Discard changes",
-                        comment: ""
-                    ),
+                    title: NSLocalizedString("Discard changes", comment: ""),
                     style: .destructive,
                     handler: {
                         self.didCancel?(self)
                     }
                 ),
                 AlertAction(
-                    title: NSLocalizedString(
-                        "CUSTOM_LISTS_BACK_TO_EDITING_BUTTON",
-                        tableName: "CustomLists",
-                        value: "Back to editing",
-                        comment: ""
-                    ),
+                    title: NSLocalizedString("Cancel", comment: ""),
                     style: .default
                 ),
             ]
@@ -139,13 +116,13 @@ class EditCustomListCoordinator: Coordinator, Presentable, Presenting {
     }
 }
 
-extension EditCustomListCoordinator: CustomListViewControllerDelegate {
+extension EditCustomListCoordinator: @preconcurrency CustomListViewControllerDelegate {
     func customListDidSave(_ list: CustomList) {
-        didFinish?(self, .save, list)
+        didFinish?(self, list)
     }
 
     func customListDidDelete(_ list: CustomList) {
-        didFinish?(self, .delete, list)
+        didFinish?(self, list)
     }
 
     func showLocations(_ list: CustomList) {
@@ -156,7 +133,9 @@ extension EditCustomListCoordinator: CustomListViewControllerDelegate {
         )
 
         coordinator.didFinish = { locationsCoordinator in
-            locationsCoordinator.removeFromParent()
+            Task { @MainActor in
+                locationsCoordinator.removeFromParent()
+            }
         }
 
         coordinator.start()

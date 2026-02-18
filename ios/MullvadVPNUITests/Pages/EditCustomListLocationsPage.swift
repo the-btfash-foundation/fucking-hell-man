@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Marco Nikic on 2024-04-19.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import XCTest
@@ -51,7 +51,7 @@ class EditCustomListLocationsPage: Page {
     }
 
     @discardableResult func tapBackButton() -> Self {
-        app.navigationBars["Edit locations"].buttons.firstMatch.tap()
+        app.navigationBars["Locations"].buttons.firstMatch.tap()
         return self
     }
 }

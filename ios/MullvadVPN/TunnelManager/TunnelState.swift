@@ -3,21 +3,34 @@
 //  TunnelState
 //
 //  Created by pronebird on 11/08/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadREST
 import MullvadTypes
 import PacketTunnelCore
-import WireGuardKitTypes
+@preconcurrency import WireGuardKitTypes
 
-/// A struct describing the tunnel status.
-struct TunnelStatus: Equatable, CustomStringConvertible {
-    /// Tunnel status returned by tunnel process.
+/// Describes the tunnel status.
+///
+/// The `state` property is reflected in the main view of the app, and typically shows
+/// whether the VPN is connected, connecting, or disconnected.
+/// On top of that, a banner might be shown in cases `state` is either `waitingForConnectivity` or `error`
+///
+/// The `observedState` contains metadata about the PacketTunnel, and can be used to infer various details such as
+/// - A reason why the app would enter the blocked state
+/// - Whether networking is available from within the `PacketTunnel` process
+/// - How many times a reconnection was attempted
+/// - Which protocol layer is used by the `PacketTunnel` (TCP, UDP etc...)
+///
+/// And so on, this is a non-exhaustive list.
+struct TunnelStatus: Equatable, CustomStringConvertible, Sendable {
+    /// Reflects the `PacketTunnel`'s internal state.
     var observedState: ObservedState = .disconnected
 
-    /// Tunnel state.
+    /// Internal state used by the UI Process to manage transitions and UI updates.
+    /// Directly affects the UI, what user actions are available.
     var state: TunnelState = .disconnected
 
     var description: String {
@@ -38,7 +51,7 @@ struct TunnelStatus: Equatable, CustomStringConvertible {
 }
 
 /// An enum that describes the tunnel state.
-enum TunnelState: Equatable, CustomStringConvertible {
+enum TunnelState: Equatable, CustomStringConvertible, Sendable {
     enum WaitingForConnectionReason {
         /// Tunnel connection is down.
         case noConnection
@@ -126,24 +139,62 @@ enum TunnelState: Equatable, CustomStringConvertible {
     var isSecured: Bool {
         switch self {
         case .reconnecting, .connecting, .connected, .waitingForConnectivity(.noConnection), .error(.accountExpired),
-             .error(.deviceRevoked), .negotiatingEphemeralPeer:
+            .error(.deviceRevoked), .error(.offline), .negotiatingEphemeralPeer:
             true
         case .pendingReconnect, .disconnecting, .disconnected, .waitingForConnectivity(.noNetwork), .error:
             false
         }
     }
 
+    var isBlockingInternet: Bool {
+        switch self {
+        case .connected, .disconnected:
+            false
+        default:
+            true
+        }
+    }
+
     var relays: SelectedRelays? {
         switch self {
         case let .connected(relays, _, _),
-             let .reconnecting(relays, _, _),
-             let .negotiatingEphemeralPeer(relays, _, _, _):
+            let .reconnecting(relays, _, _),
+            let .negotiatingEphemeralPeer(relays, _, _, _):
             relays
         case let .connecting(relays, _, _):
             relays
         case .disconnecting, .disconnected, .waitingForConnectivity, .pendingReconnect, .error:
             nil
         }
+    }
+
+    // the two accessors below return a Bool?, to differentiate known
+    // truth values from undefined/meaningless values, which the caller
+    // may want to interpret differently
+    var isPostQuantum: Bool? {
+        switch self {
+        case let .connecting(_, isPostQuantum: isPostQuantum, isDaita: _),
+            let .connected(_, isPostQuantum: isPostQuantum, isDaita: _),
+            let .reconnecting(_, isPostQuantum: isPostQuantum, isDaita: _):
+            isPostQuantum
+        default:
+            nil
+        }
+    }
+
+    var isDaita: Bool? {
+        switch self {
+        case let .connecting(_, isPostQuantum: _, isDaita: isDaita),
+            let .connected(_, isPostQuantum: _, isDaita: isDaita),
+            let .reconnecting(_, isPostQuantum: _, isDaita: isDaita):
+            isDaita
+        default:
+            nil
+        }
+    }
+
+    var isMultihop: Bool {
+        relays?.entry != nil
     }
 }
 

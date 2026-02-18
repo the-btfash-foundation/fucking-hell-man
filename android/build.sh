@@ -5,12 +5,6 @@ set -eu
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
-echo "Computing build version..."
-echo ""
-PRODUCT_VERSION=$(cargo run -q --bin mullvad-version versionName)
-echo "Building Mullvad VPN $PRODUCT_VERSION for Android"
-echo ""
-
 GRADLE_BUILD_TYPE="release"
 GRADLE_TASKS=(createOssProdReleaseDistApk createPlayProdReleaseDistApk)
 BUILD_BUNDLE="no"
@@ -36,7 +30,16 @@ while [ -n "${1:-""}" ]; do
     shift 1
 done
 
+function assert_clean_working_directory {
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Dirty working directory! Will not accept that for an official release."
+        exit 1
+    fi
+}
+
 if [[ "$GRADLE_BUILD_TYPE" == "release" ]]; then
+    assert_clean_working_directory
+
     if [ ! -f "$SCRIPT_DIR/credentials/keystore.properties" ]; then
         echo "ERROR: No keystore.properties file found" >&2
         echo "       Please configure the signing keys as described in the README" >&2
@@ -44,15 +47,34 @@ if [[ "$GRADLE_BUILD_TYPE" == "release" ]]; then
     fi
 fi
 
+echo "Computing build version..."
+echo ""
+PRODUCT_VERSION=$(cargo run -q --bin mullvad-version versionName)
+echo "Building Mullvad VPN $PRODUCT_VERSION for Android"
+echo ""
+
 if [[ "$GRADLE_BUILD_TYPE" == "release" ]]; then
-    if [[ "$PRODUCT_VERSION" == *"-dev-"* ]]; then
-        GRADLE_TASKS+=(createPlayDevmoleReleaseDistApk createPlayStagemoleReleaseDistApk)
-        BUNDLE_TASKS+=(createPlayDevmoleReleaseDistBundle createPlayStagemoleReleaseDistBundle)
-    elif [[ "$PRODUCT_VERSION" == *"-alpha"* ]]; then
-        echo "Removing old Rust build artifacts"
-        GRADLE_TASKS+=(createPlayStagemoleReleaseDistApk)
-        BUNDLE_TASKS+=(createPlayStagemoleReleaseDistBundle)
-        PLAY_PUBLISH_TASKS=(publishPlayStagemoleReleaseBundle)
+    if [[ "$PRODUCT_VERSION" == *"-alpha"* || "$PRODUCT_VERSION" == *"-dev-"* ]]; then
+        GRADLE_TASKS+=(
+            createPlayDevmoleReleaseDistApk
+            createPlayStagemoleReleaseDistApk
+        )
+        BUNDLE_TASKS+=(
+            createPlayDevmoleReleaseDistBundle
+            createPlayStagemoleReleaseDistBundle
+        )
+    fi
+
+    if [[ "$PRODUCT_VERSION" != *"-dev-"* ]]; then
+        PLAY_PUBLISH_TASKS+=(
+            publishPlayProdReleaseBundle
+        )
+        if [[ "$PRODUCT_VERSION" == *"-alpha"* ]]; then
+            PLAY_PUBLISH_TASKS+=(
+                publishPlayDevmoleReleaseBundle
+                publishPlayStagemoleReleaseBundle
+            )
+        fi
     fi
 fi
 
@@ -76,6 +98,14 @@ if [[ "$BUILD_BUNDLE" == "yes" ]]; then
     $GRADLE_CMD --console plain "${BUNDLE_TASKS[@]}"
 fi
 
+# When building releases, we check that the working directory is clean before building,
+# further up. Now verify that this is still true. The build process should never make the
+# working directory dirty.
+# This could for example happen if lockfiles are outdated, and the build process updates them.
+if [[ "$GRADLE_BUILD_TYPE" == "release" ]]; then
+    assert_clean_working_directory
+fi
+
 if [[ "$RUN_PLAY_PUBLISH_TASKS" == "yes" && "${#PLAY_PUBLISH_TASKS[@]}" -ne 0 ]]; then
     $GRADLE_CMD --console plain "${PLAY_PUBLISH_TASKS[@]}"
 fi
@@ -86,5 +116,8 @@ echo " The build finished successfully! "
 echo " You have built:"
 echo ""
 echo " $PRODUCT_VERSION"
+echo ""
+echo " Build checksums:"
+sha256sum ../dist/MullvadVPN-"$PRODUCT_VERSION"* | sed 's/^/ /'
 echo ""
 echo "**********************************"

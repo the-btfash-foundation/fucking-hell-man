@@ -20,7 +20,7 @@ pub enum Error {
     Send(#[source] routing_socket::Error),
     /// Received unexpected response to route message
     #[error("Unexpected message type")]
-    UnexpectedMessageType(RouteSocketMessage, MessageType),
+    UnexpectedMessageType(Box<RouteSocketMessage>, MessageType),
     /// Route not found
     #[error("Route not found")]
     RouteNotFound,
@@ -32,7 +32,7 @@ pub enum Error {
     Deletion(RouteMessage),
 }
 
-/// Provides an interface for manipulating the routing table on macOS using a PF_ROUTE socket.
+/// Provides an interface for PF_ROUTE sockets
 pub struct RoutingTable {
     socket: routing_socket::RoutingSocket,
 }
@@ -47,12 +47,13 @@ pub enum AddResult {
 }
 
 impl RoutingTable {
+    /// New routing table interface
     pub fn new() -> Result<Self> {
         let socket = routing_socket::RoutingSocket::new().map_err(Error::RoutingSocket)?;
-
         Ok(Self { socket })
     }
 
+    /// Receive the next message from the routing socket
     pub async fn next_message(&mut self) -> Result<RouteSocketMessage> {
         let mut buf = [0u8; 2048];
 
@@ -72,16 +73,19 @@ impl RoutingTable {
         data::RouteSocketMessage::parse_message(msg_buf).map_err(Error::InvalidMessage)
     }
 
+    /// Add route to the routing table
     pub async fn add_route(&mut self, message: &RouteMessage) -> Result<AddResult> {
-        if let Ok(destination) = message.destination_ip() {
-            if Some(destination.ip()) == message.gateway_ip() {
-                // Workaround that allows us to reach a wg peer on our router.
-                // If we don't do this, adding the route fails due to errno 49
-                // ("Can't assign requested address").
-                log::warn!("Ignoring route because the destination equals its gateway");
-                return Ok(AddResult::AlreadyExists);
-            }
+        if let Ok(Some(destination)) = message.destination_ip()
+            && Some(destination.ip()) == message.gateway_ip()
+        {
+            // Workaround that allows us to reach a wg peer on our router.
+            // If we don't do this, adding the route fails due to errno 49
+            // ("Can't assign requested address").
+            log::warn!("Ignoring route because the destination equals its gateway");
+            return Ok(AddResult::AlreadyExists);
         }
+
+        log::trace!("Add route: {message:?}");
 
         let msg = self
             .alter_routing_table(message, MessageType::RTM_ADD)
@@ -97,7 +101,7 @@ impl RoutingTable {
             Ok(anything_else) => {
                 log::error!("Unexpected route message: {anything_else:?}");
                 Err(Error::UnexpectedMessageType(
-                    anything_else,
+                    Box::new(anything_else),
                     MessageType::RTM_ADD,
                 ))
             }
@@ -130,7 +134,10 @@ impl RoutingTable {
         }
     }
 
+    /// Delete route from the routing table
     pub async fn delete_route(&mut self, message: &RouteMessage) -> Result<()> {
+        log::trace!("Delete route: {message:?}");
+
         let response = self
             .alter_routing_table(message, MessageType::RTM_DELETE)
             .await?;
@@ -141,12 +148,13 @@ impl RoutingTable {
                 Err(Error::Deletion(route))
             }
             anything_else => Err(Error::UnexpectedMessageType(
-                anything_else,
+                Box::new(anything_else),
                 MessageType::RTM_DELETE,
             )),
         }
     }
 
+    /// Get route from the routing table
     pub async fn get_route(
         &mut self,
         message: &RouteMessage,
@@ -159,10 +167,10 @@ impl RoutingTable {
         let response = match response {
             Ok(response) => response,
             Err(routing_socket::Error::Write(err)) => {
-                if let Some(err) = err.raw_os_error() {
-                    if [libc::ENETUNREACH, libc::ESRCH].contains(&err) {
-                        return Ok(None);
-                    }
+                if let Some(err) = err.raw_os_error()
+                    && [libc::ENETUNREACH, libc::ESRCH].contains(&err)
+                {
+                    return Ok(None);
                 }
                 return Err(Error::RoutingSocket(routing_socket::Error::Write(err)));
             }
@@ -174,7 +182,7 @@ impl RoutingTable {
         match data::RouteSocketMessage::parse_message(&response).map_err(Error::InvalidMessage)? {
             data::RouteSocketMessage::GetRoute(route) => Ok(Some(route)),
             unexpected_route_message => Err(Error::UnexpectedMessageType(
-                unexpected_route_message,
+                Box::new(unexpected_route_message),
                 MessageType::RTM_GET,
             )),
         }

@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-12-20.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -46,7 +46,7 @@ class LinkButton: CustomButton {
         for state: UIControl.State
     ) -> NSAttributedString {
         var attributes: [NSAttributedString.Key: Any] = [
-            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
         ]
 
         if let titleColor = state.customButtonTitleColor {

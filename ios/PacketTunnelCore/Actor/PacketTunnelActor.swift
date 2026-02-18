@@ -3,11 +3,11 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 30/06/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
-import MullvadLogging
+@preconcurrency import MullvadLogging
 import MullvadREST
 import MullvadRustRuntime
 import MullvadSettings
@@ -42,12 +42,13 @@ public actor PacketTunnelActor {
 
     let timings: PacketTunnelActorTimings
     let tunnelAdapter: TunnelAdapterProtocol
-    nonisolated let tunnelMonitor: TunnelMonitorProtocol
+    let tunnelMonitor: TunnelMonitorProtocol
     let defaultPathObserver: DefaultPathObserverProtocol
     let blockedStateErrorMapper: BlockedStateErrorMapperProtocol
     public let relaySelector: RelaySelectorProtocol
     let settingsReader: SettingsReaderProtocol
     let protocolObfuscator: ProtocolObfuscation
+    var lastAppliedTunnelSettings: TunnelInterfaceSettings?
 
     nonisolated let eventChannel = EventChannel()
 
@@ -70,6 +71,7 @@ public actor PacketTunnelActor {
         self.settingsReader = settingsReader
         self.protocolObfuscator = protocolObfuscator
 
+        Task { await setTunnelMonitorEventHandler() }
         consumeEvents(channel: eventChannel)
     }
 
@@ -77,80 +79,133 @@ public actor PacketTunnelActor {
         eventChannel.finish()
     }
 
+    public func isErrorState() async -> Bool {
+        if case .error = self.state {
+            return true
+        }
+        return false
+    }
+
     /**
      Spawn a detached task that consumes events from the channel indefinitely until the channel is closed.
      Events are processed one at a time, so no suspensions should affect the order of execution and thus guarantee transactional execution.
-
+    
      - Parameter channel: event channel.
      */
     private nonisolated func consumeEvents(channel: EventChannel) {
         Task.detached { [weak self] in
             for await event in channel {
                 guard let self else { return }
-
-                self.logger.debug("Received event: \(event.logFormat())")
-
-                let effects = await self.runReducer(event)
-
-                for effect in effects {
-                    await executeEffect(effect)
-                }
+                await self.handleEvent(event)
             }
         }
     }
 
-    // swiftlint:disable:next function_body_length
+    private func handleEvent(_ event: Event) async {
+        self.logger.debug("Received event: \(event.logFormat())")
+
+        let effects = self.runReducer(event)
+
+        for effect in effects {
+            await executeEffect(effect)
+        }
+    }
+
     func executeEffect(_ effect: Effect) async {
         switch effect {
-        case .startDefaultPathObserver:
-            startDefaultPathObserver()
-        case .stopDefaultPathObserver:
-            stopDefaultPathObserver()
-        case .startTunnelMonitor:
-            setTunnelMonitorEventHandler()
         case .stopTunnelMonitor:
             tunnelMonitor.stop()
         case let .updateTunnelMonitorPath(networkPath):
-            handleDefaultPathChange(networkPath)
+            await handleDefaultPathChange(networkPath)
         case let .startConnection(nextRelays):
-            do {
-                try await tryStart(nextRelays: nextRelays)
-            } catch {
-                logger.error(error: error, message: "Failed to start the tunnel.")
-                await setErrorStateInternal(with: error)
-            }
+            await handleStartConnection(nextRelays: nextRelays)
         case let .restartConnection(nextRelays, reason):
-            do {
-                try await tryStart(nextRelays: nextRelays, reason: reason)
-            } catch {
-                logger.error(error: error, message: "Failed to reconnect the tunnel.")
-                await setErrorStateInternal(with: error)
-            }
+            await handleRestartConnection(nextRelays: nextRelays, reason: reason)
         case let .reconnect(nextRelay):
             eventChannel.send(.reconnect(nextRelay))
         case .stopTunnelAdapter:
-            do {
-                try await tunnelAdapter.stop()
-            } catch {
-                logger.error(error: error, message: "Failed to stop adapter.")
-            }
-            state = .disconnected
+            await handleStopTunnelAdapter()
         case let .configureForErrorState(reason):
             await setErrorStateInternal(with: reason)
         case let .cacheActiveKey(lastKeyRotation):
             cacheActiveKey(lastKeyRotation: lastKeyRotation)
         case let .reconfigureForEphemeralPeer(configuration, configurationSemaphore):
-            do {
-                try await updateEphemeralPeerNegotiationState(configuration: configuration)
-            } catch {
-                logger.error(error: error, message: "Failed to reconfigure tunnel after each hop negotiation.")
-                await setErrorStateInternal(with: error)
-            }
-            configurationSemaphore.send()
+            await handleReconfigureForEphemeralPeer(configuration: configuration, semaphore: configurationSemaphore)
         case .connectWithEphemeralPeer:
             await connectWithEphemeralPeer()
         case .setDisconnectedState:
             self.state = .disconnected
+        }
+    }
+
+    private func handleStartConnection(nextRelays: NextRelays) async {
+        do {
+            try await tryStart(nextRelays: nextRelays)
+        } catch {
+            logger.error(error: error, message: "Failed to start the tunnel.")
+            await setErrorStateInternal(with: error)
+        }
+    }
+
+    private func handleRestartConnection(nextRelays: NextRelays, reason: ActorReconnectReason) async {
+        do {
+            try await tryStart(nextRelays: nextRelays, reason: reason)
+        } catch {
+            logger.error(error: error, message: "Failed to reconnect the tunnel.")
+            await setErrorStateInternal(with: error)
+        }
+    }
+
+    private func handleStopTunnelAdapter() async {
+        do {
+            try await tunnelAdapter.stop()
+        } catch {
+            logger.error(error: error, message: "Failed to stop adapter.")
+        }
+        state = .disconnected
+    }
+
+    private func handleReconfigureForEphemeralPeer(
+        configuration: EphemeralPeerNegotiationState,
+        semaphore: OneshotChannel
+    ) async {
+        do {
+            try await updateEphemeralPeerNegotiationState(configuration: configuration)
+        } catch {
+            logger.error(
+                error: error,
+                message: "Failed to reconfigure tunnel after ephemeral peer negotiation. Entering error state.")
+            // Log the specific error type for debugging
+            await setErrorStateInternal(with: error)
+        }
+        semaphore.send()
+    }
+
+    private func handleDefaultPathChange(_ networkPath: Network.NWPath.Status) async {
+        guard self.state != .initial else {
+            return
+        }
+        tunnelMonitor.handleNetworkPathUpdate(networkPath)
+
+        let newReachability = networkPath.networkReachability
+
+        if case .reachable = newReachability,
+            case let .error(
+                errorState
+            ) = state,
+            errorState.reason
+                .recoverableError()
+        {
+            await handleRestartConnection(
+                nextRelays: .random,
+                reason: .restoredConnectivity
+            )
+            return
+        }
+
+        // If network is unreachable, enter error state.
+        if case .unreachable = newReachability {
+            await setErrorStateInternal(with: .offline)
         }
     }
 }
@@ -160,21 +215,15 @@ public actor PacketTunnelActor {
 extension PacketTunnelActor {
     /**
      Start the tunnel.
-
+    
      Can only be called once, all subsequent attempts are ignored. Use `reconnect()` if you wish to change relay.
-
+    
      - Parameter options: start options produced by packet tunnel
      */
     private func start(options: StartOptions) async {
         guard case .initial = state else { return }
 
         logger.debug("\(options.logFormat())")
-
-        // Start observing default network path to determine network reachability.
-        startDefaultPathObserver()
-
-        // Assign a closure receiving tunnel monitor events.
-        setTunnelMonitorEventHandler()
 
         do {
             try await tryStart(nextRelays: options.selectedRelays.map { .preSelected($0) } ?? .random)
@@ -189,7 +238,7 @@ extension PacketTunnelActor {
     private func stop() async {
         switch state {
         case let .connected(connState), let .connecting(connState), let .reconnecting(connState),
-             let .negotiatingEphemeralPeer(connState, _):
+            let .negotiatingEphemeralPeer(connState, _):
             state = .disconnecting(connState)
             tunnelMonitor.stop()
 
@@ -197,8 +246,6 @@ extension PacketTunnelActor {
             fallthrough
 
         case .error:
-            stopDefaultPathObserver()
-
             do {
                 try await tunnelAdapter.stop()
             } catch {
@@ -215,42 +262,8 @@ extension PacketTunnelActor {
     }
 
     /**
-     Reconnect tunnel to new relays. Enters error state on failure.
-
-     - Parameters:
-     - nextRelay: next relays to connect to
-     - reason: reason for reconnect
-     */
-    private func reconnect(to nextRelays: NextRelays, reason: ActorReconnectReason) async {
-        do {
-            switch state {
-            // There is no connection monitoring going on when exchanging keys.
-            // The procedure starts from scratch for each reconnection attempts.
-            case .connecting, .connected, .reconnecting, .error, .negotiatingEphemeralPeer:
-                switch reason {
-                case .connectionLoss:
-                    // Tunnel monitor is already paused at this point. Avoid calling stop() to prevent the reset of
-                    // internal state
-                    break
-                case .userInitiated:
-                    tunnelMonitor.stop()
-                }
-
-                try await tryStart(nextRelays: nextRelays, reason: reason)
-
-            case .disconnected, .disconnecting, .initial:
-                break
-            }
-        } catch {
-            logger.error(error: error, message: "Failed to reconnect the tunnel.")
-
-            await setErrorStateInternal(with: error)
-        }
-    }
-
-    /**
      Entry point for attempting to start the tunnel by performing the following steps:
-
+    
      - Read settings
      - Start either a direct connection or the post-quantum key negotiation process, depending on settings.
      */
@@ -258,7 +271,15 @@ extension PacketTunnelActor {
         nextRelays: NextRelays,
         reason: ActorReconnectReason = .userInitiated
     ) async throws {
+        if case let .error(blockedState) = self.state,
+            blockedState.reason == .offline && reason != .restoredConnectivity
+        {
+            logger.debug("Ignore reconnection due to being offline")
+            return
+        }
+
         let settings: Settings = try settingsReader.read()
+        try await self.applyNetworkSettingsIfNeeded(settings: settings)
 
         if settings.quantumResistance.isEnabled || settings.daita.daitaState.isEnabled {
             try await tryStartEphemeralPeerNegotiation(withSettings: settings, nextRelays: nextRelays, reason: reason)
@@ -267,16 +288,24 @@ extension PacketTunnelActor {
         }
     }
 
+    private func applyNetworkSettingsIfNeeded(settings: Settings) async throws {
+        let tunnelSettings = settings.interfaceSettings()
+        if self.lastAppliedTunnelSettings != tunnelSettings {
+            try await tunnelAdapter.apply(settings: tunnelSettings)
+            self.lastAppliedTunnelSettings = tunnelSettings
+        }
+    }
+
     /**
      Attempt to start a direct (non-quantum) connection to the tunnel by performing the following steps:
-
+    
      - Determine target state, it can either be `.connecting` or `.reconnecting`. (See `TargetStateForReconnect`)
      - Bail if target state cannot be determined. That means that the actor is past the point when it could logically connect or reconnect, i.e it can already be in
      `.disconnecting` state.
      - Configure tunnel adapter.
      - Start tunnel monitor.
      - Reactivate default path observation (disabled when configuring tunnel adapter)
-
+    
      - Parameters:
      - nextRelays: which relays should be selected next.
      - reason: reason for reconnect
@@ -287,30 +316,21 @@ extension PacketTunnelActor {
         reason: ActorReconnectReason
     ) async throws {
         guard let connectionState = try obfuscateConnection(nextRelays: nextRelays, settings: settings, reason: reason),
-              let targetState = state.targetStateForReconnect else { return }
+            let targetState = state.targetStateForReconnect
+        else { return }
         let configuration = try ConnectionConfigurationBuilder(
             type: .normal,
             settings: settings,
             connectionData: connectionState
         ).make()
 
-        /*
-         Stop default path observer while updating WireGuard configuration since it will call the system method
-         `NEPacketTunnelProvider.setTunnelNetworkSettings()` which may cause active interfaces to go down making it look
-         like network connectivity is not available, but only for a brief moment.
-         */
-        stopDefaultPathObserver()
-
-        defer {
-            // Restart default path observer and notify the observer with the current path that might have changed while
-            // path observer was paused.
-            startDefaultPathObserver(notifyObserverWithCurrentPath: true)
-        }
+        let entryConfiguration = configuration.entryConfiguration
+        let exitConfiguration = configuration.exitConfiguration
 
         // Daita parameters are gotten from an ephemeral peer
         try await tunnelAdapter.startMultihop(
-            entryConfiguration: configuration.entryConfiguration,
-            exitConfiguration: configuration.exitConfiguration,
+            entryConfiguration: entryConfiguration,
+            exitConfiguration: exitConfiguration,
             daita: nil
         )
 
@@ -327,22 +347,21 @@ extension PacketTunnelActor {
 
     /**
      Derive `ConnectionState` from current `state` updating it with new relays and settings.
-
+    
      - Parameters:
      - nextRelays: relay preference that should be used when selecting next relays.
      - settings: current settings
      - reason: reason for reconnect
-
+    
      - Returns: New connection state or `nil` if current state is at or past `.disconnecting` phase.
      */
-    // swiftlint:disable:next function_body_length
     internal func makeConnectionState(
         nextRelays: NextRelays,
         settings: Settings,
         reason: ActorReconnectReason
     ) throws -> State.ConnectionData? {
         var keyPolicy: State.KeyPolicy = .useCurrent
-        var networkReachability = defaultPathObserver.defaultPath?.networkReachability ?? .undetermined
+        var networkReachability = defaultPathObserver.currentPathStatus.networkReachability
         var lastKeyRotation: Date?
 
         let callRelaySelector = { [self] maybeCurrentRelays, connectionCount in
@@ -369,7 +388,7 @@ extension PacketTunnelActor {
             connectionState.selectedRelays = selectedRelays
             connectionState.relayConstraints = settings.relayConstraints
             connectionState.connectedEndpoint = connectedRelay.endpoint
-            connectionState.remotePort = connectedRelay.endpoint.ipv4Relay.port
+            connectionState.remotePort = connectedRelay.endpoint.socketAddress.port
 
             return connectionState
         case var .connecting(connectionState), var .reconnecting(connectionState):
@@ -387,7 +406,7 @@ extension PacketTunnelActor {
             connectionState.relayConstraints = settings.relayConstraints
             connectionState.currentKey = settings.privateKey
             connectionState.connectedEndpoint = connectedRelay.endpoint
-            connectionState.remotePort = connectedRelay.endpoint.ipv4Relay.port
+            connectionState.remotePort = connectedRelay.endpoint.socketAddress.port
             return connectionState
         case let .error(blockedState):
             keyPolicy = blockedState.keyPolicy
@@ -407,7 +426,7 @@ extension PacketTunnelActor {
                 lastKeyRotation: lastKeyRotation,
                 connectedEndpoint: connectedRelay.endpoint,
                 transportLayer: .udp,
-                remotePort: connectedRelay.endpoint.ipv4Relay.port,
+                remotePort: connectedRelay.endpoint.socketAddress.port,
                 isPostQuantum: settings.quantumResistance.isEnabled,
                 isDaitaEnabled: settings.daita.daitaState.isEnabled
             )
@@ -433,11 +452,7 @@ extension PacketTunnelActor {
         guard let connectionState = try makeConnectionState(nextRelays: nextRelays, settings: settings, reason: reason)
         else { return nil }
 
-        let obfuscatedEndpoint = protocolObfuscator.obfuscate(
-            connectionState.connectedEndpoint,
-            settings: settings.tunnelSettings,
-            retryAttempts: connectionState.selectedRelays.retryAttempt
-        )
+        let obfuscated = protocolObfuscator.obfuscate(connectionState.connectedEndpoint)
         let transportLayer = protocolObfuscator.transportLayer.map { $0 } ?? .udp
 
         return State.ConnectionData(
@@ -448,7 +463,7 @@ extension PacketTunnelActor {
             networkReachability: connectionState.networkReachability,
             connectionAttemptCount: connectionState.connectionAttemptCount,
             lastKeyRotation: connectionState.lastKeyRotation,
-            connectedEndpoint: obfuscatedEndpoint,
+            connectedEndpoint: obfuscated.endpoint,
             transportLayer: transportLayer,
             remotePort: protocolObfuscator.remotePort,
             isPostQuantum: settings.quantumResistance.isEnabled,
@@ -458,13 +473,13 @@ extension PacketTunnelActor {
 
     /**
      Select next relay to connect to based on `NextRelays` and other input parameters.
-
+    
      - Parameters:
      - nextRelays: next relays to connect to.
      - relayConstraints: relay constraints.
      - currentRelays: currently selected relays.
      - connectionAttemptCount: number of failed connection attempts so far.
-
+    
      - Returns: selector result that contains the credentials of the next relays that the tunnel should connect to.
      */
     private func selectRelays(
@@ -496,5 +511,3 @@ extension PacketTunnelActor {
 }
 
 extension PacketTunnelActor: PacketTunnelActorProtocol {}
-
-// swiftlint:disable:this file_length

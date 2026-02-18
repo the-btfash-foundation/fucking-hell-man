@@ -1,8 +1,8 @@
 use clap::Parser;
 use mullvad_api::ApiEndpoint;
-use mullvad_problem_report::{collect_report, Error};
+use mullvad_problem_report::{Error, ProblemReportCollector, WriteSource};
 use std::{
-    env,
+    env, io,
     path::{Path, PathBuf},
     process,
 };
@@ -30,7 +30,7 @@ enum Cli {
     Collect {
         /// The destination path for saving the collected report
         #[arg(required = true, long, short = 'o')]
-        output: PathBuf,
+        output: String,
         /// Paths to additional log files to be included
         extra_logs: Vec<PathBuf>,
         /// List of strings to remove from the report
@@ -53,7 +53,7 @@ enum Cli {
 }
 
 fn run() -> Result<(), Error> {
-    env_logger::init();
+    tracing_subscriber::fmt::init();
 
     match Cli::parse() {
         Cli::Collect {
@@ -61,12 +61,21 @@ fn run() -> Result<(), Error> {
             extra_logs,
             redact,
         } => {
-            collect_report(&extra_logs, &output, redact)?;
+            let collector = ProblemReportCollector {
+                extra_logs,
+                redact_custom_strings: redact,
+            };
+            if output != "-" {
+                collector.write_to_path(&output)?;
 
-            println!("Problem report written to {}", output.display());
-            println!();
-            println!("Send the problem report to support via the send subcommand. See:");
-            println!(" $ {} send --help", env::args().next().unwrap());
+                println!("Problem report written to {output}");
+                println!();
+                println!("Send the problem report to support via the send subcommand. See:");
+                println!(" $ {} send --help", env::args().next().unwrap());
+            } else {
+                // Write logs to stdout
+                collector.write(WriteSource::from((io::stdout(), "stdout".to_owned())))?;
+            }
         }
         Cli::Send {
             report,
@@ -76,6 +85,7 @@ fn run() -> Result<(), Error> {
             send_problem_report(
                 &email.unwrap_or_default(),
                 &message.unwrap_or_default(),
+                None,
                 &report,
             )?;
         }
@@ -87,12 +97,14 @@ fn run() -> Result<(), Error> {
 fn send_problem_report(
     user_email: &str,
     user_message: &str,
+    account_token: Option<&str>,
     report_path: &Path,
 ) -> Result<(), Error> {
     let cache_dir = mullvad_paths::get_cache_dir().map_err(Error::ObtainCacheDirectory)?;
     mullvad_problem_report::send_problem_report(
         user_email,
         user_message,
+        account_token,
         report_path,
         &cache_dir,
         ApiEndpoint::from_env_vars(),

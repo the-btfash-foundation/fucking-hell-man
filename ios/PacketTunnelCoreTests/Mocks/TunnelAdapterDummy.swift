@@ -3,15 +3,18 @@
 //  PacketTunnelCoreTests
 //
 //  Created by pronebird on 05/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import PacketTunnelCore
+
 @testable import WireGuardKitTypes
 
 /// Dummy tunnel adapter that does nothing and reports no errors.
-class TunnelAdapterDummy: TunnelAdapterProtocol {
+class TunnelAdapterDummy: TunnelAdapterProtocol, @unchecked Sendable {
+    func apply(settings: PacketTunnelCore.TunnelInterfaceSettings) async throws {}
+
     func startMultihop(
         entryConfiguration: TunnelAdapterConfiguration?,
         exitConfiguration: TunnelAdapterConfiguration,

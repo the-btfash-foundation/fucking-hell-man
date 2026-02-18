@@ -71,6 +71,7 @@ typedef struct tag_WinFwAllowedTunnelTraffic
 }
 WinFwAllowedTunnelTraffic;
 
+
 ///////////////////////////////////////////////////////////////////////////////
 // Functions
 ///////////////////////////////////////////////////////////////////////////////
@@ -127,6 +128,10 @@ enum WINFW_CLEANUP_POLICY : uint32_t
 
 	// Remove all objects that have been registered with WFP.
 	WINFW_CLEANUP_POLICY_RESET_FIREWALL = 1,
+
+	// Continue blocking if this is the active policy.
+	// Adds ephemeral blocking filters that are active until WinFw is shut down (??)
+	WINFW_CLEANUP_POLICY_BLOCK_UNTIL_REBOOT = 2,
 };
 
 //
@@ -154,8 +159,14 @@ enum WINFW_POLICY_STATUS
 //
 // Apply restrictions in the firewall that block all traffic, except:
 // - What is specified by settings
-// - Communication with the relay server
+// - Communication with the relay server(s)
 // - Specified in-tunnel traffic, except DNS.
+//
+// Parameters:
+//
+// exitEndpointIp:
+//   IP address of the exit relay, if it differs from `relay`. Otherwise, this should be set to
+//   `nullptr`.
 //
 extern "C"
 WINFW_LINKAGE
@@ -163,7 +174,9 @@ WINFW_POLICY_STATUS
 WINFW_API
 WinFw_ApplyPolicyConnecting(
 	const WinFwSettings *settings,
-	const WinFwEndpoint *relay,
+	size_t numRelays,
+	const WinFwEndpoint *relays,
+	const wchar_t *exitEndpointIp,
 	const wchar_t **relayClient,
 	size_t relayClientLen,
 	const wchar_t *tunnelInterfaceAlias,
@@ -176,7 +189,7 @@ WinFw_ApplyPolicyConnecting(
 //
 // Apply restrictions in the firewall that block all traffic, except:
 // - What is specified by settings
-// - Communication with the relay server
+// - Communication with the relay server(s)
 // - Non-DNS traffic inside the VPN tunnel
 // - DNS requests inside the VPN tunnel to any server in 'tunnelDnsServers'
 // - DNS requests outside the VPN tunnel to any server in 'nonTunnelDnsServers'
@@ -186,13 +199,19 @@ WinFw_ApplyPolicyConnecting(
 // tunnelInterfaceAlias:
 //	 Friendly name of VPN tunnel interface
 //
+// exitEndpointIp:
+//   IP address of the exit relay, if it differs from `relay`. Otherwise, this should be set to
+//   `nullptr`.
+//
 extern "C"
 WINFW_LINKAGE
 WINFW_POLICY_STATUS
 WINFW_API
 WinFw_ApplyPolicyConnected(
 	const WinFwSettings *settings,
-	const WinFwEndpoint *relay,
+	size_t numRelays,
+	const WinFwEndpoint *relays,
+	const wchar_t *exitEndpointIp,
 	const wchar_t **relayClient,
 	size_t relayClientLen,
 	const wchar_t *tunnelInterfaceAlias,

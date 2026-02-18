@@ -3,23 +3,29 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2024-06-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
+import MullvadMockData
+import XCTest
 
 @testable import MullvadREST
 @testable import MullvadSettings
 @testable import MullvadTypes
-import XCTest
 
 class RelayPickingTests: XCTestCase {
     let sampleRelays = ServerRelaysResponseStubs.sampleRelays
-    var obfuscation: ObfuscatorPortSelection!
+    var obfuscation: RelayObfuscation!
 
     override func setUpWithError() throws {
-        obfuscation = try ObfuscatorPortSelector(relays: sampleRelays)
-            .obfuscate(tunnelSettings: LatestTunnelSettings(), connectionAttemptCount: 0)
+        // Default obfuscation settings to satisfy picker constructors for the tests below.
+        obfuscation = RelayObfuscator(
+            relays: sampleRelays,
+            tunnelSettings: LatestTunnelSettings(),
+            connectionAttemptCount: 0,
+            obfuscationBypass: IdentityObfuscationProvider()
+        ).obfuscate()
     }
 
     // MARK: Single-/multihop
@@ -30,11 +36,13 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+
         let picker = SinglehopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings()
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         let selectedRelays = try picker.pick()
@@ -49,11 +57,13 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+
         let picker = MultihopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings()
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         let selectedRelays = try picker.pick()
@@ -68,11 +78,13 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+
         let picker = MultihopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings()
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         XCTAssertThrowsError(
@@ -92,16 +104,20 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+        settings.daita = DAITASettings(daitaState: .on)
+
         let picker = SinglehopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings(daitaState: .on, directOnlyState: .off)
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         let selectedRelays = try picker.pick()
 
-        XCTAssertEqual(selectedRelays.entry?.hostname, "es1-wireguard") // Madrid relay is closest to exit relay.
+        // One of the five DAITA relays in Madrid is the closest.
+        XCTAssertEqual(selectedRelays.entry?.location.cityCode, "mad")
         XCTAssertEqual(selectedRelays.exit.hostname, "se10-wireguard")
     }
 
@@ -112,11 +128,14 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+        settings.daita = DAITASettings(daitaState: .on, directOnlyState: .on)
+
         let picker = SinglehopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings(daitaState: .on, directOnlyState: .on)
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         XCTAssertThrowsError(try picker.pick())
@@ -129,11 +148,14 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("es", "mad", "es1-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+        settings.daita = DAITASettings(daitaState: .on)
+
         let picker = SinglehopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings(daitaState: .on, directOnlyState: .off)
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         let selectedRelays = try picker.pick()
@@ -149,11 +171,14 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("es", "mad", "es1-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+        settings.daita = DAITASettings(daitaState: .on, directOnlyState: .on)
+
         let picker = SinglehopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings(daitaState: .on, directOnlyState: .on)
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         let selectedRelays = try picker.pick()
@@ -171,16 +196,20 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+        settings.daita = DAITASettings(daitaState: .on)
+
         let picker = MultihopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings(daitaState: .on, directOnlyState: .off)
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         let selectedRelays = try picker.pick()
 
-        XCTAssertEqual(selectedRelays.entry?.hostname, "es1-wireguard") // Madrid relay is closest to exit relay.
+        // One of the five DAITA relays in Madrid is the closest.
+        XCTAssertEqual(selectedRelays.entry?.location.cityCode, "mad")
         XCTAssertEqual(selectedRelays.exit.hostname, "se10-wireguard")
     }
 
@@ -193,16 +222,20 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+        settings.daita = DAITASettings(daitaState: .on)
+
         let picker = MultihopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings(daitaState: .on, directOnlyState: .off)
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         let selectedRelays = try picker.pick()
 
-        XCTAssertEqual(selectedRelays.entry?.hostname, "es1-wireguard") // Madrid relay is closest to exit relay.
+        // One of the five DAITA relays in Madrid is the closest.
+        XCTAssertEqual(selectedRelays.entry?.location.cityCode, "mad")
         XCTAssertEqual(selectedRelays.exit.hostname, "se10-wireguard")
     }
 
@@ -214,98 +247,87 @@ class RelayPickingTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+        settings.daita = DAITASettings(daitaState: .on, directOnlyState: .on)
+
         let picker = MultihopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings(daitaState: .on, directOnlyState: .on)
+            tunnelSettings: settings,
+            connectionAttemptCount: 0
         )
 
         XCTAssertThrowsError(try picker.pick())
     }
 
-    // MARK: Obfuscation
-
-    func testObfuscationForSinglehop() throws {
-        let constraints = RelayConstraints(entryLocations: .any, exitLocations: .any, port: .only(5000))
-        let tunnelSettings = LatestTunnelSettings(
-            wireGuardObfuscation: WireGuardObfuscationSettings(
-                state: .udpOverTcp,
-                udpOverTcpPort: .port80
-            )
-        )
-
-        obfuscation = try ObfuscatorPortSelector(relays: sampleRelays)
-            .obfuscate(tunnelSettings: tunnelSettings, connectionAttemptCount: 0)
-
-        let picker = SinglehopPicker(
-            obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings()
-        )
-
-        let selectedRelays = try picker.pick()
-
-        XCTAssertNil(selectedRelays.entry)
-        XCTAssertEqual(selectedRelays.exit.endpoint.ipv4Relay.port, 80)
-    }
-
-    // If DAITA is on, the selected relay has DAITA and shadowsocks obfuscation yields no compatible relays,
-    // we should make sure that .noObfuscatedRelaysFound is thrown rather than triggering smart routing.
-    func testIncompatibleShadowsocksObfuscationNotTriggeringMultihop() throws {
+    // DAITA - ON, Direct only - ON, Entry supports DAITA - TRUE, Entry does not support QUIC
+    // Shadowsocks obfuscation should be picked instead of QUIC since entry does not support it
+    func testMultihopCannotPickAutomaticallyInvalidObfuscation() throws {
         let constraints = RelayConstraints(
-            entryLocations: .any,
-            exitLocations: .only(UserSelectedRelays(locations: [.country("us")])),
-            port: .only(5000)
-        )
-        let tunnelSettings = LatestTunnelSettings(
-            wireGuardObfuscation: WireGuardObfuscationSettings(
-                state: .shadowsocks,
-                shadowsocksPort: .custom(1)
-            )
+            entryLocations: .only(UserSelectedRelays(locations: [.hostname("us", "dal", "us-dal-wg-001")])),
+            exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "got", "se10-wireguard")]))
         )
 
-        obfuscation = try ObfuscatorPortSelector(relays: sampleRelays)
-            .obfuscate(tunnelSettings: tunnelSettings, connectionAttemptCount: 0)
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+        settings.daita = DAITASettings(daitaState: .on, directOnlyState: .on)
 
-        let picker = SinglehopPicker(
-            obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings(daitaState: .on)
-        )
+        // Mimic the obfuscator ran by the relay selector wrapper prior to invoking the `MultihopPicker`
+        obfuscation = RelayObfuscator(
+            relays: sampleRelays,
+            tunnelSettings: LatestTunnelSettings(),
+            connectionAttemptCount: 2,
+            obfuscationBypass: IdentityObfuscationProvider()
+        ).obfuscate()
 
-        do {
-            _ = try picker.pick()
-            XCTFail("Should have thrown error due to incompatible shadowsocks obfuscation")
-        } catch let error as NoRelaysSatisfyingConstraintsError {
-            XCTAssertEqual(error.reason, .noObfuscatedRelaysFound)
-        }
-    }
+        // It will already have pre-filtered relays to select obfuscation via QUIC because it's the 2nd connection attempt
+        XCTAssertEqual(obfuscation.method, .quic)
 
-    func testObfuscationForMultihop() throws {
-        let constraints = RelayConstraints(entryLocations: .any, exitLocations: .any, port: .only(5000))
-        let tunnelSettings = LatestTunnelSettings(
-            wireGuardObfuscation: WireGuardObfuscationSettings(
-                state: .udpOverTcp,
-                udpOverTcpPort: .port80
-            )
-        )
-
-        obfuscation = try ObfuscatorPortSelector(relays: sampleRelays)
-            .obfuscate(tunnelSettings: tunnelSettings, connectionAttemptCount: 0)
-
+        // The `MultihopPicker` will re-roll an obfuscator to find out that QUIC is not supported for the selected entry
+        // It will then fallback to picking shadowsocks obfuscation instead
         let picker = MultihopPicker(
             obfuscation: obfuscation,
-            constraints: constraints,
-            connectionAttemptCount: 0,
-            daitaSettings: DAITASettings()
+            tunnelSettings: settings,
+            connectionAttemptCount: 2
         )
 
         let selectedRelays = try picker.pick()
 
-        XCTAssertEqual(selectedRelays.entry?.endpoint.ipv4Relay.port, 80)
-        XCTAssertEqual(selectedRelays.exit.endpoint.ipv4Relay.port, 5000)
+        XCTAssertEqual(selectedRelays.obfuscation, .udpOverTcp)
+        XCTAssertEqual(selectedRelays.entry?.hostname, "us-dal-wg-001")
+        XCTAssertEqual(selectedRelays.exit.hostname, "se10-wireguard")
+    }
+
+    // DAITA - OFF, Entry does not support QUIC
+    // Shadowsocks obfuscation should be picked instead of QUIC since entry does not support it
+    func testSinglehopCannotPickAutomaticallyInvalidObfuscation() throws {
+        let constraints = RelayConstraints(
+            exitLocations: .only(UserSelectedRelays(locations: [.hostname("us", "dal", "us-dal-wg-001")]))
+        )
+
+        var settings = LatestTunnelSettings()
+        settings.relayConstraints = constraints
+
+        // Mimic the obfuscator ran by the relay selector wrapper prior to invoking the `SinglehopPicker`
+        obfuscation = RelayObfuscator(
+            relays: sampleRelays,
+            tunnelSettings: LatestTunnelSettings(),
+            connectionAttemptCount: 2,
+            obfuscationBypass: IdentityObfuscationProvider()
+        ).obfuscate()
+
+        // It will already have pre-filtered relays to select obfuscation via QUIC because it's the 2nd connection attempt
+        XCTAssertEqual(obfuscation.method, .quic)
+
+        let picker = SinglehopPicker(
+            obfuscation: obfuscation,
+            tunnelSettings: settings,
+            connectionAttemptCount: 2
+        )
+
+        let selectedRelays = try picker.pick()
+        XCTAssertEqual(selectedRelays.obfuscation, .udpOverTcp)
+        XCTAssertEqual(selectedRelays.entry?.hostname, nil)
+        XCTAssertEqual(selectedRelays.exit.hostname, "us-dal-wg-001")
     }
 }

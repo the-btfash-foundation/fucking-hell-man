@@ -3,12 +3,14 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2023-12-13.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
-@testable import MullvadSettings
 import XCTest
+
+@testable import MullvadSettings
+@testable import MullvadTypes
 
 final class APIAccessMethodsTests: XCTestCase {
     static let store = InMemorySettingsStore<SettingNotFound>()
@@ -18,7 +20,7 @@ final class APIAccessMethodsTests: XCTestCase {
     }
 
     override static func tearDown() {
-        SettingsManager.unitTestStore = nil
+        store.reset()
     }
 
     override func tearDownWithError() throws {
@@ -123,11 +125,12 @@ extension APIAccessMethodsTests {
             id: uuid,
             name: "Method",
             isEnabled: true,
-            proxyConfiguration: .socks5(PersistentProxyConfiguration.SocksConfiguration(
-                server: .ipv4(.any),
-                port: 1,
-                authentication: .noAuthentication
-            ))
+            proxyConfiguration: .socks5(
+                PersistentProxyConfiguration.SocksConfiguration(
+                    server: .ipv4(.any),
+                    port: 1,
+                    authentication: .noAuthentication
+                ))
         )
     }
 
@@ -136,12 +139,13 @@ extension APIAccessMethodsTests {
             id: uuid,
             name: "Method",
             isEnabled: true,
-            proxyConfiguration: .shadowsocks(PersistentProxyConfiguration.ShadowsocksConfiguration(
-                server: .ipv4(.any),
-                port: 1,
-                password: "Password",
-                cipher: .default
-            ))
+            proxyConfiguration: .shadowsocks(
+                PersistentProxyConfiguration.ShadowsocksConfiguration(
+                    server: .ipv4(.any),
+                    port: 1,
+                    password: "Password",
+                    cipher: .default
+                ))
         )
     }
 }

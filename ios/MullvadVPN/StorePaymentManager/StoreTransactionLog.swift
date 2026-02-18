@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 26/10/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -12,9 +12,9 @@ import MullvadLogging
 /// Transaction log responsible for storing and querying processed transactions.
 ///
 /// This class is thread safe.
-final class StoreTransactionLog {
+final class StoreTransactionLog: @unchecked Sendable {
     private let logger = Logger(label: "StoreTransactionLog")
-    private var transactionIdentifiers: Set<String> = []
+    private(set) var transactionIdentifiers: Set<String> = []
     private let stateLock = NSLock()
 
     /// The location of the transaction log file on disk.
@@ -24,7 +24,6 @@ final class StoreTransactionLog {
     static var defaultFileURL: URL {
         let directories = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         let location = directories.first?.appendingPathComponent("transaction.log", isDirectory: false)
-        // swiftlint:disable:next force_unwrapping
         return location!
     }
 
@@ -63,6 +62,13 @@ final class StoreTransactionLog {
 
             transactionIdentifiers.insert(transactionIdentifier)
             persist()
+        }
+    }
+
+    /// Get transaction identifiers from transaction log.
+    func getTransactionIdentifiers() -> Set<String> {
+        stateLock.withLock {
+            transactionIdentifiers
         }
     }
 

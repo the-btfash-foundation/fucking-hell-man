@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 17/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -20,14 +20,10 @@ enum EditAccessMethodSectionIdentifier: Hashable {
     var sectionFooter: String? {
         switch self {
         case .testMethod:
-            NSLocalizedString(
-                "TEST_METHOD_FOOTER",
-                tableName: "APIAccess",
-                value: "Performs a connection test to a Mullvad API server via this access method.",
-                comment: ""
-            )
-
-        case .enableMethod, .methodSettings, .cancelTest, .testingStatus, .deleteMethod:
+            NSLocalizedString("Performs a connection test to a Mullvad API server via this access method.", comment: "")
+        case .enableMethod:
+            NSLocalizedString("At least one method needs to be enabled.", comment: "")
+        case .methodSettings, .cancelTest, .testingStatus, .deleteMethod:
             nil
         }
     }

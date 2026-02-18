@@ -3,19 +3,28 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 19/10/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
 import UIKit
 
 final class SettingsDataSource: UITableViewDiffableDataSource<SettingsDataSource.Section, SettingsDataSource.Item>,
-    UITableViewDelegate {
-    enum CellReuseIdentifiers: String, CaseIterable {
+    UITableViewDelegate
+{
+    enum CellReuseIdentifier: String, CaseIterable {
         case basic
+        case changelog
 
         var reusableViewClass: AnyClass {
             SettingsCell.self
+        }
+
+        var cellStyle: UITableViewCell.CellStyle {
+            switch self {
+            case .basic: .default
+            case .changelog: .subtitle
+            }
         }
     }
 
@@ -37,39 +46,53 @@ final class SettingsDataSource: UITableViewDiffableDataSource<SettingsDataSource
         case vpnSettings
         case apiAccess
         case version
+        case misc
+        case general
         case problemReport
     }
 
     enum Item: String {
         case vpnSettings
-        case version
+        case changelog
         case problemReport
         case faq
         case apiAccess
         case daita
         case multihop
+        case language
+        case notificationSettings
+        case includeAllNetworks
 
         var accessibilityIdentifier: AccessibilityIdentifier {
             switch self {
             case .vpnSettings:
-                return .vpnSettingsCell
-            case .version:
-                return .versionCell
+                .vpnSettingsCell
+            case .changelog:
+                .versionCell
             case .problemReport:
-                return .problemReportCell
+                .problemReportCell
             case .faq:
-                return .faqCell
+                .faqCell
             case .apiAccess:
-                return .apiAccessCell
+                .apiAccessCell
             case .daita:
-                return .daitaCell
+                .daitaCell
             case .multihop:
-                return .multihopCell
+                .multihopCell
+            case .language:
+                .languageCell
+            case .notificationSettings:
+                .notificationSettingsCell
+            case .includeAllNetworks:
+                .includeAllNetworksCell
             }
         }
 
-        var reuseIdentifier: CellReuseIdentifiers {
-            .basic
+        var reuseIdentifier: CellReuseIdentifier {
+            switch self {
+            case .changelog: .changelog
+            default: .basic
+            }
         }
     }
 
@@ -91,21 +114,24 @@ final class SettingsDataSource: UITableViewDiffableDataSource<SettingsDataSource
             settingsCellFactory.makeCell(for: itemIdentifier, indexPath: indexPath)
         }
 
-        tableView.sectionFooterHeight = 0
+        tableView.tableHeaderView = UIView(
+            frame: CGRect(
+                origin: .zero,
+                size: CGSize(width: 0, height: UIMetrics.TableView.emptyHeaderHeight)
+            ))
         tableView.delegate = self
-        settingsCellFactory.delegate = self
 
         registerClasses()
         updateDataSnapshot()
 
-        interactor.didUpdateDeviceState = { [weak self] _ in
+        interactor.didUpdateSettings = { [weak self] in
             self?.updateDataSnapshot()
         }
         storedAccountData = interactor.deviceState.accountData
     }
 
-    func reload(from tunnelSettings: LatestTunnelSettings) {
-        settingsCellFactory.viewModel = SettingsViewModel(from: tunnelSettings)
+    func reload() {
+        settingsCellFactory.viewModel = SettingsViewModel(from: interactor.tunnelSettings)
 
         var snapshot = snapshot()
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
@@ -115,15 +141,11 @@ final class SettingsDataSource: UITableViewDiffableDataSource<SettingsDataSource
     // MARK: - UITableViewDelegate
 
     func tableView(_ tableView: UITableView, shouldHighlightRowAt indexPath: IndexPath) -> Bool {
-        switch itemIdentifier(for: indexPath) {
-        case .vpnSettings, .problemReport, .faq, .apiAccess, .daita, .multihop:
-            true
-        case .version, .none:
-            false
-        }
+        true
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: false)
         guard let item = itemIdentifier(for: indexPath) else { return }
         delegate?.didSelectItem(item: item)
     }
@@ -134,16 +156,69 @@ final class SettingsDataSource: UITableViewDiffableDataSource<SettingsDataSource
         )
     }
 
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        guard let section = sectionIdentifier(for: section) else { return 0 }
+
+        return switch section {
+        case .vpnSettings:
+            0
+        default:
+            UIMetrics.TableView.sectionSpacing
+        }
+    }
+
+    func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
+        guard let section = sectionIdentifier(for: section) else {
+            return nil
+        }
+
+        var footerView = tableView.dequeueReusableHeaderFooterView(
+            withIdentifier: HeaderFooterReuseIdentifier.primary.rawValue
+        )
+
+        var contentConfiguration = ListCellContentConfiguration(
+            textProperties:
+                ListCellContentConfiguration.TextProperties(
+                    font: .mullvadTiny,
+                    color: .TableSection.footerTextColor
+                ),
+            directionalLayoutMargins: NSDirectionalEdgeInsets(UIMetrics.SettingsRowView.footerLayoutMargins)
+        )
+
+        switch section {
+        case .vpnSettings:
+            contentConfiguration.text = NSLocalizedString(
+                "Forces all apps on the device to use the VPN tunnel, preventing data leaks",
+                comment: ""
+            )
+            footerView?.contentConfiguration = contentConfiguration
+        case .misc:
+            contentConfiguration.text = NSLocalizedString(
+                "Changing language will disconnect you from the VPN and restart the app",
+                comment: ""
+            )
+            footerView?.contentConfiguration = contentConfiguration
+        default:
+            footerView = nil
+        }
+
+        return footerView
+    }
+
+    func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
+        guard let section = sectionIdentifier(for: section) else { return 0 }
+
+        return switch section {
+        case .vpnSettings, .misc:
+            UITableView.automaticDimension
+        default:
+            0
+        }
+    }
+
     // MARK: - Private
 
     private func registerClasses() {
-        CellReuseIdentifiers.allCases.forEach { cellIdentifier in
-            tableView?.register(
-                cellIdentifier.reusableViewClass,
-                forCellReuseIdentifier: cellIdentifier.rawValue
-            )
-        }
-
         HeaderFooterReuseIdentifier.allCases.forEach { reuseIdentifier in
             tableView?.register(
                 reuseIdentifier.headerFooterClass,
@@ -154,29 +229,30 @@ final class SettingsDataSource: UITableViewDiffableDataSource<SettingsDataSource
 
     private func updateDataSnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-
-        if interactor.deviceState.isLoggedIn {
+        let isLoggedIn = interactor.deviceState.isLoggedIn
+        if isLoggedIn {
             snapshot.appendSections([.vpnSettings])
-            snapshot.appendItems([
-                .daita,
-                .multihop,
-                .vpnSettings,
-            ], toSection: .vpnSettings)
+            snapshot.appendItems(
+                [
+                    .daita,
+                    .multihop,
+                    .vpnSettings,
+                ], toSection: .vpnSettings)
+
+            #if DEBUG
+                snapshot.appendItems([.includeAllNetworks], toSection: .vpnSettings)
+            #endif
         }
 
         snapshot.appendSections([.apiAccess])
         snapshot.appendItems([.apiAccess], toSection: .apiAccess)
 
-        snapshot.appendSections([.version, .problemReport])
-        snapshot.appendItems([.version], toSection: .version)
-        snapshot.appendItems([.problemReport, .faq], toSection: .problemReport)
+        snapshot.appendSections([.general])
+        snapshot.appendItems([.notificationSettings, .changelog], toSection: .general)
+
+        snapshot.appendSections([.misc])
+        snapshot.appendItems([.problemReport, .faq, .language], toSection: .misc)
 
         apply(snapshot)
-    }
-}
-
-extension SettingsDataSource: SettingsCellEventHandler {
-    func showInfo(for button: SettingsInfoButtonItem) {
-        delegate?.showInfo(for: button)
     }
 }

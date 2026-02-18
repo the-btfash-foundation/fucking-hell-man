@@ -1,30 +1,27 @@
 use super::{
-    get_best_default_route, get_best_default_route::route_has_gateway, Error, InterfaceAndGateway,
-    Result,
+    Error, InterfaceAndGateway, Result, get_best_default_route,
+    get_best_default_route::route_has_gateway,
 };
 use crate::debounce::BurstGuard;
 
 use std::{
     ffi::c_void,
+    os::windows::io::RawHandle,
+    ptr,
     sync::{Arc, Mutex},
     time::Duration,
 };
 use talpid_types::win32_err;
-use windows_sys::Win32::{
-    Foundation::{BOOLEAN, HANDLE},
-    NetworkManagement::{
-        IpHelper::{
-            CancelMibChangeNotify2, ConvertInterfaceLuidToIndex, NotifyIpInterfaceChange,
-            NotifyRouteChange2, NotifyUnicastIpAddressChange, MIB_IPFORWARD_ROW2,
-            MIB_IPINTERFACE_ROW, MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW,
-        },
-        Ndis::NET_LUID_LH,
+use windows_sys::Win32::NetworkManagement::{
+    IpHelper::{
+        CancelMibChangeNotify2, ConvertInterfaceLuidToIndex, MIB_IPFORWARD_ROW2,
+        MIB_IPINTERFACE_ROW, MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW,
+        NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange,
     },
+    Ndis::NET_LUID_LH,
 };
 
 use talpid_windows::net::AddressFamily;
-
-const WIN_FALSE: BOOLEAN = 0;
 
 struct DefaultRouteMonitorContext {
     callback: Box<dyn for<'a> Fn(EventType<'a>) + Send + 'static>,
@@ -64,7 +61,7 @@ impl DefaultRouteMonitorContext {
             let route_luid = best_route.iface;
             // SAFETY: No clear safety specifications
             match win32_err!(unsafe {
-                ConvertInterfaceLuidToIndex(&route_luid, &mut default_interface_index)
+                ConvertInterfaceLuidToIndex(&raw const route_luid, &raw mut default_interface_index)
             }) {
                 Ok(()) => self.refresh_current_route = index == default_interface_index,
                 Err(_) => self.refresh_current_route = true,
@@ -128,7 +125,7 @@ impl Drop for DefaultRouteMonitor {
     }
 }
 
-struct NotifyChangeHandle(HANDLE);
+struct NotifyChangeHandle(RawHandle);
 
 /// SAFETY: NotifyChangeHandle is `Send` since it holds sole ownership of a pointer provided by C
 unsafe impl Send for NotifyChangeHandle {}
@@ -141,7 +138,7 @@ impl Drop for NotifyChangeHandle {
         if let Err(e) = win32_err!(unsafe { CancelMibChangeNotify2(self.0) }) {
             // If this callback is called after we free the context that could result in UB, in
             // order to avoid that we panic.
-            panic!("Could not cancel change notification callback: {}", e)
+            panic!("Could not cancel change notification callback: {e}")
         }
     }
 }
@@ -240,7 +237,7 @@ impl DefaultRouteMonitor {
         // we cancel the callbacks. This will leak the weak pointer but the context state itself
         // will be correctly dropped when DefaultRouteManager is dropped.
         let context_ptr = context_and_burst;
-        let mut handle_ptr = 0;
+        let mut handle_ptr = ptr::null_mut();
         // SAFETY: No clear safety specifications, context_ptr must be valid for as long as handle
         // has not been dropped.
         win32_err!(unsafe {
@@ -248,14 +245,14 @@ impl DefaultRouteMonitor {
                 family,
                 Some(route_change_callback),
                 context_ptr as *const _,
-                WIN_FALSE,
-                &mut handle_ptr,
+                false,
+                &raw mut handle_ptr,
             )
         })
         .map_err(Error::RegisterNotifyRouteCallback)?;
         let notify_route_change_handle = NotifyChangeHandle(handle_ptr);
 
-        let mut handle_ptr = 0;
+        let mut handle_ptr = ptr::null_mut();
         // SAFETY: No clear safety specifications, context_ptr must be valid for as long as handle
         // has not been dropped.
         win32_err!(unsafe {
@@ -263,14 +260,14 @@ impl DefaultRouteMonitor {
                 family,
                 Some(interface_change_callback),
                 context_ptr as *const _,
-                WIN_FALSE,
-                &mut handle_ptr,
+                false,
+                &raw mut handle_ptr,
             )
         })
         .map_err(Error::RegisterNotifyIpInterfaceCallback)?;
         let notify_interface_change_handle = NotifyChangeHandle(handle_ptr);
 
-        let mut handle_ptr = 0;
+        let mut handle_ptr = ptr::null_mut();
         // SAFETY: No clear safety specifications, context_ptr must be valid for as long as handle
         // has not been dropped.
         win32_err!(unsafe {
@@ -278,8 +275,8 @@ impl DefaultRouteMonitor {
                 family,
                 Some(ip_address_change_callback),
                 context_ptr as *const _,
-                WIN_FALSE,
-                &mut handle_ptr,
+                false,
+                &raw mut handle_ptr,
             )
         })
         .map_err(Error::RegisterNotifyUnicastIpAddressCallback)?;
@@ -302,14 +299,15 @@ unsafe extern "system" fn route_change_callback(
     _notification_type: MIB_NOTIFICATION_TYPE,
 ) {
     // SAFETY: We assume Windows provides this pointer correctly
-    let row = &*row;
+    let row = unsafe { &*row };
 
     if row.DestinationPrefix.PrefixLength != 0 || !route_has_gateway(row) {
         return;
     }
 
     // SAFETY: context must not be dropped or modified until this callback has been cancelled.
-    let context_and_burst: &ContextAndBurstGuard = &*(context as *const ContextAndBurstGuard);
+    let context_and_burst: &ContextAndBurstGuard =
+        unsafe { &*(context as *const ContextAndBurstGuard) };
     let mut context = context_and_burst.context.lock().unwrap();
 
     context.update_refresh_flag(&row.InterfaceLuid, row.InterfaceIndex);
@@ -325,10 +323,11 @@ unsafe extern "system" fn interface_change_callback(
     _notification_type: MIB_NOTIFICATION_TYPE,
 ) {
     // SAFETY: We assume Windows provides this pointer correctly
-    let row = &*row;
+    let row = unsafe { &*row };
 
     // SAFETY: context must not be dropped or modified until this callback has been cancelled.
-    let context_and_burst: &ContextAndBurstGuard = &*(context as *const ContextAndBurstGuard);
+    let context_and_burst: &ContextAndBurstGuard =
+        unsafe { &*(context as *const ContextAndBurstGuard) };
     let mut context = context_and_burst.context.lock().unwrap();
 
     context.update_refresh_flag(&row.InterfaceLuid, row.InterfaceIndex);
@@ -344,10 +343,11 @@ unsafe extern "system" fn ip_address_change_callback(
     _notification_type: MIB_NOTIFICATION_TYPE,
 ) {
     // SAFETY: We assume Windows provides this pointer correctly
-    let row = &*row;
+    let row = unsafe { &*row };
 
     // SAFETY: context must not be dropped or modified until this callback has been cancelled.
-    let context_and_burst: &ContextAndBurstGuard = &*(context as *const ContextAndBurstGuard);
+    let context_and_burst: &ContextAndBurstGuard =
+        unsafe { &*(context as *const ContextAndBurstGuard) };
     let mut context = context_and_burst.context.lock().unwrap();
 
     context.update_refresh_flag(&row.InterfaceLuid, row.InterfaceIndex);

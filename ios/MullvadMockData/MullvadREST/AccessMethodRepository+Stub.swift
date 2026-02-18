@@ -3,13 +3,14 @@
 //  MullvadRESTTests
 //
 //  Created by Mojgan on 2024-01-02.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import MullvadSettings
+import MullvadTypes
 
-public struct AccessMethodRepositoryStub: AccessMethodRepositoryDataSource {
+public struct AccessMethodRepositoryStub: AccessMethodRepositoryDataSource, @unchecked Sendable {
     public var directAccess: PersistentAccessMethod
 
     public var accessMethodsPublisher: AnyPublisher<[PersistentAccessMethod], Never> {
@@ -27,7 +28,7 @@ public struct AccessMethodRepositoryStub: AccessMethodRepositoryDataSource {
         passthroughSubject.value
     }
 
-    public func saveLastReachable(_ method: PersistentAccessMethod) {}
+    public func requestAccessMethod(_ method: PersistentAccessMethod) {}
 
     public func fetchLastReachable() -> PersistentAccessMethod {
         directAccess
@@ -35,5 +36,28 @@ public struct AccessMethodRepositoryStub: AccessMethodRepositoryDataSource {
 
     public func infoHeaderConfig(for id: UUID) -> InfoHeaderConfig? {
         nil
+    }
+
+    public static var stub: AccessMethodRepositoryStub {
+        AccessMethodRepositoryStub(accessMethods: [
+            PersistentAccessMethod(
+                id: UUID(),
+                name: "direct",
+                isEnabled: true,
+                proxyConfiguration: .direct
+            ),
+            PersistentAccessMethod(
+                id: UUID(),
+                name: "bridges",
+                isEnabled: true,
+                proxyConfiguration: .bridges
+            ),
+            PersistentAccessMethod(
+                id: UUID(),
+                name: "Encrypted DNS",
+                isEnabled: true,
+                proxyConfiguration: .encryptedDNS
+            ),
+        ])
     }
 }

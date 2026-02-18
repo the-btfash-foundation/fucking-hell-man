@@ -1,7 +1,10 @@
 # Mullvad VPN app security
 
-This document describes the security properties of the Mullvad VPN app. It describes it for all
-platforms and their differences. Individual platforms might have slightly different properties and
+This document describes the security properties of the Mullvad VPN app.
+For the security policy on this code repository, see [SECURITY.md](../SECURITY.md).
+
+This document describes the security for all platforms, and their differences.
+Individual platforms might have slightly different properties and
 allow or block network traffic a bit differently, but all such deviations are described here.
 
 This document does not describe in detail *how* we reach and uphold these properties, just what
@@ -130,10 +133,15 @@ forwarded. All other forward traffic is rejected.
 #### Mullvad API
 
 The firewall allows traffic to the API regardless of tunnel state, so the daemon is able to update
-keys, fetch account data, etc. In the [Connected] state, API traffic is only allowed inside the tunnel.
+keys, fetch account data and more. In the [Connected] state, API traffic is only allowed inside the tunnel.
 For the other states, API traffic will bypass the firewall. On Windows, only the Mullvad service and
 problem report tool are able to communicate with the API in any of the blocking states. On macOS and
 Linux all applications running as root are able to reach the API in blocking states.
+
+All API connections use TLS 1.3 with certificate pinning. The app comes bundled with the
+[Let's encrypt root certificate](../mullvad-api/le_root_cert.pem) and only accepts connections
+with servers having a valid certificate issued to `api.mullvad.net` and signed with this
+bundled certificate.
 
 ### Disconnected
 
@@ -142,7 +150,7 @@ This is the default state that the `mullvad-daemon` starts in when the device bo
 [connecting] state immediately.
 
 The disconnected state behaves very differently depending on the value of the
-"always require VPN" setting. If this setting is enabled, the disconnected state behaves
+"Lockdown mode" setting. If this setting is enabled, the disconnected state behaves
 like and has the same security properties as, the [error] state. If the setting is
 disabled (the default), then it is the only state where the app does not enforce any firewall
 rules. It then behaves the same as if the `mullvad-daemon` was not even running. It lets
@@ -161,7 +169,7 @@ been established and verified to work. Then it transitions to the [connected] st
 
 In this state, network traffic to the IP+port+protocol combination used for the first hop of the
 VPN tunnel is allowed on all interfaces, together with responses to this outgoing traffic.
-First hop means the bridge server if one is used, otherwise the VPN server directly.
+First hop means the entry server if multihop is used, otherwise the VPN server directly.
 This IP+port+protocol combination should only be allowed for the process establishing the
 VPN tunnel, or only administrator level processes, depending on what the platform firewall
 allows restricting. On Windows the rule only allows processes from binaries in certain paths. macOS
@@ -173,15 +181,12 @@ This process/user check is important to not allow unprivileged programs
 to leak packets to this IP outside the tunnel, as those packets can be fingerprinted.
 
 Examples:
-1. No bridge is used and the tunnel protocol is OpenVPN trying to connect with UDP to a VPN
-  server at IP `a.b.c.d` port `1301` - Allow traffic to `a.b.c.d:1301/UDP` for `openvpn.exe`
-  or any process running as `root`, and incoming matching traffic.
-1. Connecting to the same VPN server, but via a bridge. The bridge is at IP `e.f.g.h` and the
-  proxy service listens on TCP port `443` - Allow traffic to `e.f.g.h:443/TCP` for
-  `mullvad-daemon.exe` or any process running as `root`, and incoming matching
-  traffic. Do not allow any direct communication with the VPN server.
 1. Connecting to `a.b.c.d` port `1234` using WireGuard: Allow `a.b.c.d:1234/UDP` for
   `mullvad-daemon.exe` or any process running as `root`.
+1. Connecting to the same VPN server, but using multihop. The entry server is
+  at IP `e.f.g.h` and we are using the port `5678` - Allow traffic to `e.f.g.h:5678/UDP` for
+  `mullvad-daemon.exe` or any process running as `root`, and incoming matching
+  traffic. Do not allow any direct communication with the exit server with IP `a.b.c.d`.
 
 When using WireGuard, traffic inside the tunnel is permitted immediately after the tunnel device
 has been created. See the [connected] state for details on this.
@@ -256,10 +261,10 @@ then they can't leave at all.
 Essentially, one can say that the app's "kill switch" is the fact that the [connecting],
 [disconnecting] and [error] states prevent leaks via firewall rules.
 
-### Always require VPN
+### Lockdown mode
 
-The "always require VPN" setting in the app is regularly misunderstood as the kill switch.
-This is not the case. The "always require VPN" setting only changes whether or not the
+The "Lockdown mode" setting in the app is regularly misunderstood as the kill switch.
+This is not the case. The "Lockdown mode" setting only changes whether or not the
 [disconnected] state should allow traffic to flow freely or to block it. The
 disconnected state is not active during intermittent network issues or server changes, when
 a kill switch would normally be operating.
@@ -301,7 +306,7 @@ Locally running malicious programs are outside of the app's threat model.
 The `mullvad-daemon` transition to the [disconnected] state before exiting. To
 limit leaks during computer shutdown, it will maintain the blocking firewall
 rules upon exit in the following scenarios:
-- _Always require VPN_ is enabled
+- _Lockdown mode_ is enabled
 - A user didn't explicitly request for the `mullvad-daemon` to be shut down and
   either or both of the following are true
     - The daemon is currently in one of the blocking states ([connected],
@@ -317,7 +322,7 @@ On Windows, persistent firewall filters may be added when the service exits, in 
 decides to continue to enforce a blocking policy. These filters block any traffic occurring before
 the service has started back up again during boot, including before the BFE service has started.
 
-As with "Always require VPN", enabling "Auto-connect" in the service will cause it to
+As with "Lockdown mode", enabling "Auto-connect" in the service will cause it to
 enforce the blocking policy before being stopped.
 
 ### Linux
@@ -337,6 +342,9 @@ The GUI only communicates with the system service (`mullvad-daemon`), it makes n
 network connections. Except when the user sends a problem report, then it spawn the
 `mullvad-problem-report` tool, which in turn communicate over TLS with our API.
 
+## Mullvad VPN loader
+
+See the threat model [document](../mullvad-update/threat-model.md) for the Mullvad VPN loader.
 
 [disconnected]: #disconnected
 [connecting]: #connecting

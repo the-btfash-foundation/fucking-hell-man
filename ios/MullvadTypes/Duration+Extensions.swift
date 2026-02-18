@@ -3,7 +3,7 @@
 //  MullvadTypes
 //
 //  Created by Jon Petersson on 2023-08-18.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -12,6 +12,10 @@ import Foundation
 extension Duration {
     public var isFinite: Bool {
         return timeInterval.isFinite
+    }
+
+    public var seconds: Int64 {
+        return components.seconds
     }
 
     public var timeInterval: TimeInterval {
@@ -72,5 +76,22 @@ extension Duration {
 
     public static func > (lhs: TimeInterval, rhs: Duration) -> Bool {
         return lhs > rhs.timeInterval
+    }
+
+    public func logFormat() -> String {
+        let timeInterval = timeInterval
+
+        guard timeInterval >= 1 else {
+            return "\(milliseconds)ms"
+        }
+
+        let trailingZeroesSuffix = ".00"
+        var string = String(format: "%.2f", timeInterval)
+
+        if string.hasSuffix(trailingZeroesSuffix) {
+            string.removeLast(trailingZeroesSuffix.count)
+        }
+
+        return "\(string)s"
     }
 }

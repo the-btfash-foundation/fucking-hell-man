@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { Page } from 'playwright';
 
-import { RoutePath } from '../../../../src/renderer/lib/routes';
+import { RoutePath } from '../../../../src/shared/routes';
 import { TestUtils } from '../../utils';
 import { startInstalledApp } from '../installed-utils';
 
@@ -25,15 +25,18 @@ let util: TestUtils;
 
 test.beforeAll(async () => {
   ({ page, util } = await startInstalledApp());
+  await util.expectRoute(RoutePath.main);
 });
 
 test.afterAll(async () => {
-  await page.close();
+  await util?.closePage();
 });
 
 async function navigateToAccessMethods() {
-  await util.waitForNavigation(() => page.click('button[aria-label="Settings"]'));
-  await util.waitForNavigation(() => page.getByText('API access').click());
+  await page.click('button[aria-label="Settings"]');
+  await util.expectRoute(RoutePath.settings);
+  await page.getByText('API access').click();
+  await util.expectRoute(RoutePath.apiAccessMethods);
 
   const title = page.locator('h1');
   await expect(title).toHaveText('API access');
@@ -55,7 +58,8 @@ test('App should display access methods', async () => {
 });
 
 test('App should add invalid access method', async () => {
-  await util.waitForNavigation(() => page.locator('button:has-text("Add")').click());
+  await page.locator('button:has-text("Add")').click();
+  await util.expectRoute(RoutePath.editApiAccessMethods);
 
   const title = page.locator('h1');
   await expect(title).toHaveText('Add method');
@@ -79,9 +83,8 @@ test('App should add invalid access method', async () => {
   await expect(page.getByText('Testing method...')).toBeVisible();
   await expect(page.getByText('API unreachable, add anyway?')).toBeVisible();
 
-  expect(
-    await util.waitForNavigation(() => page.locator('button:has-text("Save")').click()),
-  ).toEqual(RoutePath.apiAccessMethods);
+  await page.locator('button:has-text("Save")').click();
+  await util.expectRoute(RoutePath.apiAccessMethods);
 
   const accessMethods = page.getByTestId('access-method');
   // Direct, Bridges, Encrypted DNS Proxy & the non-functioning access method.
@@ -97,7 +100,9 @@ test('App should use invalid method', async () => {
   await expect(page.getByText(IN_USE_LABEL)).toHaveCount(1);
   await expect(nonFunctioningTestMethod).not.toContainText(IN_USE_LABEL);
 
-  await nonFunctioningTestMethod.locator('button').last().click();
+  const contextMenuButton = nonFunctioningTestMethod.getByRole('button').first();
+  await nonFunctioningTestMethod.highlight();
+  await contextMenuButton.click();
   await nonFunctioningTestMethod.getByText('Use').click();
   await expect(nonFunctioningTestMethod).toContainText('Testing...');
   await expect(nonFunctioningTestMethod).toContainText('API unreachable');
@@ -108,8 +113,10 @@ test('App should use invalid method', async () => {
 
 test('App should edit access method', async () => {
   const customMethod = page.getByTestId('access-method').last();
-  await customMethod.locator('button').last().click();
-  await util.waitForNavigation(() => customMethod.getByText('Edit').click());
+  const contextMenuButton = customMethod.getByRole('button').first();
+  await contextMenuButton.click();
+  await customMethod.getByText('Edit').click();
+  await util.expectRoute(RoutePath.editApiAccessMethods);
 
   const title = page.locator('h1');
   await expect(title).toHaveText('Edit method');
@@ -133,9 +140,8 @@ test('App should edit access method', async () => {
     .getByRole('option', { name: process.env.SHADOWSOCKS_SERVER_CIPHER!, exact: true })
     .click();
 
-  expect(await util.waitForNavigation(() => saveButton.click())).toEqual(
-    RoutePath.apiAccessMethods,
-  );
+  await page.locator('button:has-text("Save")').last().click();
+  await util.expectRoute(RoutePath.apiAccessMethods);
 
   const accessMethods = page.getByTestId('access-method');
   // Direct, Bridges, Encrypted DNS Proxy & the custom access method.
@@ -156,7 +162,8 @@ test('App should use valid method', async () => {
   await expect(functioningTestMethod).not.toContainText(IN_USE_LABEL);
   await expect(functioningTestMethod).toHaveText(FUNCTIONING_METHOD_NAME);
 
-  await functioningTestMethod.locator('button').last().click();
+  const contextMenuButton = functioningTestMethod.getByRole('button').first();
+  await contextMenuButton.click();
   await functioningTestMethod.getByText('Use').click();
   await expect(direct).not.toContainText(IN_USE_LABEL);
   await expect(bridges).not.toContainText(IN_USE_LABEL);
@@ -169,7 +176,8 @@ test('App should delete method', async () => {
   const accessMethods = page.getByTestId('access-method');
   const customMethod = accessMethods.last();
 
-  await customMethod.locator('button').last().click();
+  const contextMenuButton = customMethod.getByRole('button').first();
+  await contextMenuButton.click();
   await customMethod.getByText('Delete').click();
 
   await expect(page.getByText(`Delete ${FUNCTIONING_METHOD_NAME}?`)).toBeVisible();

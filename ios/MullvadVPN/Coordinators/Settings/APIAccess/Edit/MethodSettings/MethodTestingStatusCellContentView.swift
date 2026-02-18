@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 16/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -24,14 +24,18 @@ class MethodTestingStatusCellContentView: UIView, UIContentView {
 
     private let textLabel: UILabel = {
         let textLabel = UILabel()
-        textLabel.font = UIFont.systemFont(ofSize: 17)
+        textLabel.font = .mullvadSmall
+        textLabel.adjustsFontForContentSizeCategory = true
+        textLabel.numberOfLines = 0
         textLabel.textColor = .primaryTextColor
         return textLabel
     }()
 
     private let detailLabel: UILabel = {
         let textLabel = UILabel()
-        textLabel.font = UIFont.systemFont(ofSize: 14)
+        textLabel.font = .mullvadTiny
+        textLabel.adjustsFontForContentSizeCategory = true
+        textLabel.numberOfLines = 0
         textLabel.textColor = .secondaryTextColor
         textLabel.textAlignment = .center
         return textLabel

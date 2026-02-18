@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 27/03/2020.
-//  Copyright © 2020 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -15,12 +15,19 @@ extension String {
 
         let resultCount = Int((Float(count) / Float(length)).rounded(.up))
 
-        return (0 ..< resultCount)
+        return (0..<resultCount)
             .map { dropFirst($0 * length).prefix(length) }
     }
 
     func width(using font: UIFont) -> CGFloat {
         let fontAttributes = [NSAttributedString.Key.font: font]
         return self.size(withAttributes: fontAttributes).width
+    }
+}
+
+extension Array where Element == String {
+    func joinedParagraphs(lineBreaks: Int = 2) -> String {
+        let separator = String(repeating: "\n", count: lineBreaks)
+        return self.joined(separator: separator)
     }
 }

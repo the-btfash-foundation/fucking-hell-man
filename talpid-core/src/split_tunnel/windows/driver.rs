@@ -1,6 +1,8 @@
+#![allow(clippy::undocumented_unsafe_blocks)] // Remove me if you dare.
+
 use super::windows::{
-    get_device_path, get_process_creation_time, get_process_device_path, open_process,
-    ProcessAccess,
+    ProcessAccess, get_device_path, get_process_creation_time, get_process_device_path,
+    open_process,
 };
 use bitflags::bitflags;
 use memoffset::offset_of;
@@ -10,7 +12,7 @@ use std::{
     ffi::{OsStr, OsString},
     fs::{self, OpenOptions},
     io,
-    mem::{self, size_of, MaybeUninit},
+    mem::{self, MaybeUninit, size_of},
     net::{Ipv4Addr, Ipv6Addr},
     os::windows::{
         ffi::{OsStrExt, OsStringExt},
@@ -26,15 +28,15 @@ use talpid_windows::{io::Overlapped, process::ProcessSnapshot, sync::Event};
 use windows_sys::Win32::{
     Foundation::{
         ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INVALID_PARAMETER, ERROR_IO_PENDING,
-        HANDLE, NTSTATUS, WAIT_ABANDONED, WAIT_ABANDONED_0, WAIT_FAILED, WAIT_OBJECT_0,
+        NTSTATUS, WAIT_ABANDONED, WAIT_ABANDONED_0, WAIT_FAILED, WAIT_OBJECT_0,
     },
-    Networking::WinSock::{IN6_ADDR, IN_ADDR},
+    Networking::WinSock::{IN_ADDR, IN6_ADDR},
     Storage::FileSystem::FILE_FLAG_OVERLAPPED,
     System::{
         Diagnostics::ToolHelp::TH32CS_SNAPPROCESS,
-        Ioctl::{FILE_ANY_ACCESS, METHOD_BUFFERED, METHOD_NEITHER},
-        Threading::{WaitForMultipleObjects, WaitForSingleObject, INFINITE},
         IO::{DeviceIoControl, GetOverlappedResult, OVERLAPPED},
+        Ioctl::{FILE_ANY_ACCESS, METHOD_BUFFERED, METHOD_NEITHER},
+        Threading::{INFINITE, WaitForMultipleObjects, WaitForSingleObject},
     },
 };
 
@@ -42,11 +44,11 @@ const DRIVER_SYMBOLIC_NAME: &str = "\\\\.\\MULLVADSPLITTUNNEL";
 const ST_DEVICE_TYPE: u32 = 0x8000;
 
 const fn ctl_code(device_type: u32, function: u32, method: u32, access: u32) -> u32 {
-    device_type << 16 | access << 14 | function << 2 | method
+    (device_type << 16) | (access << 14) | (function << 2) | method
 }
 
 #[repr(u32)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub enum DriverIoctlCode {
     Initialize = ctl_code(ST_DEVICE_TYPE, 1, METHOD_NEITHER, FILE_ANY_ACCESS),
     DequeEvent = ctl_code(ST_DEVICE_TYPE, 2, METHOD_BUFFERED, FILE_ANY_ACCESS),
@@ -63,7 +65,6 @@ pub enum DriverIoctlCode {
 
 #[derive(Debug, PartialEq)]
 #[repr(u32)]
-#[allow(dead_code)]
 pub enum DriverState {
     // Default state after being loaded.
     None = 0,
@@ -105,7 +106,6 @@ impl TryFrom<u64> for DriverState {
 
 #[repr(u32)]
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub enum EventId {
     StartSplittingProcess = 0,
     StopSplittingProcess,
@@ -278,15 +278,21 @@ impl DeviceHandle {
         internet_ipv4: Option<Ipv4Addr>,
         internet_ipv6: Option<Ipv6Addr>,
     ) -> io::Result<()> {
-        log::debug!("Register IPs: tunnel IPv4: {:?}, tunnel IPv6 {:?}, internet IPv4: {:?}, internet IPv6: {:?}", tunnel_ipv4, tunnel_ipv6, internet_ipv4, internet_ipv6);
+        log::debug!(
+            "Register IPs: tunnel IPv4: {:?}, tunnel IPv6 {:?}, internet IPv4: {:?}, internet IPv6: {:?}",
+            tunnel_ipv4,
+            tunnel_ipv6,
+            internet_ipv4,
+            internet_ipv6
+        );
         let mut addresses: SplitTunnelAddresses = unsafe { mem::zeroed() };
 
         unsafe {
             if let Some(tunnel_ipv4) = tunnel_ipv4 {
                 let tunnel_ipv4 = tunnel_ipv4.octets();
                 ptr::copy_nonoverlapping(
-                    &tunnel_ipv4[0] as *const u8,
-                    &mut addresses.tunnel_ipv4 as *mut _ as *mut u8,
+                    tunnel_ipv4.as_ptr(),
+                    (&raw mut addresses.tunnel_ipv4).cast::<u8>(),
                     tunnel_ipv4.len(),
                 );
             }
@@ -294,8 +300,8 @@ impl DeviceHandle {
             if let Some(tunnel_ipv6) = tunnel_ipv6 {
                 let tunnel_ipv6 = tunnel_ipv6.octets();
                 ptr::copy_nonoverlapping(
-                    &tunnel_ipv6[0] as *const u8,
-                    &mut addresses.tunnel_ipv6 as *mut _ as *mut u8,
+                    tunnel_ipv6.as_ptr(),
+                    (&raw mut addresses.tunnel_ipv6).cast::<u8>(),
                     tunnel_ipv6.len(),
                 );
             }
@@ -303,8 +309,8 @@ impl DeviceHandle {
             if let Some(internet_ipv4) = internet_ipv4 {
                 let internet_ipv4 = internet_ipv4.octets();
                 ptr::copy_nonoverlapping(
-                    &internet_ipv4[0] as *const u8,
-                    &mut addresses.internet_ipv4 as *mut _ as *mut u8,
+                    internet_ipv4.as_ptr(),
+                    (&raw mut addresses.internet_ipv4).cast::<u8>(),
                     internet_ipv4.len(),
                 );
             }
@@ -312,8 +318,8 @@ impl DeviceHandle {
             if let Some(internet_ipv6) = internet_ipv6 {
                 let internet_ipv6 = internet_ipv6.octets();
                 ptr::copy_nonoverlapping(
-                    &internet_ipv6[0] as *const u8,
-                    &mut addresses.internet_ipv6 as *mut _ as *mut u8,
+                    internet_ipv6.as_ptr(),
+                    (&raw mut addresses.internet_ipv6).cast::<u8>(),
                     internet_ipv6.len(),
                 );
             }
@@ -342,8 +348,7 @@ impl DeviceHandle {
 
         let raw_state: u64 = unsafe { deserialize_buffer(&buffer[0..size_of::<u64>()]) };
 
-        DriverState::try_from(raw_state)
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))
+        DriverState::try_from(raw_state).map_err(io::Error::other)
     }
 
     pub fn set_config<T: AsRef<OsStr>>(&self, apps: &[T]) -> io::Result<()> {
@@ -538,10 +543,10 @@ fn build_process_tree() -> io::Result<Vec<ProcessInfo>> {
         if parent_pid == 0 {
             continue;
         }
-        if let Some(parent_info) = process_info.get(&parent_pid) {
-            if parent_info.borrow_mut().creation_time > info.creation_time {
-                info.parent_pid = 0;
-            }
+        if let Some(parent_info) = process_info.get(&parent_pid)
+            && parent_info.borrow_mut().creation_time > info.creation_time
+        {
+            info.parent_pid = 0;
         }
     }
 
@@ -835,29 +840,28 @@ pub unsafe fn device_io_control_buffer_async(
     overlapped: *mut OVERLAPPED,
 ) -> Result<(), io::Error> {
     let input_ptr = match input {
-        Some(input) => input.as_ptr() as *mut _,
-        None => ptr::null_mut(),
+        Some(input) => input.as_ptr().cast(),
+        None => ptr::null(),
     };
     let input_len = input.map(|input| input.len()).unwrap_or(0);
 
-    let result = DeviceIoControl(
-        device.as_raw_handle() as HANDLE,
-        ioctl_code,
-        input_ptr,
-        u32::try_from(input_len).map_err(|_error| {
-            io::Error::new(io::ErrorKind::InvalidInput, "the input buffer is too large")
-        })?,
-        output_ptr as *mut _,
-        output_len,
-        ptr::null_mut(),
-        overlapped,
-    );
+    let result = unsafe {
+        DeviceIoControl(
+            device.as_raw_handle(),
+            ioctl_code,
+            input_ptr,
+            u32::try_from(input_len).map_err(|_error| {
+                io::Error::new(io::ErrorKind::InvalidInput, "the input buffer is too large")
+            })?,
+            output_ptr as *mut _,
+            output_len,
+            ptr::null_mut(),
+            overlapped,
+        )
+    };
 
     if result != 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "Expected pending operation",
-        ));
+        return Err(io::Error::other("Expected pending operation"));
     }
 
     let last_error = io::Error::last_os_error();
@@ -882,15 +886,15 @@ pub fn get_overlapped_result(
     let event = overlapped.get_event().unwrap();
 
     // SAFETY: This is a valid event object.
-    unsafe { wait_for_single_object(event.as_raw(), None) }?;
+    unsafe { wait_for_single_object(event, None) }?;
 
     // SAFETY: The handle and overlapped object are valid.
     let mut returned_bytes = 0u32;
     let result = unsafe {
         GetOverlappedResult(
-            device.as_raw_handle() as HANDLE,
+            device.as_raw_handle(),
             overlapped.as_mut_ptr(),
-            &mut returned_bytes,
+            &raw mut returned_bytes,
             0,
         )
     };
@@ -905,18 +909,21 @@ pub fn get_overlapped_result(
 /// # Safety
 ///
 /// * `object` must be a valid object that can be signaled, such as an event object.
-pub unsafe fn wait_for_single_object(object: HANDLE, timeout: Option<Duration>) -> io::Result<()> {
+pub unsafe fn wait_for_single_object(
+    object: &impl AsRawHandle,
+    timeout: Option<Duration>,
+) -> io::Result<()> {
     let timeout = match timeout {
         Some(timeout) => u32::try_from(timeout.as_millis()).map_err(|_error| {
             io::Error::new(io::ErrorKind::InvalidInput, "the duration is too long")
         })?,
         None => INFINITE,
     };
-    let result = WaitForSingleObject(object, timeout);
+    let result = unsafe { WaitForSingleObject(object.as_raw_handle(), timeout) };
     match result {
         WAIT_OBJECT_0 => Ok(()),
         WAIT_FAILED => Err(io::Error::last_os_error()),
-        WAIT_ABANDONED => Err(io::Error::new(io::ErrorKind::Other, "abandoned mutex")),
+        WAIT_ABANDONED => Err(io::Error::other("abandoned mutex")),
         error => Err(io::Error::from_raw_os_error(error as i32)),
     }
 }
@@ -927,23 +934,28 @@ pub unsafe fn wait_for_single_object(object: HANDLE, timeout: Option<Duration>) 
 /// # Safety
 ///
 /// * `objects` must be a slice of valid objects that can be signaled, such as event objects.
-pub unsafe fn wait_for_multiple_objects(objects: &[HANDLE], wait_all: bool) -> io::Result<HANDLE> {
-    let objects_len = u32::try_from(objects.len())
-        .map_err(|_error| io::Error::new(io::ErrorKind::InvalidInput, "too many objects"))?;
-    let result = WaitForMultipleObjects(
-        objects_len,
-        objects.as_ptr(),
-        if wait_all { 1 } else { 0 },
-        INFINITE,
-    );
-    let signaled_index = if result < objects_len {
-        result
-    } else if result >= WAIT_ABANDONED_0 && result < WAIT_ABANDONED_0 + objects_len {
-        return Err(io::Error::new(io::ErrorKind::Other, "abandoned mutex"));
-    } else {
-        return Err(io::Error::last_os_error());
-    };
-    Ok(objects[usize::try_from(signaled_index).expect("usize must be larger than u32")])
+pub unsafe fn wait_for_multiple_objects(
+    objects: &[RawHandle],
+    wait_all: bool,
+) -> io::Result<RawHandle> {
+    unsafe {
+        let objects_len = u32::try_from(objects.len())
+            .map_err(|_error| io::Error::new(io::ErrorKind::InvalidInput, "too many objects"))?;
+        let result = WaitForMultipleObjects(
+            objects_len,
+            objects.as_ptr(),
+            if wait_all { 1 } else { 0 },
+            INFINITE,
+        );
+        let signaled_index = if result < objects_len {
+            result
+        } else if result >= WAIT_ABANDONED_0 && result < WAIT_ABANDONED_0 + objects_len {
+            return Err(io::Error::other("abandoned mutex"));
+        } else {
+            return Err(io::Error::last_os_error());
+        };
+        Ok(objects[usize::try_from(signaled_index).expect("usize must be larger than u32")])
+    }
 }
 
 /// Reads the value from `buffer`, zeroing any remaining bytes.
@@ -959,12 +971,14 @@ unsafe fn deserialize_buffer<T>(buffer: &[u8]) -> T {
     assert!(buffer.len() <= mem::size_of::<T>());
 
     let mut instance = MaybeUninit::zeroed();
-    ptr::copy_nonoverlapping(
-        buffer.as_ptr(),
-        instance.as_mut_ptr() as *mut u8,
-        buffer.len(),
-    );
-    instance.assume_init()
+    unsafe {
+        ptr::copy_nonoverlapping(
+            buffer.as_ptr(),
+            instance.as_mut_ptr() as *mut u8,
+            buffer.len(),
+        );
+        instance.assume_init()
+    }
 }
 
 fn buffer_to_osstring(buffer: &[u8]) -> OsString {

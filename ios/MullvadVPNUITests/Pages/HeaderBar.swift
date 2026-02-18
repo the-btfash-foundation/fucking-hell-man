@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-23.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -33,7 +33,8 @@ class HeaderBar: Page {
     @discardableResult public func verifyDeviceLabelShown() -> Self {
         XCTAssertTrue(
             app.staticTexts[AccessibilityIdentifier.headerDeviceNameLabel]
-                .waitForExistence(timeout: BaseUITestCase.defaultTimeout), "Device name displayed in header"
+                .existsAfterWait(),
+            "Device name displayed in header"
         )
 
         return self

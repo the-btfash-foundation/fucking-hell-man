@@ -1,11 +1,9 @@
 import styled from 'styled-components';
 
-import { colors } from '../../config.json';
+import { colors } from '../lib/foundations';
 import AccountNumberLabel from './AccountNumberLabel';
-import * as Cell from './cell';
-import { hugeText, measurements, tinyText } from './common-styles';
+import { hugeText, tinyText } from './common-styles';
 import CustomScrollbars from './CustomScrollbars';
-import { Container } from './Layout';
 
 export const StyledAccountNumberLabel = styled(AccountNumberLabel)({
   fontFamily: 'Open Sans',
@@ -15,27 +13,8 @@ export const StyledAccountNumberLabel = styled(AccountNumberLabel)({
   color: colors.white,
 });
 
-export const StyledModalCellContainer = styled(Cell.Container)({
-  marginTop: '18px',
-  paddingLeft: '12px',
-  paddingRight: '12px',
-});
-
 export const StyledCustomScrollbars = styled(CustomScrollbars)({
   flex: 1,
-});
-
-export const StyledContainer = styled(Container)({
-  paddingTop: '22px',
-  minHeight: '100%',
-  backgroundColor: colors.darkBlue,
-});
-
-export const StyledBody = styled.div({
-  display: 'flex',
-  flexDirection: 'column',
-  flex: 1,
-  padding: `0 ${measurements.horizontalViewMargin}`,
 });
 
 export const StyledTitle = styled.span(hugeText, {
@@ -52,13 +31,6 @@ export const StyledAccountNumberMessage = styled.span(tinyText, {
   color: colors.white,
 });
 
-export const StyledStatusIcon = styled.div({
-  alignSelf: 'center',
-  width: '60px',
-  height: '60px',
-  marginBottom: '18px',
-});
-
 export const StyledAccountNumberContainer = styled.div({
   display: 'flex',
   height: '50px',
@@ -66,9 +38,6 @@ export const StyledAccountNumberContainer = styled.div({
 });
 
 export const StyledDeviceLabel = styled.span(tinyText, {
-  display: 'flex',
-  alignItems: 'middle',
   lineHeight: '20px',
-  marginBottom: '18px',
   color: colors.white,
 });

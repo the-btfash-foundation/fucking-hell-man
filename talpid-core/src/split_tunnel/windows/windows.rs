@@ -33,7 +33,7 @@ pub fn get_device_path<T: AsRef<Path>>(path: T) -> Result<OsString, io::Error> {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "path must be absolute",
-            ))
+            ));
         }
     };
 
@@ -51,15 +51,18 @@ pub fn get_device_path<T: AsRef<Path>>(path: T) -> Result<OsString, io::Error> {
 
 pub unsafe fn get_final_path_name_by_handle(raw_handle: HANDLE) -> Result<OsString, io::Error> {
     let buffer_size =
-        GetFinalPathNameByHandleW(raw_handle, ptr::null_mut(), 0u32, VOLUME_NAME_NT) as usize;
+        unsafe { GetFinalPathNameByHandleW(raw_handle, ptr::null_mut(), 0u32, VOLUME_NAME_NT) }
+            as usize;
     let mut buffer = vec![0; buffer_size];
 
-    let status = GetFinalPathNameByHandleW(
-        raw_handle,
-        buffer.as_mut_ptr(),
-        buffer_size as u32,
-        VOLUME_NAME_NT,
-    ) as usize;
+    let status = unsafe {
+        GetFinalPathNameByHandleW(
+            raw_handle,
+            buffer.as_mut_ptr(),
+            buffer_size as u32,
+            VOLUME_NAME_NT,
+        )
+    } as usize;
 
     if status == 0 {
         return Err(io::Error::last_os_error());
@@ -136,8 +139,7 @@ pub fn open_process(
     pid: u32,
 ) -> Result<WinHandle, io::Error> {
     let handle = unsafe { OpenProcess(access as u32, if inherit_handle { 1 } else { 0 }, pid) };
-
-    if handle == 0 {
+    if handle.is_null() {
         return Err(io::Error::last_os_error());
     }
     Ok(WinHandle(handle))
@@ -151,10 +153,10 @@ pub fn get_process_creation_time(handle: HANDLE) -> Result<u64, io::Error> {
     if unsafe {
         GetProcessTimes(
             handle,
-            &mut creation_time as *mut _,
-            &mut dummy as *mut _,
-            &mut dummy as *mut _,
-            &mut dummy as *mut _,
+            &raw mut creation_time,
+            &raw mut dummy,
+            &raw mut dummy,
+            &raw mut dummy,
         )
     } == 0
     {

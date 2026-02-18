@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 19/05/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
@@ -18,17 +18,21 @@ class VPNSettingsViewController: UITableViewController {
     private let interactor: VPNSettingsInteractor
     private var dataSource: VPNSettingsDataSource?
     private let alertPresenter: AlertPresenter
-
+    private let section: VPNSettingsSection?
     weak var delegate: VPNSettingsViewControllerDelegate?
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
         .lightContent
     }
 
-    init(interactor: VPNSettingsInteractor, alertPresenter: AlertPresenter) {
+    init(
+        interactor: VPNSettingsInteractor,
+        alertPresenter: AlertPresenter,
+        section: VPNSettingsSection?
+    ) {
         self.interactor = interactor
         self.alertPresenter = alertPresenter
-
+        self.section = section
         super.init(style: .grouped)
     }
 
@@ -41,20 +45,20 @@ class VPNSettingsViewController: UITableViewController {
 
         tableView.setAccessibilityIdentifier(.vpnSettingsTableView)
         tableView.backgroundColor = .secondaryColor
+        tableView.separatorColor = .secondaryColor
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 60
         tableView.estimatedSectionHeaderHeight = tableView.estimatedRowHeight
         tableView.allowsMultipleSelection = true
 
-        dataSource = VPNSettingsDataSource(tableView: tableView)
+        dataSource = VPNSettingsDataSource(
+            tableView: tableView,
+            section: section
+        )
+
         dataSource?.delegate = self
 
-        navigationItem.title = NSLocalizedString(
-            "NAVIGATION_TITLE",
-            tableName: "VPNSettings",
-            value: "VPN settings",
-            comment: ""
-        )
+        navigationItem.title = NSLocalizedString("VPN settings", comment: "")
 
         interactor.tunnelSettingsDidChange = { [weak self] newSettings in
             self?.dataSource?.reload(from: newSettings)
@@ -66,17 +70,20 @@ class VPNSettingsViewController: UITableViewController {
             self?.dataSource?.setAvailablePortRanges(cachedRelays.relays.wireguard.portRanges)
         }
 
-        tableView.tableHeaderView = UIView(frame: CGRect(
-            origin: .zero,
-            size: CGSize(width: 0, height: UIMetrics.TableView.sectionSpacing)
-        ))
+        let showsSingleSection = section != nil
+        tableView.tableHeaderView = UIView(
+            frame: CGRect(
+                origin: .zero,
+                size: CGSize(width: 0, height: showsSingleSection ? 0 : UIMetrics.TableView.emptyHeaderHeight)
+            ))
     }
 }
 
-extension VPNSettingsViewController: VPNSettingsDataSourceDelegate {
+extension VPNSettingsViewController: @preconcurrency VPNSettingsDataSourceDelegate {
     func humanReadablePortRepresentation() -> String {
         let ranges = interactor.cachedRelays?.relays.wireguard.portRanges ?? []
-        return ranges
+        return
+            ranges
             .compactMap { range in
                 if let minPort = range.first, let maxPort = range.last {
                     return minPort == maxPort ? String(minPort) : "\(minPort)-\(maxPort)"
@@ -98,14 +105,9 @@ extension VPNSettingsViewController: VPNSettingsDataSourceDelegate {
             message: item.description,
             buttons: [
                 AlertAction(
-                    title: NSLocalizedString(
-                        "VPN_SETTINGS_VPN_SETTINGS_OK_ACTION",
-                        tableName: "ContentBlockers",
-                        value: "Got it!",
-                        comment: ""
-                    ),
+                    title: NSLocalizedString("Got it!", comment: ""),
                     style: .default
-                ),
+                )
             ]
         )
 
@@ -134,12 +136,7 @@ extension VPNSettingsViewController: VPNSettingsDataSourceDelegate {
         let viewModel = TunnelUDPOverTCPObfuscationSettingsViewModel(tunnelManager: interactor.tunnelManager)
         let view = UDPOverTCPObfuscationSettingsView(viewModel: viewModel)
         let vc = UIHostingController(rootView: view)
-        vc.title = NSLocalizedString(
-            "UDP_OVER_TCP_TITLE",
-            tableName: "VPNSettings",
-            value: "UDP-over-TCP",
-            comment: ""
-        )
+        vc.title = NSLocalizedString("UDP-over-TCP", comment: "")
         navigationController?.pushViewController(vc, animated: true)
     }
 
@@ -147,12 +144,7 @@ extension VPNSettingsViewController: VPNSettingsDataSourceDelegate {
         let viewModel = TunnelShadowsocksObfuscationSettingsViewModel(tunnelManager: interactor.tunnelManager)
         let view = ShadowsocksObfuscationSettingsView(viewModel: viewModel)
         let vc = UIHostingController(rootView: view)
-        vc.title = NSLocalizedString(
-            "SHADOWSOCKS_TITLE",
-            tableName: "VPNSettings",
-            value: "Shadowsocks",
-            comment: ""
-        )
+        vc.title = NSLocalizedString("Shadowsocks", comment: "")
         navigationController?.pushViewController(vc, animated: true)
     }
 

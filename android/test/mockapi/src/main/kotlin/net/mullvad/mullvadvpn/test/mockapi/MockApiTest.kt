@@ -12,8 +12,9 @@ import net.mullvad.mullvadvpn.lib.endpoint.ApiEndpointOverride
 import net.mullvad.mullvadvpn.test.common.interactor.AppInteractor
 import net.mullvad.mullvadvpn.test.common.rule.CaptureScreenshotOnFailedTestRule
 import net.mullvad.mullvadvpn.test.mockapi.constant.LOG_TAG
-import net.mullvad.mullvadvpn.test.mockapi.constant.PACKAGE_NAME
-import okhttp3.mockwebserver.MockWebServer
+import net.mullvad.mullvadvpn.test.mockapi.server.MockApiRouter
+import net.mullvad.mullvadvpn.test.mockapi.server.MockServer
+import net.mullvad.mullvadvpn.test.mockapi.server.port
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.extension.RegisterExtension
@@ -27,8 +28,8 @@ abstract class MockApiTest {
     val permissionRule: GrantPermissionExtension =
         GrantPermissionExtension.grant(WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE)
 
-    protected val apiDispatcher = MockApiDispatcher()
-    private val mockWebServer = MockWebServer().apply { dispatcher = apiDispatcher }
+    protected val apiRouter = MockApiRouter()
+    private val mockApiServer = MockServer.createWithRouter(apiRouter)
 
     lateinit var device: UiDevice
     lateinit var targetContext: Context
@@ -42,19 +43,25 @@ abstract class MockApiTest {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         targetContext = InstrumentationRegistry.getInstrumentation().targetContext
 
-        app = AppInteractor(device, targetContext, PACKAGE_NAME)
+        mockApiServer.start()
+        Logger.d("Mocked web server started using port: ${mockApiServer.port()}")
+        endpoint = createEndpoint(mockApiServer.port())
 
-        mockWebServer.start()
-        Logger.d("Mocked web server started using port: ${mockWebServer.port}")
-        endpoint = createEndpoint(mockWebServer.port)
+        Logger.d("targetContext packageName: ${targetContext.packageName}")
+        app = AppInteractor(device, targetContext, endpoint)
     }
 
     @AfterEach
     open fun teardown() {
-        mockWebServer.shutdown()
+        mockApiServer.stop()
     }
 
     private fun createEndpoint(port: Int): ApiEndpointOverride {
-        return ApiEndpointOverride(InetAddress.getLocalHost().hostName, port, disableTls = true)
+        return ApiEndpointOverride(
+            InetAddress.getLocalHost().hostName,
+            InetAddress.getLocalHost().hostAddress!!,
+            port,
+            disableTls = true,
+        )
     }
 }

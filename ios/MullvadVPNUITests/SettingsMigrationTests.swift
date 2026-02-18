@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-03-15.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -43,11 +43,10 @@ class SettingsMigrationTests: BaseUITestCase {
         return false
     }
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
 
         agreeToTermsOfServiceIfShown()
-        dismissChangeLogIfShown()
 
         // Relaunch app so that tests start from a deterministic state
         app.terminate()
@@ -141,13 +140,18 @@ class SettingsMigrationTests: BaseUITestCase {
             .tapPort5001Cell()
             .tapPort80Cell()
             .tapBackButton()
+
         VPNSettingsPage(app)
             .tapShadowsocksPortSelectorButton()
+
         ShadowsocksObfuscationSettingsPage(app)
             .tapAutomaticPortCell()
             .tapCustomCell()
             .enterText("1234")
             .tapBackButton()
+
+        VPNSettingsPage(app)
+            .tapWireGuardObfuscationUdpOverTcpCell()
     }
 
     func testVerifySettingsStillChanged() {
@@ -171,12 +175,12 @@ class SettingsMigrationTests: BaseUITestCase {
             .tapBackButton()
 
         VPNSettingsPage(app)
+            .tapQuantumResistantTunnelExpandButton()
+            .verifyQuantumResistantTunnelOnSelected()
             .tapWireGuardPortsExpandButton()
             .verifyCustomWireGuardPortSelected(portNumber: wireGuardPort)
             .tapWireGuardObfuscationExpandButton()
             .verifyWireGuardObfuscationOnSelected()
             .verifyUDPOverTCPPort80Selected()
-            .tapQuantumResistantTunnelExpandButton()
-            .verifyQuantumResistantTunnelOnSelected()
     }
 }

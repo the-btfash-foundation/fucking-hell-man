@@ -3,7 +3,7 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 31/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -12,11 +12,11 @@ import MullvadREST
 import MullvadRustRuntime
 import MullvadSettings
 import MullvadTypes
-import NetworkExtension
+@preconcurrency import NetworkExtension
 import PacketTunnelCore
 import WireGuardKitTypes
 
-class PacketTunnelProvider: NEPacketTunnelProvider {
+class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let internalQueue = DispatchQueue(label: "PacketTunnel-internalQueue")
     private let providerLogger: Logger
 
@@ -27,9 +27,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var adapter: WgAdapter!
     private var relaySelector: RelaySelectorWrapper!
     private var ephemeralPeerExchangingPipeline: EphemeralPeerExchangingPipeline!
-    private let tunnelSettingsUpdater: SettingsUpdater!
-    private var encryptedDNSTransport: EncryptedDNSTransport!
-    private var migrationManager: MigrationManager!
+    private var appStoreMetaDataService: AppStoreMetaDataService!
+    private let tunnelSettingsUpdater: SettingsUpdater
+    private let defaultPathObserver: PacketTunnelPathObserver
+    private var migrationManager: MigrationManager
     let migrationFailureIterator = REST.RetryStrategy.failedMigrationRecovery.makeDelayIterator()
 
     private let tunnelSettingsListener = TunnelSettingsListener()
@@ -37,10 +38,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         EphemeralPeerReceiver(tunnelProvider: adapter, keyReceiver: self)
     }()
 
-    // swiftlint:disable:next function_body_length
+    var apiContext: MullvadApiContext!
+    var accessMethodReceiver: MullvadAccessMethodReceiver!
+    private var shadowsocksCacheCleaner: ShadowsocksCacheCleaner!
+
     override init() {
         Self.configureLogging()
         providerLogger = Logger(label: "PacketTunnelProvider")
+        providerLogger.info("Starting new packet tunnel")
 
         let containerURL = ApplicationConfiguration.containerURL
         let addressCache = REST.AddressCache(canWriteToCache: false, cacheDirectory: containerURL)
@@ -53,14 +58,37 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         tunnelSettingsUpdater = SettingsUpdater(listener: tunnelSettingsListener)
         migrationManager = MigrationManager(cacheDirectory: containerURL)
 
+        defaultPathObserver = PacketTunnelPathObserver(eventQueue: internalQueue)
+
         super.init()
 
         performSettingsMigration()
 
-        let transportProvider = setUpTransportProvider(
+        let settingsReader = TunnelSettingsManager(settingsReader: SettingsReader()) { [weak self] settings in
+            guard let self = self else { return }
+            tunnelSettingsListener.onNewSettings?(settings.tunnelSettings)
+        }
+
+        let tunnelSettings = (try? settingsReader.read().tunnelSettings) ?? LatestTunnelSettings()
+        let accessMethodRepository = AccessMethodRepository()
+
+        setUpApiContextAndAccessMethodReceiver(
             appContainerURL: containerURL,
             ipOverrideWrapper: ipOverrideWrapper,
-            addressCache: addressCache
+            addressCache: addressCache,
+            accessMethodRepository: accessMethodRepository,
+            tunnelSettings: tunnelSettings
+        )
+
+        setUpAccessMethodReceiver(
+            accessMethodRepository: accessMethodRepository
+        )
+
+        let apiTransportProvider = APITransportProvider(
+            requestFactory: MullvadApiRequestFactory(
+                apiContext: apiContext,
+                encoder: REST.Coding.makeJSONEncoder()
+            )
         )
 
         adapter = WgAdapter(packetTunnelProvider: self)
@@ -75,8 +103,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         )
 
         let proxyFactory = REST.ProxyFactory.makeProxyFactory(
-            transportProvider: transportProvider,
-            addressCache: addressCache
+            apiTransportProvider: apiTransportProvider
         )
         let accountsProxy = proxyFactory.createAccountsProxy()
         let devicesProxy = proxyFactory.createDevicesProxy()
@@ -90,18 +117,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             timings: PacketTunnelActorTimings(),
             tunnelAdapter: adapter,
             tunnelMonitor: tunnelMonitor,
-            defaultPathObserver: PacketTunnelPathObserver(packetTunnelProvider: self, eventQueue: internalQueue),
+            defaultPathObserver: defaultPathObserver,
             blockedStateErrorMapper: BlockedStateErrorMapper(),
             relaySelector: relaySelector,
-            settingsReader: TunnelSettingsManager(settingsReader: SettingsReader()) { [weak self] settings in
-                guard let self = self else { return }
-                tunnelSettingsListener.onNewSettings?(settings.tunnelSettings)
-            },
+            settingsReader: settingsReader,
             protocolObfuscator: ProtocolObfuscator<TunnelObfuscator>()
         )
 
-        let urlRequestProxy = URLRequestProxy(dispatchQueue: internalQueue, transportProvider: transportProvider)
-        appMessageHandler = AppMessageHandler(packetTunnelActor: actor, urlRequestProxy: urlRequestProxy)
+        // Since PacketTunnelActor depends on the path observer, start observing after actor has been initalized.
+        startDefaultPathObserver()
+
+        let apiRequestProxy = APIRequestProxy(
+            dispatchQueue: internalQueue,
+            transportProvider: apiTransportProvider
+        )
+        appMessageHandler = AppMessageHandler(
+            packetTunnelActor: actor,
+            apiRequestProxy: apiRequestProxy
+        )
 
         ephemeralPeerExchangingPipeline = EphemeralPeerExchangingPipeline(
             EphemeralPeerExchangeActor(
@@ -116,13 +149,27 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     reconfigurationSemaphore: channel
                 )
                 await channel.receive()
-            }, onFinish: { [unowned self] in
+            },
+            onFinish: { [unowned self] in
                 actor.notifyEphemeralPeerNegotiated()
             }
         )
+
+        appStoreMetaDataService = AppStoreMetaDataService(
+            tunnelSettings: tunnelSettings,
+            urlSession: URLSession.shared,
+            appPreferences: AppPreferences(),
+            mainAppBundleIdentifier: ApplicationTarget.mainApp.bundleIdentifier
+        )
+        #if DEBUG
+            appStoreMetaDataService.scheduleTimer()
+        #endif
     }
 
-    override func startTunnel(options: [String: NSObject]? = nil) async throws {
+    override func startTunnel(
+        options: [String: NSObject]? = nil,
+        completionHandler: @escaping @Sendable ((any Error)?) -> Void
+    ) {
         let startOptions = parseStartOptions(options ?? [:])
 
         startObservingActorState()
@@ -131,39 +178,31 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         // This check is allowed to push new key to server if there are some issues with it.
         startDeviceCheck(rotateKeyOnMismatch: true)
 
-        actor.start(options: startOptions)
-
-        for await state in await actor.observedStates {
-            switch state {
-            case .connected, .disconnected, .error:
-                return
-            case let .connecting(connectionState):
-                // Give the tunnel a few tries to connect, otherwise return immediately. This will enable VPN in
-                // device settings, but the app will still report the true state via ObservedState over IPC.
-                // In essence, this prevents the 60s tunnel timeout to trigger.
-                if connectionState.connectionAttemptCount > 1 {
-                    return
+        setTunnelNetworkSettings(
+            initialTunnelNetworkSettings(),
+            completionHandler: { error in
+                if let error {
+                    self.providerLogger
+                        .error(
+                            "Failed to configure tunnel with initial config: \(error)"
+                        )
+                } else {
+                    self.providerLogger.debug("Starting actor after initial configuration is applied")
+                    self.actor.start(options: startOptions)
                 }
-            case .negotiatingEphemeralPeer:
-                // When negotiating ephemeral peers, allow the connection to go through immediately.
-                // Otherwise, the in-tunnel TCP connection will never become ready as the OS doesn't let
-                // any traffic through until this function returns, which would prevent negotiating ephemeral peers
-                // from an unconnected state.
-                return
-            default:
-                break
-            }
-        }
+                self.internalQueue.async {
+                    completionHandler(error)
+                }
+            })
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
-        providerLogger.debug("stopTunnel: \(reason)")
-
-        stopObservingActorState()
+        providerLogger.debug("stopTunnel: \(ProviderStopReasonWrapper(reason: reason))")
 
         actor.stop()
-
         await actor.waitUntilDisconnected()
+
+        stopObservingActorState()
     }
 
     override func handleAppMessage(_ messageData: Data) async -> Data? {
@@ -179,7 +218,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func performSettingsMigration() {
-        var hasNotMigrated = true
+        nonisolated(unsafe) var hasNotMigrated = true
         repeat {
             migrationManager.migrateSettings(
                 store: SettingsManager.store,
@@ -211,53 +250,98 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         } while hasNotMigrated
     }
 
-    private func setUpTransportProvider(
+    private func setUpApiContextAndAccessMethodReceiver(
         appContainerURL: URL,
         ipOverrideWrapper: IPOverrideWrapper,
-        addressCache: REST.AddressCache
-    ) -> TransportProvider {
-        let urlSession = REST.makeURLSession(addressCache: addressCache)
-        let urlSessionTransport = URLSessionTransport(urlSession: urlSession)
+        addressCache: REST.AddressCache,
+        accessMethodRepository: AccessMethodRepository,
+        tunnelSettings: LatestTunnelSettings
+    ) {
         let shadowsocksCache = ShadowsocksConfigurationCache(cacheDirectory: appContainerURL)
 
         let shadowsocksRelaySelector = ShadowsocksRelaySelector(
             relayCache: ipOverrideWrapper
         )
 
-        let transportStrategy = TransportStrategy(
-            datasource: AccessMethodRepository(),
-            shadowsocksLoader: ShadowsocksLoader(
-                cache: shadowsocksCache,
-                relaySelector: shadowsocksRelaySelector,
-                settingsUpdater: tunnelSettingsUpdater
-            )
+        let shadowsocksLoader = ShadowsocksLoader(
+            cache: shadowsocksCache,
+            relaySelector: shadowsocksRelaySelector,
+            tunnelSettings: tunnelSettings,
+            settingsUpdater: tunnelSettingsUpdater
         )
 
-        encryptedDNSTransport = EncryptedDNSTransport(urlSession: urlSession)
-        return TransportProvider(
-            urlSessionTransport: urlSessionTransport,
-            addressCache: addressCache,
-            transportStrategy: transportStrategy,
-            encryptedDNSTransport: encryptedDNSTransport
+        shadowsocksCacheCleaner = ShadowsocksCacheCleaner(cache: shadowsocksCache)
+
+        let opaqueAccessMethodSettingsWrapper = initAccessMethodSettingsWrapper(
+            methods: accessMethodRepository.fetchAll()
         )
+
+        // swift-format-ignore: NeverUseForceTry
+        apiContext = try! MullvadApiContext(
+            host: REST.defaultAPIHostname,
+            address: REST.defaultAPIEndpoint.description,
+            domain: REST.encryptedDNSHostname,
+            shadowsocksProvider: shadowsocksLoader,
+            accessMethodWrapper: opaqueAccessMethodSettingsWrapper,
+            addressCacheProvider: addressCache,
+            accessMethodChangeListeners: [accessMethodRepository, shadowsocksCacheCleaner]
+        )
+    }
+
+    private func setUpAccessMethodReceiver(
+        accessMethodRepository: AccessMethodRepository
+    ) {
+        accessMethodReceiver = MullvadAccessMethodReceiver(
+            apiContext: apiContext,
+            accessMethodsDataSource: accessMethodRepository.accessMethodsPublisher,
+            requestDataSource: accessMethodRepository.requestAccessMethodPublisher
+        )
+    }
+
+    private func initialTunnelNetworkSettings() -> NETunnelNetworkSettings {
+        let settings = NEPacketTunnelNetworkSettings(
+            tunnelRemoteAddress: "\(IPv4Address.loopback)"
+        )
+
+        // IPv4 settings
+        let ipv4Settings = NEIPv4Settings(
+            addresses: [LocalNetworkIPs.gatewayAddressIpV4.rawValue],
+            subnetMasks: ["255.255.255.255"]
+        )
+        ipv4Settings.includedRoutes = [NEIPv4Route.default()]
+        settings.ipv4Settings = ipv4Settings
+
+        // IPv6 settings
+        let ipv6Settings = NEIPv6Settings(
+            addresses: [LocalNetworkIPs.gatewayAddressIpV6.rawValue],
+            networkPrefixLengths: [128]
+        )
+        ipv6Settings.includedRoutes = [NEIPv6Route.default()]
+        settings.ipv6Settings = ipv6Settings
+
+        return settings
     }
 }
 
 extension PacketTunnelProvider {
     private static func configureLogging() {
-        var loggerBuilder = LoggerBuilder(header: "PacketTunnel version \(Bundle.main.productVersion)")
-        let pid = ProcessInfo.processInfo.processIdentifier
-        loggerBuilder.metadata["pid"] = .string("\(pid)")
+        let loggerBuilder = LoggerBuilder.shared
+        let header = "PacketTunnel version \(Bundle.main.productVersion)"
+
         loggerBuilder.addFileOutput(
             fileURL: ApplicationConfiguration.newLogFileURL(
                 for: .packetTunnel,
                 in: ApplicationConfiguration.containerURL
-            )
+            ),
+            header: header
         )
         #if DEBUG
-        loggerBuilder.addOSLogOutput(subsystem: ApplicationTarget.packetTunnel.bundleIdentifier)
+            loggerBuilder.addOSLogOutput(subsystem: ApplicationTarget.packetTunnel.bundleIdentifier)
         #endif
         loggerBuilder.install()
+
+        // Initialize Rust logging to forward to Swift Logger
+        RustLogging.initialize()
     }
 
     private func parseStartOptions(_ options: [String: NSObject]) -> StartOptions {
@@ -279,6 +363,25 @@ extension PacketTunnelProvider {
     }
 }
 
+// MARK: - Network path monitor observing
+
+extension PacketTunnelProvider {
+
+    private func startDefaultPathObserver() {
+        providerLogger.trace("Start default path observer.")
+
+        defaultPathObserver.start { [weak self] networkPath in
+            self?.actor.updateNetworkReachability(networkPathStatus: networkPath)
+        }
+    }
+
+    private func stopDefaultPathObserver() {
+        providerLogger.trace("Stop default path observer.")
+
+        defaultPathObserver.stop()
+    }
+}
+
 // MARK: - State observer
 
 extension PacketTunnelProvider {
@@ -290,15 +393,9 @@ extension PacketTunnelProvider {
             var lastConnectionAttempt: UInt = 0
 
             for await newState in stateStream {
-                // Tell packet tunnel when reconnection begins.
-                // Packet tunnel moves to `NEVPNStatus.reasserting` state once `reasserting` flag is set to `true`.
-                if case .reconnecting = newState, !self.reasserting {
+                if case .connected = newState {
+                    // Instead of setting the `reasserting` flag to true when we lose connectivity, we can wait until we restore connectivity. This will decrease the amount of path updates that are issued. There's also no need to signal to the system that anything is broken - instead we just want to invalidate old sockets when a new relay connection is up - the only way to do that is to toggle this flag.
                     self.reasserting = true
-                }
-
-                // Tell packet tunnel when reconnection ends.
-                // Packet tunnel moves to `NEVPNStatus.connected` state once `reasserting` flag is set to `false`.
-                if case .connected = newState, self.reasserting {
                     self.reasserting = false
                 }
 
@@ -308,7 +405,8 @@ extension PacketTunnelProvider {
 
                     // Start device check every second failure attempt to connect.
                     if lastConnectionAttempt != connectionAttempt, connectionAttempt > 0,
-                       connectionAttempt.isMultiple(of: 2) {
+                        connectionAttempt.isMultiple(of: 2)
+                    {
                         startDeviceCheck()
                     }
 
@@ -320,7 +418,9 @@ extension PacketTunnelProvider {
                         observedConnectionState,
                         privateKey: privateKey
                     )
-                case .initial, .connected, .disconnecting, .disconnected, .error:
+                case .disconnected:
+                    stopDefaultPathObserver()
+                case .initial, .connected, .disconnecting, .error:
                     break
                 }
             }
@@ -349,12 +449,12 @@ extension PacketTunnelProvider {
         case let .failure(error):
             switch error {
             case is DeviceCheckError:
-                providerLogger.error("\(error.localizedDescription) Forcing a log out")
+                providerLogger.error("\(error.description) Forcing a log out")
                 actor.setErrorState(reason: .deviceLoggedOut)
             default:
                 providerLogger
                     .error(
-                        "Device check encountered a network error: \(error.localizedDescription)"
+                        "Device check encountered a network error: \(error.description)"
                     )
             }
 

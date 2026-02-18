@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::atomic::{AtomicUsize, Ordering},
@@ -8,29 +8,27 @@ use std::{
 use itertools::Itertools;
 use mullvad_management_interface::MullvadProxyClient;
 use mullvad_types::{
-    relay_constraints::RelaySettings,
-    settings,
+    CustomTunnelEndpoint, settings,
     wireguard::{DaitaSettings, QuantumResistantState},
-    ConnectionConfig, CustomTunnelEndpoint,
 };
 use talpid_types::net::wireguard;
 use test_macro::test_function;
 use test_rpc::ServiceClient;
 
 use super::{
-    helpers::{self, connect_and_wait, set_relay_settings},
     Error, TestContext,
+    helpers::{self, connect_and_wait, set_custom_endpoint},
 };
 use crate::{
+    TEST_CONFIG,
     network_monitor::{
-        start_packet_monitor_until, start_tunnel_packet_monitor_until, Direction,
-        IpHeaderProtocols, MonitorOptions,
+        Direction, IpHeaderProtocols, MonitorOptions, start_packet_monitor_until,
+        start_tunnel_packet_monitor_until,
     },
     vm::network::{
         CUSTOM_TUN_GATEWAY, CUSTOM_TUN_LOCAL_PRIVKEY, CUSTOM_TUN_LOCAL_TUN_ADDR,
         CUSTOM_TUN_REMOTE_PUBKEY, CUSTOM_TUN_REMOTE_REAL_PORT, CUSTOM_TUN_REMOTE_TUN_ADDR,
     },
-    TEST_CONFIG,
 };
 
 /// How long to wait for expected "DNS queries" to appear
@@ -658,9 +656,9 @@ async fn connect_local_wg_relay(mullvad_client: &mut MullvadProxyClient) -> Resu
         CUSTOM_TUN_REMOTE_REAL_PORT,
     );
 
-    let relay_settings = RelaySettings::CustomTunnelEndpoint(CustomTunnelEndpoint {
+    let custom_tunnel_endpoint = CustomTunnelEndpoint {
         host: peer_addr.ip().to_string(),
-        config: ConnectionConfig::Wireguard(wireguard::ConnectionConfig {
+        config: wireguard::ConnectionConfig {
             tunnel: wireguard::TunnelConfig {
                 addresses: vec![IpAddr::V4(CUSTOM_TUN_LOCAL_TUN_ADDR)],
                 private_key: wireguard::PrivateKey::from(CUSTOM_TUN_LOCAL_PRIVKEY),
@@ -677,10 +675,9 @@ async fn connect_local_wg_relay(mullvad_client: &mut MullvadProxyClient) -> Resu
             #[cfg(target_os = "linux")]
             fwmark: None,
             ipv6_gateway: None,
-        }),
-    });
-
-    set_relay_settings(mullvad_client, relay_settings)
+        },
+    };
+    set_custom_endpoint(mullvad_client, custom_tunnel_endpoint)
         .await
         .expect("failed to update relay settings");
 

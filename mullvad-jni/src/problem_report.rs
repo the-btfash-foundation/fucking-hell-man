@@ -1,30 +1,46 @@
 use jnix::{
-    jni::{
-        objects::{JObject, JString},
-        sys::{jboolean, JNI_FALSE, JNI_TRUE},
-        JNIEnv,
-    },
     FromJava, JnixEnv,
+    jni::{
+        JNIEnv,
+        objects::{JObject, JString},
+        sys::{JNI_FALSE, JNI_TRUE, jboolean, jint},
+    },
 };
 use mullvad_api::ApiEndpoint;
 use std::path::Path;
+use std::path::PathBuf;
 use talpid_types::ErrorExt;
 
-#[no_mangle]
-#[allow(non_snake_case)]
-pub extern "system" fn Java_net_mullvad_mullvadvpn_dataproxy_MullvadProblemReport_collectReport(
+#[unsafe(no_mangle)]
+#[expect(non_snake_case)]
+pub extern "system" fn Java_net_mullvad_mullvadvpn_lib_repository_ProblemReportRepository_collectReport(
     env: JNIEnv<'_>,
     _: JObject<'_>,
     logDirectory: JString<'_>,
+    extraAppLogsDirectory: JString<'_>,
     outputPath: JString<'_>,
+    unverifiedPurchases: jint,
+    pendingPurchases: jint,
 ) -> jboolean {
     let env = JnixEnv::from(env);
     let log_dir_string = String::from_java(&env, logDirectory);
-    let log_dir = Path::new(&log_dir_string);
-    let output_path_string = String::from_java(&env, outputPath);
-    let output_path = Path::new(&output_path_string);
+    let log_dir = PathBuf::from(log_dir_string);
+    let extra_logs_dir_string = String::from_java(&env, extraAppLogsDirectory);
+    let extra_logs_dir = PathBuf::from(extra_logs_dir_string);
+    let output_path = String::from_java(&env, outputPath);
+    let unverified_purchases = i32::from_java(&env, unverifiedPurchases);
+    let pending_purchases = i32::from_java(&env, pendingPurchases);
 
-    match mullvad_problem_report::collect_report::<&str>(&[], output_path, Vec::new(), log_dir) {
+    let collector = mullvad_problem_report::ProblemReportCollector {
+        extra_logs: vec![],
+        redact_custom_strings: vec![],
+        android_log_dir: log_dir,
+        extra_logs_dir,
+        unverified_purchases,
+        pending_purchases,
+    };
+
+    match collector.write_to_path(&output_path) {
         Ok(()) => JNI_TRUE,
         Err(error) => {
             log::error!(
@@ -36,13 +52,14 @@ pub extern "system" fn Java_net_mullvad_mullvadvpn_dataproxy_MullvadProblemRepor
     }
 }
 
-#[no_mangle]
-#[allow(non_snake_case)]
-pub extern "system" fn Java_net_mullvad_mullvadvpn_dataproxy_MullvadProblemReport_sendProblemReport(
+#[unsafe(no_mangle)]
+#[expect(non_snake_case)]
+pub extern "system" fn Java_net_mullvad_mullvadvpn_lib_repository_ProblemReportRepository_sendProblemReport(
     env: JNIEnv<'_>,
     _: JObject<'_>,
     userEmail: JString<'_>,
     userMessage: JString<'_>,
+    accountToken: JString<'_>,
     outputPath: JString<'_>,
     cacheDirectory: JString<'_>,
     endpoint: JObject<'_>,
@@ -50,6 +67,11 @@ pub extern "system" fn Java_net_mullvad_mullvadvpn_dataproxy_MullvadProblemRepor
     let env = JnixEnv::from(env);
     let user_email = String::from_java(&env, userEmail);
     let user_message = String::from_java(&env, userMessage);
+    let account_token = if accountToken.is_null() {
+        None
+    } else {
+        Some(String::from_java(&env, accountToken))
+    };
     let output_path_string = String::from_java(&env, outputPath);
     let output_path = Path::new(&output_path_string);
     let cache_directory_string = String::from_java(&env, cacheDirectory);
@@ -60,6 +82,7 @@ pub extern "system" fn Java_net_mullvad_mullvadvpn_dataproxy_MullvadProblemRepor
     let send_result = mullvad_problem_report::send_problem_report(
         &user_email,
         &user_message,
+        account_token.as_deref(),
         output_path,
         cache_directory,
         api_endpoint,

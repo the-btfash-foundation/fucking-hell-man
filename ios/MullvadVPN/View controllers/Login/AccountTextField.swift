@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 20/03/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -24,12 +24,13 @@ class AccountTextField: CustomTextField, UITextFieldDelegate {
     }
 
     private var groupSize: GroupingStyle = .full
-    private lazy var inputFormatter = InputTextFormatter(configuration: InputTextFormatter.Configuration(
-        allowedInput: .numeric,
-        groupSeparator: " ",
-        groupSize: 4,
-        maxGroups: groupSize.size
-    ))
+    private lazy var inputFormatter = InputTextFormatter(
+        configuration: InputTextFormatter.Configuration(
+            allowedInput: .numeric,
+            groupSeparator: " ",
+            groupSize: 4,
+            maxGroups: groupSize.size
+        ))
 
     var onReturnKey: ((AccountTextField) -> Bool)?
 

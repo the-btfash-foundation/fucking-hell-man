@@ -1,43 +1,19 @@
-use std::{
-    future::Future,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    pin::Pin,
-    str::FromStr,
-    sync::Arc,
-};
+use std::{future::Future, net::IpAddr, pin::Pin, sync::Arc};
 
+use talpid_types::net::wireguard::TunnelParameters;
 use tokio::sync::Mutex;
 
-use mullvad_relay_selector::{GetRelay, RelaySelector, RuntimeParameters, WireguardConfig};
+use mullvad_relay_selector::{GetRelay, RelaySelector, WireguardConfig};
 use mullvad_types::{
-    endpoint::MullvadWireguardEndpoint, location::GeoIpLocation, relay_list::Relay,
+    endpoint::MullvadEndpoint, location::GeoIpLocation, relay_list::WireguardRelay,
     settings::TunnelOptions,
 };
-use std::sync::LazyLock;
 use talpid_core::tunnel_state_machine::TunnelParametersGenerator;
-#[cfg(not(target_os = "android"))]
-use talpid_types::net::{
-    obfuscation::ObfuscatorConfig, openvpn, proxy::CustomProxy, wireguard, Endpoint,
-    TunnelParameters,
-};
-#[cfg(target_os = "android")]
-use talpid_types::net::{obfuscation::ObfuscatorConfig, wireguard, TunnelParameters};
+use talpid_types::net::{obfuscation::Obfuscators, wireguard};
 
-use talpid_types::{tunnel::ParameterGenerationError, ErrorExt};
+use talpid_types::{ErrorExt, net::IpAvailability, tunnel::ParameterGenerationError};
 
 use crate::device::{AccountManagerHandle, Error as DeviceError, PrivateAccountAndDevice};
-
-/// The IP-addresses that the client uses when it connects to a server that supports the
-/// "Same IP" functionality. This means all clients have the same in-tunnel IP on these
-/// servers. This improves anonymity since the in-tunnel IP will not be unique to a specific
-/// peer.
-static SAME_IP_V4: LazyLock<IpAddr> =
-    LazyLock::new(|| Ipv4Addr::from_str("10.127.255.254").unwrap().into());
-static SAME_IP_V6: LazyLock<IpAddr> = LazyLock::new(|| {
-    Ipv6Addr::from_str("fc00:bbbb:bbbb:bb01:ffff:ffff:ffff:ffff")
-        .unwrap()
-        .into()
-});
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -92,15 +68,7 @@ impl ParametersGenerator {
         let Some(relays) = inner.last_generated_relays.as_ref() else {
             return false;
         };
-        match relays {
-            LastSelectedRelays::WireGuard {
-                server_override, ..
-            } => *server_override,
-            #[cfg(not(target_os = "android"))]
-            LastSelectedRelays::OpenVpn {
-                server_override, ..
-            } => *server_override,
-        }
+        relays.server_override
     }
 
     /// Gets the location associated with the last generated tunnel parameters.
@@ -109,36 +77,13 @@ impl ParametersGenerator {
 
         let relays = inner.last_generated_relays.as_ref()?;
 
-        let hostname;
-        let bridge_hostname;
-        let entry_hostname;
-        let obfuscator_hostname;
-        let location;
         let take_hostname =
-            |relay: &Option<Relay>| relay.as_ref().map(|relay| relay.hostname.clone());
+            |relay: &Option<WireguardRelay>| relay.as_ref().map(|relay| relay.hostname.clone());
 
-        match relays {
-            LastSelectedRelays::WireGuard {
-                wg_entry: entry,
-                wg_exit: exit,
-                obfuscator,
-                ..
-            } => {
-                entry_hostname = take_hostname(entry);
-                hostname = exit.hostname.clone();
-                obfuscator_hostname = take_hostname(obfuscator);
-                bridge_hostname = None;
-                location = exit.location.clone();
-            }
-            #[cfg(not(target_os = "android"))]
-            LastSelectedRelays::OpenVpn { relay, bridge, .. } => {
-                hostname = relay.hostname.clone();
-                bridge_hostname = take_hostname(bridge);
-                entry_hostname = None;
-                obfuscator_hostname = None;
-                location = relay.location.clone();
-            }
-        };
+        let entry_hostname = take_hostname(&relays.entry);
+        let hostname = relays.exit.hostname.clone();
+        let obfuscator_hostname = take_hostname(&relays.obfuscator);
+        let location = relays.exit.location.clone();
 
         Some(GeoIpLocation {
             ipv4: None,
@@ -149,7 +94,6 @@ impl ParametersGenerator {
             longitude: location.longitude,
             mullvad_exit_ip: true,
             hostname: Some(hostname),
-            bridge_hostname,
             entry_hostname,
             obfuscator_hostname,
         })
@@ -160,35 +104,15 @@ impl InnerParametersGenerator {
     async fn generate(
         &mut self,
         retry_attempt: u32,
-        ipv6: bool,
+        ip_availability: IpAvailability,
     ) -> Result<TunnelParameters, Error> {
         let data = self.device().await?;
         let selected_relay = self
             .relay_selector
-            .get_relay(retry_attempt as usize, RuntimeParameters { ipv6 })?;
+            .get_relay(retry_attempt as usize, ip_availability)?;
 
         match selected_relay {
-            #[cfg(not(target_os = "android"))]
-            GetRelay::OpenVpn {
-                endpoint,
-                exit,
-                bridge,
-            } => {
-                let bridge_relay = bridge.as_ref().and_then(|bridge| bridge.relay());
-                let server_override = {
-                    let first_relay = bridge_relay.unwrap_or(&exit);
-                    (first_relay.overridden_ipv4 && endpoint.address.is_ipv4())
-                        || (first_relay.overridden_ipv6 && endpoint.address.is_ipv6())
-                };
-                self.last_generated_relays = Some(LastSelectedRelays::OpenVpn {
-                    relay: exit.clone(),
-                    bridge: bridge_relay.cloned(),
-                    server_override,
-                });
-                let bridge_settings = bridge.map(|bridge| bridge.to_proxy());
-                Ok(self.create_openvpn_tunnel_parameters(endpoint, data, bridge_settings))
-            }
-            GetRelay::Wireguard {
+            GetRelay::Mullvad {
                 endpoint,
                 obfuscator,
                 inner,
@@ -198,19 +122,19 @@ impl InnerParametersGenerator {
                     None => (None, None),
                 };
 
-                let (wg_entry, wg_exit) = match inner {
+                let (entry, exit) = match inner {
                     WireguardConfig::Singlehop { exit } => (None, exit),
                     WireguardConfig::Multihop { exit, entry } => (Some(entry), exit),
                 };
                 let server_override = {
-                    let first_relay = wg_entry.as_ref().unwrap_or(&wg_exit);
+                    let first_relay = entry.as_ref().unwrap_or(&exit);
                     (first_relay.overridden_ipv4 && endpoint.peer.endpoint.is_ipv4())
                         || (first_relay.overridden_ipv6 && endpoint.peer.endpoint.is_ipv6())
                 };
 
-                self.last_generated_relays = Some(LastSelectedRelays::WireGuard {
-                    wg_entry,
-                    wg_exit,
+                self.last_generated_relays = Some(LastSelectedRelays {
+                    entry,
+                    exit,
                     obfuscator: obfuscator_relay,
                     server_override,
                 });
@@ -220,39 +144,21 @@ impl InnerParametersGenerator {
             GetRelay::Custom(custom_relay) => {
                 self.last_generated_relays = None;
                 custom_relay
-                     // TODO: generate proxy settings for custom tunnels
-                     .to_tunnel_parameters(self.tunnel_options.clone(), None)
-                     .map_err(|e| {
-                         log::error!("Failed to resolve hostname for custom tunnel config: {}", e);
-                         Error::ResolveCustomHostname
-                     })
+                    // TODO: generate proxy settings for custom tunnels
+                    .to_tunnel_parameters(self.tunnel_options.clone())
+                    .map_err(|e| {
+                        log::error!("Failed to resolve hostname for custom tunnel config: {}", e);
+                        Error::ResolveCustomHostname
+                    })
             }
         }
     }
 
-    #[cfg(not(target_os = "android"))]
-    fn create_openvpn_tunnel_parameters(
-        &self,
-        endpoint: Endpoint,
-        data: PrivateAccountAndDevice,
-        bridge_settings: Option<CustomProxy>,
-    ) -> TunnelParameters {
-        openvpn::TunnelParameters {
-            config: openvpn::ConnectionConfig::new(endpoint, data.account_number, "-".to_string()),
-            options: self.tunnel_options.openvpn.clone(),
-            generic_options: self.tunnel_options.generic.clone(),
-            proxy: bridge_settings,
-            #[cfg(target_os = "linux")]
-            fwmark: mullvad_types::TUNNEL_FWMARK,
-        }
-        .into()
-    }
-
     fn create_wireguard_tunnel_parameters(
         &self,
-        endpoint: MullvadWireguardEndpoint,
+        endpoint: MullvadEndpoint,
         data: PrivateAccountAndDevice,
-        obfuscator_config: Option<ObfuscatorConfig>,
+        obfuscator_config: Option<Obfuscators>,
     ) -> TunnelParameters {
         let tunnel_ipv4 = data.device.wg_data.addresses.ipv4_address.ip();
         let tunnel_ipv6 = data.device.wg_data.addresses.ipv6_address.ip();
@@ -260,13 +166,6 @@ impl InnerParametersGenerator {
             private_key: data.device.wg_data.private_key,
             addresses: vec![IpAddr::from(tunnel_ipv4), IpAddr::from(tunnel_ipv6)],
         };
-        // FIXME: Used for debugging purposes during the migration to same IP. Remove when
-        // the migration is over.
-        if tunnel_ipv4 == *SAME_IP_V4 || tunnel_ipv6 == *SAME_IP_V6 {
-            log::debug!("Same IP is being used");
-        } else {
-            log::debug!("Same IP is NOT being used");
-        }
 
         wireguard::TunnelParameters {
             connection: wireguard::ConnectionConfig {
@@ -286,7 +185,6 @@ impl InnerParametersGenerator {
             generic_options: self.tunnel_options.generic.clone(),
             obfuscation: obfuscator_config,
         }
-        .into()
     }
 
     async fn device(&self) -> Result<PrivateAccountAndDevice, Error> {
@@ -299,13 +197,13 @@ impl TunnelParametersGenerator for ParametersGenerator {
     fn generate(
         &mut self,
         retry_attempt: u32,
-        ipv6: bool,
+        ip_availability: IpAvailability,
     ) -> Pin<Box<dyn Future<Output = Result<TunnelParameters, ParameterGenerationError>>>> {
         let generator = self.0.clone();
         Box::pin(async move {
             let mut inner = generator.lock().await;
             inner
-                .generate(retry_attempt, ipv6)
+                .generate(retry_attempt, ip_availability)
                 .await
                 .inspect_err(|error| {
                     log::error!(
@@ -325,7 +223,16 @@ impl From<Error> for ParameterGenerationError {
                 ParameterGenerationError::NoMatchingBridgeRelay
             }
             Error::ResolveCustomHostname => {
-                ParameterGenerationError::CustomTunnelHostResultionError
+                ParameterGenerationError::CustomTunnelHostResolutionError
+            }
+            Error::SelectRelay(mullvad_relay_selector::Error::IpVersionUnavailable { family }) => {
+                ParameterGenerationError::IpVersionUnavailable { family }
+            }
+            Error::SelectRelay(mullvad_relay_selector::Error::NoRelayEntry(_)) => {
+                ParameterGenerationError::NoMatchingRelayEntry
+            }
+            Error::SelectRelay(mullvad_relay_selector::Error::NoRelayExit(_)) => {
+                ParameterGenerationError::NoMatchingRelayExit
             }
             Error::NoAuthDetails | Error::SelectRelay(_) | Error::Device(_) => {
                 ParameterGenerationError::NoMatchingRelay
@@ -335,25 +242,15 @@ impl From<Error> for ParameterGenerationError {
 }
 
 /// Contains all relays that were selected last time when tunnel parameters were generated.
-enum LastSelectedRelays {
-    /// Represents all relays generated for a WireGuard tunnel.
-    /// The traffic flow can look like this:
-    ///     client -> obfuscator -> entry -> exit -> internet
-    /// But for most users, it will look like this:
-    ///     client -> entry -> internet
-    WireGuard {
-        wg_entry: Option<Relay>,
-        wg_exit: Relay,
-        obfuscator: Option<Relay>,
-        server_override: bool,
-    },
-    /// Represents all relays generated for an OpenVPN tunnel.
-    /// The traffic flows like this:
-    ///     client -> bridge -> relay -> internet
-    #[cfg(not(target_os = "android"))]
-    OpenVpn {
-        relay: Relay,
-        bridge: Option<Relay>,
-        server_override: bool,
-    },
+///
+/// Represents all relays generated for a WireGuard tunnel.
+/// The traffic flow can look like this:
+///     client -> obfuscator -> entry -> exit -> internet
+/// But for most users, it will look like this:
+///     client -> entry -> internet
+struct LastSelectedRelays {
+    entry: Option<WireguardRelay>,
+    exit: WireguardRelay,
+    obfuscator: Option<WireguardRelay>,
+    server_override: bool,
 }

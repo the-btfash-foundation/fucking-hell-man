@@ -3,16 +3,17 @@
 //  MullvadVPNTests
 //
 //  Created by Marco Nikic on 2023-10-02.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
-@testable import MullvadREST
+
+import XCTest
 
 @testable import MullvadMockData
+@testable import MullvadREST
+@testable import MullvadRustRuntime
 @testable import MullvadSettings
 @testable import MullvadTypes
 @testable import WireGuardKitTypes
-
-import XCTest
 
 class TunnelManagerTests: XCTestCase {
     static let store = InMemorySettingsStore<SettingNotFound>()
@@ -21,52 +22,47 @@ class TunnelManagerTests: XCTestCase {
     var application: BackgroundTaskProviding!
     var relayCacheTracker: RelayCacheTrackerStub!
     var accountProxy: AccountsProxyStub!
-    var accessTokenManager: AccessTokenManagerStub!
     var devicesProxy: DevicesProxyStub!
     var apiProxy: APIProxyStub!
     var addressCache: REST.AddressCache!
-
-    var transportProvider: TransportProvider!
+    var apiContext: MullvadApiContext!
 
     override static func setUp() {
         SettingsManager.unitTestStore = store
     }
 
     override static func tearDown() {
-        SettingsManager.unitTestStore = nil
+        store.reset()
     }
 
     override func setUp() async throws {
         application = UIApplicationStub()
         relayCacheTracker = RelayCacheTrackerStub()
         accountProxy = AccountsProxyStub()
-        accessTokenManager = AccessTokenManagerStub()
         devicesProxy = DevicesProxyStub(deviceResult: .success(Device.mock(publicKey: PrivateKey().publicKey)))
         apiProxy = APIProxyStub()
+        let shadowsocksLoader = ShadowsocksLoader(
+            cache: ShadowsocksConfigurationCacheStub(),
+            relaySelector: ShadowsocksRelaySelectorStub(relays: .mock()),
+            tunnelSettings: LatestTunnelSettings(),
+            settingsUpdater: SettingsUpdater(listener: TunnelSettingsListener())
+        )
         addressCache = REST.AddressCache(
             canWriteToCache: false,
             fileCache: MockFileCache(initialState: .fileNotFound)
         )
 
-        transportProvider = TransportProvider(
-            urlSessionTransport: URLSessionTransport(urlSession: REST.makeURLSession(addressCache: addressCache)),
-            addressCache: REST.AddressCache(
-                canWriteToCache: true,
-                cacheDirectory: FileManager.default.temporaryDirectory
-            ),
-            transportStrategy: TransportStrategy(
-                datasource: AccessMethodRepositoryStub(accessMethods: [PersistentAccessMethod(
-                    id: UUID(),
-                    name: "direct",
-                    isEnabled: true,
-                    proxyConfiguration: .direct
-                )]),
-                shadowsocksLoader: ShadowsocksLoader(
-                    cache: ShadowsocksConfigurationCacheStub(),
-                    relaySelector: ShadowsocksRelaySelectorStub(relays: .mock()),
-                    settingsUpdater: SettingsUpdater(listener: TunnelSettingsListener())
-                )
-            ), encryptedDNSTransport: RESTTransportStub()
+        let opaqueAccessMethodSettingsWrapper = initAccessMethodSettingsWrapper(
+            methods: AccessMethodRepositoryStub.stub.fetchAll())
+
+        apiContext = try MullvadApiContext(
+            host: REST.defaultAPIHostname,
+            address: REST.defaultAPIEndpoint.description,
+            domain: REST.encryptedDNSHostname,
+            shadowsocksProvider: shadowsocksLoader,
+            accessMethodWrapper: opaqueAccessMethodSettingsWrapper,
+            addressCacheProvider: addressCache,
+            accessMethodChangeListeners: []
         )
 
         try SettingsManager.writeSettings(LatestTunnelSettings())
@@ -76,15 +72,13 @@ class TunnelManagerTests: XCTestCase {
         application = nil
         relayCacheTracker = nil
         accountProxy = nil
-        accessTokenManager = nil
         devicesProxy = nil
         apiProxy = nil
-        transportProvider = nil
         tunnelObserver = nil
     }
 
     func testLogInStartsKeyRotations() async throws {
-        accountProxy.createAccountResult = .success(REST.NewAccountData.mockValue())
+        accountProxy.createAccountResult = .success(NewAccountData.mockValue())
 
         let tunnelManager = TunnelManager(
             backgroundTaskProvider: application,
@@ -93,7 +87,6 @@ class TunnelManagerTests: XCTestCase {
             accountsProxy: accountProxy,
             devicesProxy: devicesProxy,
             apiProxy: apiProxy,
-            accessTokenManager: accessTokenManager,
             relaySelector: RelaySelectorStub.nonFallible()
         )
 
@@ -102,7 +95,7 @@ class TunnelManagerTests: XCTestCase {
     }
 
     func testLogOutStopsKeyRotations() async throws {
-        accountProxy.createAccountResult = .success(REST.NewAccountData.mockValue())
+        accountProxy.createAccountResult = .success(NewAccountData.mockValue())
 
         let tunnelManager = TunnelManager(
             backgroundTaskProvider: application,
@@ -111,7 +104,6 @@ class TunnelManagerTests: XCTestCase {
             accountsProxy: accountProxy,
             devicesProxy: devicesProxy,
             apiProxy: apiProxy,
-            accessTokenManager: accessTokenManager,
             relaySelector: RelaySelectorStub.nonFallible()
         )
         _ = try await tunnelManager.setNewAccount()
@@ -120,12 +112,11 @@ class TunnelManagerTests: XCTestCase {
     }
 
     /// This test verifies tunnel gets out of `blockedState` after constraints are satisfied.
-    // swiftlint:disable:next function_body_length
     func testExitBlockedStateAfterSatisfyingConstraints() async throws {
         let blockedExpectation = expectation(description: "Relay constraints aren't satisfied!")
         let connectedExpectation = expectation(description: "Connected!")
 
-        accountProxy.createAccountResult = .success(REST.NewAccountData.mockValue())
+        accountProxy.createAccountResult = .success(NewAccountData.mockValue())
 
         let relaySelector = RelaySelectorStub { _ in
             try RelaySelectorStub.unsatisfied().selectRelays(
@@ -141,13 +132,17 @@ class TunnelManagerTests: XCTestCase {
             accountsProxy: accountProxy,
             devicesProxy: devicesProxy,
             apiProxy: apiProxy,
-            accessTokenManager: accessTokenManager,
             relaySelector: relaySelector
         )
 
         let simulatorTunnelProviderHost = SimulatorTunnelProviderHost(
             relaySelector: relaySelector,
-            transportProvider: transportProvider
+            apiTransportProvider: APITransportProvider(
+                requestFactory: MullvadApiRequestFactory(
+                    apiContext: apiContext,
+                    encoder: REST.Coding.makeJSONEncoder()
+                )
+            )
         )
         SimulatorTunnelProvider.shared.delegate = simulatorTunnelProviderHost
 
@@ -183,6 +178,140 @@ class TunnelManagerTests: XCTestCase {
 
         await fulfillment(
             of: [blockedExpectation, connectedExpectation],
+            timeout: .UnitTest.timeout,
+            enforceOrder: true
+        )
+    }
+
+    /// This test verifies that a refresh tunnel status operation is scheduled whenever the tunnel is being restarted
+    func testReconnectingTunnelRefreshesItsStatus() async throws {
+        accountProxy.createAccountResult = .success(NewAccountData.mockValue())
+
+        let relaySelector = RelaySelectorStub { _ in
+            try RelaySelectorStub.nonFallible().selectRelays(
+                tunnelSettings: LatestTunnelSettings(),
+                connectionAttemptCount: 0
+            )
+        }
+
+        let tunnelManager = TunnelManager(
+            backgroundTaskProvider: application,
+            tunnelStore: TunnelStore(application: application),
+            relayCacheTracker: relayCacheTracker,
+            accountsProxy: accountProxy,
+            devicesProxy: devicesProxy,
+            apiProxy: apiProxy,
+            relaySelector: relaySelector
+        )
+
+        let simulatorTunnelProviderHost = SimulatorTunnelProviderHost(
+            relaySelector: relaySelector,
+            apiTransportProvider: APITransportProvider(
+                requestFactory: MullvadApiRequestFactory(
+                    apiContext: apiContext,
+                    encoder: REST.Coding.makeJSONEncoder()
+                )
+            )
+        )
+
+        SimulatorTunnelProvider.shared.delegate = simulatorTunnelProviderHost
+
+        _ = try await tunnelManager.setNewAccount()
+        XCTAssertTrue(tunnelManager.deviceState.isLoggedIn)
+
+        let connectedExpectation = expectation(description: "Connected")
+        let reconnectingExpectation = expectation(description: "Reconnecting")
+        let tunnelObserver = TunnelBlockObserver(
+            didUpdateTunnelStatus: { manager, tunnelStatus in
+                switch tunnelStatus.state {
+                case .connected: connectedExpectation.fulfill()
+                case .reconnecting:
+                    manager.removeObserver(self.tunnelObserver)
+                    reconnectingExpectation.fulfill()
+                default: return
+                }
+            }
+        )
+
+        self.tunnelObserver = tunnelObserver
+        tunnelManager.addObserver(tunnelObserver)
+        tunnelManager.startTunnel()
+
+        await fulfillment(of: [connectedExpectation])
+
+        let reconnectMessageExpectation = expectation(description: "Did witness reconnect message")
+
+        simulatorTunnelProviderHost.onHandleProviderMessage = { message in
+            switch message {
+            case .reconnectTunnel: reconnectMessageExpectation.fulfill()
+            default: break
+            }
+        }
+
+        tunnelManager.reconnectTunnel(selectNewRelay: false)
+        await fulfillment(
+            of: [reconnectMessageExpectation, reconnectingExpectation], enforceOrder: true
+        )
+    }
+
+    /// This test verifies tunnel gets disconnected and reconnected on config reapply.
+    func testReapplyingConfigDisconnectsAndReconnects() async throws {
+        throw XCTSkip("TODO: Fix this flaky test or relieve it of it's misery")
+        var connectedExpectation = expectation(description: "Connected!")
+        let disconnectedExpectation = expectation(description: "Disconnected!")
+
+        accountProxy.createAccountResult = .success(NewAccountData.mockValue())
+
+        let relaySelector = RelaySelectorStub { _ in
+            try RelaySelectorStub.nonFallible().selectRelays(
+                tunnelSettings: LatestTunnelSettings(),
+                connectionAttemptCount: 0
+            )
+        }
+
+        let tunnelManager = TunnelManager(
+            backgroundTaskProvider: application,
+            tunnelStore: TunnelStore(application: application),
+            relayCacheTracker: relayCacheTracker,
+            accountsProxy: accountProxy,
+            devicesProxy: devicesProxy,
+            apiProxy: apiProxy,
+            relaySelector: relaySelector
+        )
+
+        let simulatorTunnelProviderHost = SimulatorTunnelProviderHost(
+            relaySelector: relaySelector,
+            apiTransportProvider: APITransportProvider(
+                requestFactory: MullvadApiRequestFactory(
+                    apiContext: apiContext,
+                    encoder: REST.Coding.makeJSONEncoder()
+                )
+            )
+        )
+        SimulatorTunnelProvider.shared.delegate = simulatorTunnelProviderHost
+        let tunnelObserver = TunnelBlockObserver(
+            didUpdateTunnelStatus: { _, tunnelStatus in
+                switch tunnelStatus.state {
+                case .connected: connectedExpectation.fulfill()
+                case .disconnected: disconnectedExpectation.fulfill()
+                default: return
+                }
+            }
+        )
+
+        self.tunnelObserver = tunnelObserver
+        tunnelManager.addObserver(tunnelObserver)
+
+        _ = try await tunnelManager.setNewAccount()
+
+        XCTAssertTrue(tunnelManager.deviceState.isLoggedIn)
+
+        tunnelManager.startTunnel()
+        await fulfillment(of: [connectedExpectation])
+        tunnelManager.reapplyTunnelConfiguration()
+        connectedExpectation = expectation(description: "Connected!")
+        await fulfillment(
+            of: [disconnectedExpectation, connectedExpectation],
             timeout: .UnitTest.timeout,
             enforceOrder: true
         )

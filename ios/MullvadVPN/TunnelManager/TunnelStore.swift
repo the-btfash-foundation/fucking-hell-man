@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 07/12/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -12,14 +12,14 @@ import MullvadTypes
 import NetworkExtension
 import UIKit
 
-protocol TunnelStoreProtocol {
+protocol TunnelStoreProtocol: Sendable {
     associatedtype TunnelType: TunnelProtocol, Equatable
     func getPersistentTunnels() -> [TunnelType]
     func createNewTunnel() -> TunnelType
 }
 
 /// Wrapper around system VPN tunnels.
-final class TunnelStore: TunnelStoreProtocol, TunnelStatusObserver {
+final class TunnelStore: TunnelStoreProtocol, TunnelStatusObserver, @unchecked Sendable {
     typealias TunnelType = Tunnel
     private let logger = Logger(label: "TunnelStore")
     private let lock = NSLock()
@@ -48,7 +48,7 @@ final class TunnelStore: TunnelStoreProtocol, TunnelStatusObserver {
         return persistentTunnels
     }
 
-    func loadPersistentTunnels(completion: @escaping (Error?) -> Void) {
+    func loadPersistentTunnels(completion: @escaping @Sendable (Error?) -> Void) {
         TunnelProviderManagerType.loadAllFromPreferences { managers, error in
             self.lock.lock()
             defer {
@@ -63,16 +63,17 @@ final class TunnelStore: TunnelStoreProtocol, TunnelStatusObserver {
                 tunnel.removeObserver(self)
             }
 
-            self.persistentTunnels = managers?.map { manager in
-                let tunnel = Tunnel(tunnelProvider: manager, backgroundTaskProvider: self.application)
-                tunnel.addObserver(self)
+            self.persistentTunnels =
+                managers?.map { manager in
+                    let tunnel = Tunnel(tunnelProvider: manager, backgroundTaskProvider: self.application)
+                    tunnel.addObserver(self)
 
-                self.logger.debug(
-                    "Loaded persistent tunnel: \(tunnel.logFormat()) with status: \(tunnel.status)."
-                )
+                    self.logger.debug(
+                        "Loaded persistent tunnel: \(tunnel.logFormat()) with status: \(tunnel.status)."
+                    )
 
-                return tunnel
-            } ?? []
+                    return tunnel
+                } ?? []
         }
     }
 
@@ -96,19 +97,20 @@ final class TunnelStore: TunnelStoreProtocol, TunnelStatusObserver {
         lock.lock()
         defer { lock.unlock() }
 
-        // swiftlint:disable:next force_cast
         handleTunnelStatus(tunnel: tunnel as! TunnelType, status: status)
     }
 
     private func handleTunnelStatus(tunnel: TunnelType, status: NEVPNStatus) {
         if status == .invalid,
-           let index = persistentTunnels.firstIndex(of: tunnel) {
+            let index = persistentTunnels.firstIndex(of: tunnel)
+        {
             persistentTunnels.remove(at: index)
             logger.debug("Persistent tunnel was removed: \(tunnel.logFormat()).")
         }
 
         if status != .invalid,
-           let index = newTunnels.compactMap({ $0.value }).firstIndex(where: { $0 == tunnel }) {
+            let index = newTunnels.compactMap({ $0.value }).firstIndex(where: { $0 == tunnel })
+        {
             newTunnels.remove(at: index)
             persistentTunnels.append(tunnel)
             logger.debug("New tunnel became persistent: \(tunnel.logFormat()).")

@@ -1,12 +1,19 @@
-use crate::cli;
-use mullvad_daemon::{runtime::new_multi_thread, DaemonShutdownHandle};
+#![allow(clippy::undocumented_unsafe_blocks)] // Remove me if you dare.
+
+use crate::{cli, init_daemon_logging};
+use mullvad_daemon::{
+    DaemonShutdownHandle,
+    runtime::new_multi_thread,
+    service::{SERVICE_DISPLAY_NAME, SERVICE_NAME},
+};
 use std::{
     env,
-    ffi::{c_void, OsString},
+    ffi::{OsString, c_void},
     ptr, slice,
     sync::{
+        Arc, LazyLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc, Arc, LazyLock,
+        mpsc,
     },
     thread,
     time::{Duration, Instant},
@@ -31,12 +38,10 @@ use windows_sys::Win32::{
     },
 };
 
-static SERVICE_NAME: &str = "MullvadVPN";
-static SERVICE_DISPLAY_NAME: &str = "Mullvad VPN Service";
 static SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 
-const SERVICE_RECOVERY_LAST_RESTART_DELAY: Duration = Duration::from_secs(60 * 10);
-const SERVICE_FAILURE_RESET_PERIOD: Duration = Duration::from_secs(60 * 15);
+const SERVICE_RECOVERY_LAST_RESTART_DELAY: Duration = Duration::from_mins(10);
+const SERVICE_FAILURE_RESET_PERIOD: Duration = Duration::from_mins(15);
 
 static SERVICE_ACCESS: LazyLock<ServiceAccess> = LazyLock::new(|| {
     ServiceAccess::QUERY_CONFIG
@@ -56,8 +61,7 @@ pub fn run() -> Result<(), String> {
 windows_service::define_windows_service!(service_main, handle_service_main);
 
 pub fn handle_service_main(_arguments: Vec<OsString>) {
-    log::info!("Service started.");
-
+    let runtime = new_multi_thread().build().expect("Starting runtime");
     let (event_tx, event_rx) = mpsc::channel();
 
     // Register service event handler
@@ -78,76 +82,50 @@ pub fn handle_service_main(_arguments: Vec<OsString>) {
             _ => ServiceControlHandlerResult::NotImplemented,
         }
     };
-    let status_handle = match service_control_handler::register(SERVICE_NAME, event_handler) {
-        Ok(handle) => handle,
-        Err(error) => {
-            log::error!(
-                "{}",
-                error.display_chain_with_msg("Failed to register a service control handler")
-            );
-            return;
-        }
-    };
+
+    let status_handle = service_control_handler::register(SERVICE_NAME, event_handler)
+        .expect("Failed to register a service control handler");
     let mut persistent_service_status = PersistentServiceStatus::new(status_handle);
     persistent_service_status
         .set_pending_start(Duration::from_secs(1))
         .unwrap();
 
-    let should_restart = Arc::new(AtomicBool::new(true));
-
-    let log_dir = crate::get_log_dir(cli::get_config()).expect("Log dir should be available here");
-
-    let runtime = new_multi_thread().build();
-    let runtime = match runtime {
-        Err(error) => {
-            log::error!("{}", error.display_chain());
-            persistent_service_status
-                .set_stopped(ServiceExitCode::ServiceSpecific(1))
-                .unwrap();
-            return;
-        }
-        Ok(runtime) => runtime,
-    };
-
-    let result = runtime.block_on(crate::create_daemon(log_dir));
-    let result = if let Ok(daemon) = result {
-        let shutdown_handle = daemon.shutdown_handle();
-
-        // Register monitor that translates `ServiceControl` to Daemon events
-        start_event_monitor(
-            persistent_service_status.clone(),
-            shutdown_handle,
-            event_rx,
-            should_restart.clone(),
-        );
-
-        persistent_service_status.set_running().unwrap();
-
-        runtime
-            .block_on(daemon.run())
-            .map_err(|e| e.display_chain())
-    } else {
-        result.map(|_| ())
-    };
-
+    let result = runtime.block_on(run_daemon(event_rx, &mut persistent_service_status));
     let exit_code = match result {
-        Ok(()) => {
-            log::info!("Stopping service");
-            // check if shutdown signal was sent from the system
-            if !should_restart.load(Ordering::Acquire) {
-                ServiceExitCode::default()
-            } else {
-                // otherwise return a non-zero code so that the daemon gets restarted
-                ServiceExitCode::ServiceSpecific(1)
-            }
-        }
+        Ok(should_restart) if !should_restart => ServiceExitCode::default(),
+        Ok(_should_restart) => ServiceExitCode::ServiceSpecific(1),
         Err(error) => {
             log::error!("{}", error);
             ServiceExitCode::ServiceSpecific(1)
         }
     };
-
     persistent_service_status.set_stopped(exit_code).unwrap();
+}
+
+async fn run_daemon(
+    event_rx: mpsc::Receiver<ServiceControl>,
+    persistent_service_status: &mut PersistentServiceStatus,
+) -> Result<bool, String> {
+    let config = cli::get_config();
+    let (log_location, log_handle) =
+        init_daemon_logging(config).expect("Failed to initialize logging");
+
+    let daemon = crate::create_daemon(log_location.map(|l| l.directory), log_handle).await?;
+
+    let shutdown_handle = daemon.shutdown_handle();
+    let should_restart = Arc::new(AtomicBool::new(true));
+    start_event_monitor(
+        persistent_service_status.clone(),
+        shutdown_handle,
+        event_rx,
+        should_restart.clone(),
+    );
+    log::info!("Service started.");
+    persistent_service_status.set_running().unwrap();
+    daemon.run().await.map_err(|e| e.display_chain())?;
+    log::info!("Stopping service");
+    // check if shutdown signal was sent from the system
+    Ok(should_restart.load(Ordering::Acquire))
 }
 
 /// Start event monitor thread that polls for `ServiceControl` and translates them into calls to
@@ -434,8 +412,9 @@ impl HibernationDetector {
     fn is_interactive_session(session_id: u32) -> bool {
         let mut logon_session_count = 0u32;
         let mut logon_session_list: *mut LUID = ptr::null_mut();
-        let status =
-            unsafe { LsaEnumerateLogonSessions(&mut logon_session_count, &mut logon_session_list) };
+        let status = unsafe {
+            LsaEnumerateLogonSessions(&raw mut logon_session_count, &raw mut logon_session_list)
+        };
         if status != STATUS_SUCCESS {
             log::warn!("LsaEnumerateLogonSessions() failed, error code: {}", status);
             return false;
@@ -447,7 +426,7 @@ impl HibernationDetector {
         for logon in logons {
             let mut session_data: *mut SECURITY_LOGON_SESSION_DATA = ptr::null_mut();
             // SAFETY: `LsaGetLogonSessionData` does not mutate `logon`
-            let status = unsafe { LsaGetLogonSessionData(logon, &mut session_data) };
+            let status = unsafe { LsaGetLogonSessionData(logon, &raw mut session_data) };
             if status != STATUS_SUCCESS {
                 log::warn!("LsaGetLogonSessionData() failed, error code: {}", status);
                 continue;
@@ -468,11 +447,11 @@ impl HibernationDetector {
 
     /// Register a machine suspend event.
     fn register_suspend(&mut self) {
-        if let Some(logoff_time) = &self.logoff_time {
-            if logoff_time.elapsed() < Duration::from_secs(5) {
-                log::info!("Pending hibernation detected");
-                self.should_restart = true;
-            }
+        if let Some(logoff_time) = &self.logoff_time
+            && logoff_time.elapsed() < Duration::from_secs(5)
+        {
+            log::info!("Pending hibernation detected");
+            self.should_restart = true;
         }
     }
 

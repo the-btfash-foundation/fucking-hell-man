@@ -3,13 +3,14 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 02/08/2020.
-//  Copyright © 2020 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import Logging
 
-public struct CustomFormatLogHandler: LogHandler {
+// FIXME: remobe @unchecked Sendable when we upgrade to Xcode26 everywhere
+public struct CustomFormatLogHandler: @unchecked Sendable, LogHandler {
     public var metadata: Logger.Metadata = [:]
     public var logLevel: Logger.Level = .debug
 
@@ -30,7 +31,6 @@ public struct CustomFormatLogHandler: LogHandler {
         }
     }
 
-    // swiftlint:disable:next function_parameter_count
     public func log(
         level: Logger.Level,
         message: Logger.Message,

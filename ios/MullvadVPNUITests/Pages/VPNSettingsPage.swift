@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-03-04.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -32,7 +32,7 @@ class VPNSettingsPage: Page {
         let expandButton = matchingCells.buttons[.expandButton]
         let lastCell = tableView.cells.allElementsBoundByIndex.last!
         tableView.scrollDownToElement(element: lastCell)
-        return expandButton
+        return expandButton.wait()
     }
 
     private func cellPortSelectorButton(_ cellAccessiblityIdentifier: AccessibilityIdentifier) -> XCUIElement {
@@ -76,34 +76,6 @@ class VPNSettingsPage: Page {
         return self
     }
 
-    // this button no longer exists
-    @discardableResult func tapUDPOverTCPPortExpandButton() -> Self {
-        cellExpandButton(AccessibilityIdentifier.udpOverTCPPortCell).tap()
-
-        return self
-    }
-
-    // this button no longer exists
-    @discardableResult func tapUDPOverTCPPortAutomaticCell() -> Self {
-        app.cells["\(AccessibilityIdentifier.wireGuardObfuscationPort)Automatic"]
-            .tap()
-        return self
-    }
-
-    // this button no longer exists
-    @discardableResult func tapUDPOverTCPPort80Cell() -> Self {
-        app.cells["\(AccessibilityIdentifier.wireGuardObfuscationPort)80"]
-            .tap()
-        return self
-    }
-
-    // this button no longer exists
-    @discardableResult func tapUDPOverTCPPort5001Cell() -> Self {
-        app.cells["\(AccessibilityIdentifier.wireGuardObfuscationPort)5001"]
-            .tap()
-        return self
-    }
-
     @discardableResult func tapQuantumResistantTunnelExpandButton() -> Self {
         cellExpandButton(AccessibilityIdentifier.quantumResistantTunnelCell).tap()
 
@@ -143,6 +115,11 @@ class VPNSettingsPage: Page {
     @discardableResult func tapWireGuardObfuscationShadowsocksCell() -> Self {
         app.cells[AccessibilityIdentifier.wireGuardObfuscationShadowsocks].tap()
 
+        return self
+    }
+
+    @discardableResult func tapWireGuardObufscationQuicCell() -> Self {
+        app.cells[AccessibilityIdentifier.wireGuardObfuscationQuic].tap()
         return self
     }
 

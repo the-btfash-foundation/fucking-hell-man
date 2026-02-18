@@ -1,11 +1,11 @@
-import { exec } from 'child_process';
-import { app, BrowserWindow, dialog, Menu, nativeImage, screen, Tray } from 'electron';
+import { exec, spawn } from 'child_process';
+import { app, BrowserWindow, dialog, Menu, screen, Tray } from 'electron';
 import path from 'path';
 import { sprintf } from 'sprintf-js';
 import { promisify } from 'util';
 
 import { connectEnabled, disconnectEnabled, reconnectEnabled } from '../shared/connect-helper';
-import { IAccountData, ILocation, TunnelState } from '../shared/daemon-rpc-types';
+import { DisconnectSource, IAccountData, ILocation, TunnelState } from '../shared/daemon-rpc-types';
 import { messages, relayLocations } from '../shared/gettext';
 import log from '../shared/logging';
 import { Scheduler } from '../shared/scheduler';
@@ -18,6 +18,8 @@ import {
 } from './ipc-event-channel';
 import { WebContentsConsoleInput } from './logging';
 import { isMacOs11OrNewer } from './platform-version';
+import { resolveBin } from './proc';
+import { createTray } from './tray';
 import TrayIconController, { TrayIconType } from './tray-icon-controller';
 import WindowController, { WindowControllerDelegate } from './window-controller';
 
@@ -28,12 +30,13 @@ export interface UserInterfaceDelegate {
   updateAccountData(): void;
   connectTunnel(): void;
   reconnectTunnel(): void;
-  disconnectTunnel(): void;
-  disconnectAndQuit(): void;
+  disconnectTunnel(source: DisconnectSource): void;
+  disconnectAndQuit(source: DisconnectSource): void;
   isUnpinnedWindow(): boolean;
   isLoggedIn(): boolean;
   getAccountData(): IAccountData | undefined;
   getTunnelState(): TunnelState;
+  getVersionInfo(): Promise<void>;
 }
 
 export default class UserInterface implements WindowControllerDelegate {
@@ -58,10 +61,60 @@ export default class UserInterface implements WindowControllerDelegate {
     const window = this.createWindow();
 
     this.windowController = this.createWindowController(window);
-    this.tray = this.createTray();
+    this.tray = createTray();
   }
 
   public registerIpcListeners() {
+    IpcMainEventChannel.daemon.handleTryStart(() => {
+      IpcMainEventChannel.daemon.notifyTryStartEvent?.('start-requested');
+
+      try {
+        const SETUP_PATH = `"\\"${resolveBin('mullvad-setup')}\\""`;
+        const SYSTEM_ROOT_PATH = process.env.SYSTEMROOT || process.env.windir || 'C:\\Windows';
+        const PWSH_PATH = `${SYSTEM_ROOT_PATH}\\System32\\WindowsPowershell\\v1.0\\powershell.exe`;
+
+        const child = spawn(
+          PWSH_PATH,
+          [
+            '-Command',
+            'Start-Process',
+            SETUP_PATH,
+            'start-service',
+            '-Verb',
+            'RunAs',
+            '-WindowStyle',
+            'Hidden',
+            '-Wait',
+          ],
+          {
+            detached: false,
+            stdio: 'ignore',
+            windowsVerbatimArguments: true,
+          },
+        );
+        child.once('error', (error) => {
+          log.error(`"mullvad-setup.exe start-service" failed: ${error.message}`);
+          IpcMainEventChannel.daemon.notifyTryStartEvent?.('stopped');
+        });
+
+        child.once('exit', (code) => {
+          if (code !== 0) {
+            log.error(
+              `"mullvad-setup.exe start-service" exited unexpectedly with exit code: ${code}`,
+            );
+            IpcMainEventChannel.daemon.notifyTryStartEvent?.('stopped');
+          } else {
+            log.info('"mullvad-setup.exe start-service" succeeded');
+            // 'running' is set from onDaemonConnected event handler
+          }
+        });
+      } catch (e) {
+        const error = e as Error;
+        log.error(`Failed to run "mullvad-setup.exe start-service". Error: ${error.message}`);
+        IpcMainEventChannel.daemon.notifyTryStartEvent?.('stopped');
+      }
+    });
+
     IpcMainEventChannel.app.handleShowOpenDialog(async (options) => {
       this.browsingFiles = true;
       const response = await dialog.showOpenDialog({
@@ -92,12 +145,8 @@ export default class UserInterface implements WindowControllerDelegate {
     });
   }
 
-  public createTrayIconController(
-    tunnelState: TunnelState,
-    blockWhenDisconnected: boolean,
-    monochromaticIcon: boolean,
-  ) {
-    const iconType = this.trayIconType(tunnelState, blockWhenDisconnected);
+  public createTrayIconController(tunnelState: TunnelState, monochromaticIcon: boolean) {
+    const iconType = this.trayIconType(tunnelState);
     this.trayIconController = new TrayIconController(this.tray, iconType, monochromaticIcon, false);
   }
 
@@ -146,9 +195,12 @@ export default class UserInterface implements WindowControllerDelegate {
     this.installWindowCloseHandler();
     this.installTrayClickHandlers();
 
-    const filePath = path.resolve(path.join(__dirname, '../renderer/index.html'));
     try {
-      await window.loadFile(filePath);
+      if (process.env.NODE_ENV === 'development' && process.env.VITE_DEV_SERVER_URL) {
+        await window.loadURL(process.env.VITE_DEV_SERVER_URL);
+      } else {
+        await window.loadFile(path.join(import.meta.dirname, 'index.html'));
+      }
     } catch (e) {
       const error = e as Error;
       log.error(`Failed to load index file: ${error.message}`);
@@ -160,12 +212,8 @@ export default class UserInterface implements WindowControllerDelegate {
     }
   }
 
-  public updateTray = (
-    isLoggedIn: boolean,
-    tunnelState: TunnelState,
-    blockWhenDisconnected: boolean,
-  ) => {
-    this.updateTrayIcon(tunnelState, blockWhenDisconnected);
+  public updateTray = (isLoggedIn: boolean, tunnelState: TunnelState) => {
+    this.updateTrayIcon(tunnelState);
     this.setTrayContextMenu(isLoggedIn, tunnelState);
     this.setTrayTooltip(tunnelState);
   };
@@ -201,8 +249,8 @@ export default class UserInterface implements WindowControllerDelegate {
     this.trayIconController?.showNotificationIcon(value, reason);
   public setWindowIcon = (icon: string) => this.windowController.window?.setIcon(icon);
 
-  public updateTrayIcon(tunnelState: TunnelState, blockWhenDisconnected: boolean) {
-    const type = this.trayIconType(tunnelState, blockWhenDisconnected);
+  public updateTrayIcon(tunnelState: TunnelState) {
+    const type = this.trayIconType(tunnelState);
     this.trayIconController?.animateToIcon(type);
   }
 
@@ -223,16 +271,6 @@ export default class UserInterface implements WindowControllerDelegate {
     this.trayIconController?.dispose();
   };
 
-  private createTray(): Tray {
-    const tray = new Tray(nativeImage.createEmpty());
-    tray.setToolTip('Mullvad VPN');
-
-    // disable double click on tray icon since it causes weird delay
-    tray.setIgnoreDoubleClickEvents(true);
-
-    return tray;
-  }
-
   private createWindow(): BrowserWindow {
     const unpinnedWindow = this.delegate.isUnpinnedWindow();
     const { width, height } = WindowController.getContentSize(unpinnedWindow);
@@ -247,7 +285,7 @@ export default class UserInterface implements WindowControllerDelegate {
       show: false,
       frame: unpinnedWindow,
       webPreferences: {
-        preload: path.join(__dirname, '../renderer/preloadBundle.js'),
+        preload: path.join(import.meta.dirname, 'preload.js'),
         nodeIntegration: false,
         nodeIntegrationInWorker: false,
         nodeIntegrationInSubFrames: false,
@@ -273,10 +311,10 @@ export default class UserInterface implements WindowControllerDelegate {
         // make the window visible on all workspaces and prevent the icon from showing in the dock
         // and app switcher.
         if (unpinnedWindow) {
-          void app.dock.show();
+          void app.dock?.show();
         } else {
           appWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-          app.dock.hide();
+          app.dock?.hide();
         }
 
         return appWindow;
@@ -316,7 +354,10 @@ export default class UserInterface implements WindowControllerDelegate {
       }
 
       default:
-        return new BrowserWindow(options);
+        return new BrowserWindow({
+          ...options,
+          transparent: true,
+        });
     }
   }
 
@@ -334,6 +375,8 @@ export default class UserInterface implements WindowControllerDelegate {
       this.delegate.dismissActiveNotifications();
 
       this.delegate.updateAccountData();
+
+      void this.delegate.getVersionInfo();
     });
 
     this.windowController.window?.on('blur', () => {
@@ -648,7 +691,7 @@ export default class UserInterface implements WindowControllerDelegate {
         id: 'disconnect',
         label: messages.gettext('Disconnect'),
         enabled: disconnectEnabled(connectedToDaemon, tunnelState.state),
-        click: this.delegate.disconnectTunnel,
+        click: () => this.delegate.disconnectTunnel('tray-disconnect'),
       },
       { type: 'separator' },
       {
@@ -657,7 +700,7 @@ export default class UserInterface implements WindowControllerDelegate {
           tunnelState.state === 'disconnected'
             ? messages.gettext('Quit')
             : this.escapeContextMenuLabel(messages.gettext('Disconnect & quit')),
-        click: this.delegate.disconnectAndQuit,
+        click: () => this.delegate.disconnectAndQuit('tray-disconnect-quit'),
       },
     ];
 
@@ -668,7 +711,7 @@ export default class UserInterface implements WindowControllerDelegate {
     return label.replace('&', '&&');
   }
 
-  private trayIconType(tunnelState: TunnelState, blockWhenDisconnected: boolean): TrayIconType {
+  private trayIconType(tunnelState: TunnelState): TrayIconType {
     switch (tunnelState.state) {
       case 'connected':
         return 'secured';
@@ -686,7 +729,7 @@ export default class UserInterface implements WindowControllerDelegate {
         return 'securing';
 
       case 'disconnected':
-        if (blockWhenDisconnected) {
+        if (tunnelState.lockedDown) {
           return 'securing';
         } else {
           return 'unsecured';

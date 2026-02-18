@@ -3,9 +3,10 @@
 //  PacketTunnelCore
 //
 //  Created by pronebird on 07/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
+@preconcurrency import Combine
 import Foundation
 
 extension PacketTunnelActor {

@@ -3,11 +3,12 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-09-27.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadSettings
 import XCTest
+
+@testable import MullvadSettings
 
 final class DAITASettingsTests: XCTestCase {
     func testIsAutomaticRouting() throws {

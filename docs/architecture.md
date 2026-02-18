@@ -61,7 +61,7 @@ All API requests can be dropped in flight to allow for resetting the connection 
 established. The API requests can also be blocked when in the offline state or when it's assumed
 that the user hasn't used our client for a period of time.
 
-### Selecting relay and bridge servers
+### Selecting relays
 See [this document](relay-selector.md).
 
 ### Problem reports
@@ -130,7 +130,7 @@ A high-level overview of the tunnel state machine can be seen in the diagram bel
 
 #### State machine inputs
 
-There are two types of inputs that the tunnel state machine react to. The first one is commands sent
+There are two types of inputs that the tunnel state machine reacts to. The first one is commands sent
 to the state machine, and the second is external events that the state machine listens to. Reacting
 to any event can result in the state machine transitioning away to a different state.
 
@@ -246,9 +246,8 @@ on Linux.
 
 #### macOS
 
-On macOS,  the offline monitor uses `route -n monitor -` to listen for changes in the routing table,
-reasserting that a default route exists any time a change is detected. It's only assumed that the
-host is offline if a default route doesn't exist.
+On macOS, the offline monitor detects whether the host is offline by using `SCDynamicStore` to check
+if there's any active network service.
 
 ##### Issues
 
@@ -261,15 +260,13 @@ needed for routing tunnel traffic.
 #### Android
 
 To detect connectivity on Android, the app relies on [`ConnectivityManager`] by listening for
-changes to the availability  of non-VPN networks that provide internet connectivity.  Connectivity
+changes to the availability of non-VPN networks that provide internet connectivity. Connectivity
 is inferred if such a network exists.
 
 #### iOS
 
 The iOS app uses WireGuard kit's offline detection, which in turn uses [`NWPathMonitor`] to listen
 for changes to the route table and assumes connectivity if a default route exists.
-
-### OpenVPN plugin and communication back to system service
 
 ### Split tunneling
 

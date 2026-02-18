@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-02-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -43,19 +43,9 @@ class AddCustomListCoordinator: Coordinator, Presentable, Presenting {
         )
         controller.delegate = self
 
-        controller.navigationItem.title = NSLocalizedString(
-            "CUSTOM_LISTS_NAVIGATION_EDIT_TITLE",
-            tableName: "CustomLists",
-            value: "New custom list",
-            comment: ""
-        )
+        controller.navigationItem.title = NSLocalizedString("Create new list", comment: "")
 
-        controller.saveBarButton.title = NSLocalizedString(
-            "CUSTOM_LISTS_NAVIGATION_CREATE_BUTTON",
-            tableName: "CustomLists",
-            value: "Create",
-            comment: ""
-        )
+        controller.saveBarButton.title = NSLocalizedString("Create", comment: "")
 
         controller.navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel,
@@ -71,7 +61,7 @@ class AddCustomListCoordinator: Coordinator, Presentable, Presenting {
     }
 }
 
-extension AddCustomListCoordinator: CustomListViewControllerDelegate {
+extension AddCustomListCoordinator: @preconcurrency CustomListViewControllerDelegate {
     func customListDidSave(_ list: CustomList) {
         didFinish?(self)
     }

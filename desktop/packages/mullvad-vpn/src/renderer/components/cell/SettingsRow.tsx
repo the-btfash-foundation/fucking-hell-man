@@ -1,10 +1,10 @@
 import React, { useCallback, useContext, useMemo, useState } from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../../config.json';
+import { Icon } from '../../lib/components';
+import { colors } from '../../lib/foundations';
 import { AriaInputGroup, AriaLabel } from '../AriaGroup';
 import { measurements, smallNormalText, tinyText } from '../common-styles';
-import ImageView from '../ImageView';
 import { StyledSettingsGroup, useSettingsGroupContext } from './SettingsGroup';
 
 const StyledSettingsRow = styled.label<{ $invalid: boolean }>((props) => ({
@@ -36,8 +36,8 @@ const StyledSettingsRow = styled.label<{ $invalid: boolean }>((props) => ({
   outlineWidth: '1px',
   borderStyle: 'solid',
   outlineStyle: 'solid',
-  borderColor: props.$invalid ? colors.red : 'transparent',
-  outlineColor: props.$invalid ? colors.red : 'transparent',
+  borderColor: props.$invalid ? colors.red : colors.transparent,
+  outlineColor: props.$invalid ? colors.red : colors.transparent,
   '&&:focus-within': {
     borderColor: props.$invalid ? colors.red : colors.white,
     outlineColor: props.$invalid ? colors.red : colors.white,
@@ -60,11 +60,12 @@ const StyledSettingsRowErrorMessage = styled.div(tinyText, {
   display: 'flex',
   alignItems: 'center',
   marginLeft: measurements.horizontalViewMargin,
+  marginRight: measurements.horizontalViewMargin,
   marginTop: '5px',
-  color: colors.white60,
+  color: colors.whiteAlpha60,
 });
 
-const StyledErrorMessageAlertIcon = styled(ImageView)({
+const StyledErrorMessageAlertIcon = styled(Icon)({
   marginRight: '5px',
 });
 
@@ -85,7 +86,7 @@ export function useSettingsRowContext() {
   return useContext(settingsRowContext);
 }
 
-interface IndentedRowProps {
+export interface IndentedRowProps {
   label: string;
   infoMessage?: string | Array<string>;
   errorMessage?: string;
@@ -132,7 +133,7 @@ export function SettingsRow(props: React.PropsWithChildren<IndentedRowProps>) {
 export function SettingsRowErrorMessage(props: React.PropsWithChildren) {
   return (
     <StyledSettingsRowErrorMessage>
-      <StyledErrorMessageAlertIcon source="icon-alert" tintColor={colors.red} width={12} />
+      <StyledErrorMessageAlertIcon icon="alert-circle" color="red" size="small" />
       {props.children}
     </StyledSettingsRowErrorMessage>
   );

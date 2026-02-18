@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-10.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -24,7 +24,7 @@ class LoginPage: Page {
 
     @discardableResult public func waitForAccountNumberSubmitButton() -> Self {
         let submitButtonExist = app.buttons[AccessibilityIdentifier.loginTextFieldButton]
-            .waitForExistence(timeout: BaseUITestCase.defaultTimeout)
+            .existsAfterWait()
         XCTAssertTrue(submitButtonExist, "Account number submit button shown")
         return self
     }
@@ -40,39 +40,37 @@ class LoginPage: Page {
     }
 
     @discardableResult public func verifySuccessIconShown() -> Self {
-        // Success icon is only shown very briefly, since another view is presented after success icon is shown.
-        // Therefore we need to poll faster than waitForElement function.
-        let successIconDisplayedExpectation = XCTestExpectation(description: "Success icon shown")
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [self] _ in
-            let statusImageView = self.app.images[.statusImageView]
+        let isShown = getSuccessIconShown()
 
-            if statusImageView.exists {
-                if statusImageView.value as? String == "success" {
-                    successIconDisplayedExpectation.fulfill()
-                }
-            }
+        XCTAssertTrue(isShown, "Success icon shown")
+
+        return self
+    }
+
+    @discardableResult public func confirmAccountCreation() -> Self {
+        app.buttons[AccessibilityIdentifier.createAccountConfirmationButton].tap()
+        return self
+    }
+
+    @discardableResult public func tryConfirmAccountCreation() -> Self {
+        if app.buttons[AccessibilityIdentifier.createAccountConfirmationButton].existsAfterWait(timeout: .short) {
+            return confirmAccountCreation()
         }
-
-        let waitResult = XCTWaiter.wait(for: [successIconDisplayedExpectation], timeout: BaseUITestCase.longTimeout)
-        XCTAssertEqual(waitResult, .completed, "Success icon shown")
-        timer.invalidate()
-
         return self
     }
 
     @discardableResult public func verifyFailIconShown() -> Self {
         let predicate = NSPredicate(format: "identifier == 'statusImageView' AND value == 'fail'")
         let elementQuery = app.images.containing(predicate)
-        let elementExists = elementQuery.firstMatch.waitForExistence(timeout: BaseUITestCase.longTimeout)
+        let elementExists = elementQuery.firstMatch.existsAfterWait(
+            timeout: .longerThanMullvadAPITimeout
+        )
         XCTAssertTrue(elementExists, "Fail icon shown")
         return self
     }
 
     /// Checks whether success icon is being shown
     func getSuccessIconShown() -> Bool {
-        let predicate = NSPredicate(format: "identifier == 'statusImageView' AND value == 'success'")
-        let elementQuery = app.images.containing(predicate)
-        let elementExists = elementQuery.firstMatch.waitForExistence(timeout: BaseUITestCase.defaultTimeout)
-        return elementExists
+        app.images[.statusImageView].existsAfterWait(timeout: .longerThanMullvadAPITimeout)
     }
 }

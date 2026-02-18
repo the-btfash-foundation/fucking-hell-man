@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 25/10/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -11,11 +11,12 @@ import MullvadREST
 import MullvadTypes
 import Operations
 
-final class ProblemReportInteractor {
+final class ProblemReportInteractor: @unchecked Sendable {
     private let apiProxy: APIQuerying
     private let tunnelManager: TunnelManager
     private let consolidatedLog: ConsolidatedApplicationLog
     private var reportedString = ""
+    private var requestCancellable: Cancellable?
 
     init(apiProxy: APIQuerying, tunnelManager: TunnelManager) {
         self.apiProxy = apiProxy
@@ -28,10 +29,12 @@ final class ProblemReportInteractor {
         )
     }
 
-    func fetchReportString(completion: @escaping (String) -> Void) {
-        consolidatedLog.addLogFiles(fileURLs: ApplicationTarget.allCases.flatMap {
-            ApplicationConfiguration.logFileURLs(for: $0, in: ApplicationConfiguration.containerURL)
-        }) { [weak self] in
+    func fetchReportString(completion: @escaping @Sendable (String) -> Void) {
+        consolidatedLog.addLogFiles(
+            fileURLs: ApplicationTarget.allCases.flatMap {
+                ApplicationConfiguration.logFileURLs(for: $0, in: ApplicationConfiguration.containerURL)
+            }
+        ) { [weak self] in
             guard let self else { return }
             completion(consolidatedLog.string)
         }
@@ -40,15 +43,22 @@ final class ProblemReportInteractor {
     func sendReport(
         email: String,
         message: String,
-        completion: @escaping (Result<Void, Error>) -> Void
+        includeAccountTokenInLogs: Bool,
+        completion: @escaping @Sendable (Result<Void, Error>) -> Void
     ) {
         let logString = self.consolidatedLog.string
+        let accountToken =
+            if isUserLoggedIn() && includeAccountTokenInLogs,
+                let token = tunnelManager.deviceState.accountData?.identifier
+            {
+                "\naccount-token: \(token)"
+            } else { "" }
 
         if logString.isEmpty {
-            fetchReportString { [weak self] updatedLogString in
+            fetchReportString { [weak self, accountToken] updatedLogString in
                 self?.sendProblemReport(
                     email: email,
-                    message: message,
+                    message: message + accountToken,
                     logString: updatedLogString,
                     completion: completion
                 )
@@ -56,34 +66,39 @@ final class ProblemReportInteractor {
         } else {
             sendProblemReport(
                 email: email,
-                message: message,
+                message: message + accountToken,
                 logString: logString,
                 completion: completion
             )
         }
     }
 
+    func isUserLoggedIn() -> Bool {
+        tunnelManager.deviceState.isLoggedIn
+    }
+
+    func cancelSendingReport() {
+        requestCancellable?.cancel()
+    }
+
     private func sendProblemReport(
         email: String,
         message: String,
         logString: String,
-        completion: @escaping (Result<Void, Error>) -> Void
+        completion: @escaping @Sendable (Result<Void, Error>) -> Void
     ) {
         let metadataDict = self.consolidatedLog.metadata.reduce(into: [:]) { output, entry in
             output[entry.key.rawValue] = entry.value
         }
 
-        let request = REST.ProblemReportRequest(
+        let request = ProblemReportRequest(
             address: email,
             message: message,
             log: logString,
             metadata: metadataDict
         )
 
-        _ = self.apiProxy.sendProblemReport(
-            request,
-            retryStrategy: .default
-        ) { result in
+        requestCancellable = apiProxy.sendProblemReport(request, retryStrategy: .default) { result in
             DispatchQueue.main.async {
                 completion(result)
             }

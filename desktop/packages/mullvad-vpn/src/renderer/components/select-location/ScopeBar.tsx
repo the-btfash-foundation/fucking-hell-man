@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../../config.json';
+import { colors } from '../../lib/foundations';
 import { smallText } from '../common-styles';
 
 const StyledScopeBar = styled.div({
@@ -43,7 +43,7 @@ const StyledScopeBarItem = styled.button<{ selected?: boolean }>(smallText, (pro
   color: colors.white,
   textAlign: 'center',
   border: 'none',
-  backgroundColor: props.selected ? colors.green : 'transparent',
+  backgroundColor: props.selected ? colors.green : colors.transparent,
   '&&:hover': {
     backgroundColor: props.selected ? colors.green : colors.blue40,
   },

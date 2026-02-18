@@ -3,14 +3,15 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 07/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadREST
 import MullvadRustRuntime
+import MullvadSettings
 import MullvadTypes
-import WireGuardKitTypes
+@preconcurrency import WireGuardKitTypes
 
 /**
  Tunnel actor state with metadata describing the current phase of packet tunnel lifecycle.
@@ -87,7 +88,7 @@ enum State: Equatable {
 }
 
 /// Enum describing network availability.
-public enum NetworkReachability: Equatable, Codable {
+public enum NetworkReachability: Equatable, Codable, Sendable {
     case undetermined, reachable, unreachable
 }
 
@@ -100,7 +101,7 @@ protocol StateAssociatedData {
 
 extension State {
     /// Policy describing what WG key to use for tunnel communication.
-    enum KeyPolicy {
+    enum KeyPolicy: Sendable {
         /// Use current key stored in device data.
         case useCurrent
 
@@ -141,7 +142,9 @@ extension State {
         }
 
         /// The actual endpoint fed to WireGuard, can be a local endpoint if obfuscation is used.
-        public var connectedEndpoint: MullvadEndpoint
+        /// Contains the socket address, gateway info, public key, and obfuscation method.
+        public var connectedEndpoint: SelectedEndpoint
+
         /// Via which transport protocol was the connection made to the relay
         public let transportLayer: TransportLayer
 
@@ -156,7 +159,7 @@ extension State {
     }
 
     /// Data associated with error state.
-    struct BlockingData: StateAssociatedData {
+    struct BlockingData: StateAssociatedData, Sendable {
         /// Reason why block state was entered.
         public var reason: BlockedStateReason
 
@@ -188,7 +191,7 @@ extension State {
 }
 
 /// Reason why packet tunnel entered error state.
-public enum BlockedStateReason: String, Codable, Equatable {
+public enum BlockedStateReason: String, Codable, Equatable, Sendable {
     /// Device is locked.
     case deviceLocked
 
@@ -207,8 +210,11 @@ public enum BlockedStateReason: String, Codable, Equatable {
     /// No relays satisfying DAITA constraints.
     case noRelaysSatisfyingDaitaConstraints
 
-    /// No relays satisfying DAITA constraints.
+    /// No relays satisfying obfuscation settings.
     case noRelaysSatisfyingObfuscationSettings
+
+    /// No relays satisfying port constraints.
+    case noRelaysSatisfyingPortConstraints
 
     /// Any other failure when reading settings.
     case readSettings
@@ -232,8 +238,24 @@ public enum BlockedStateReason: String, Codable, Equatable {
     /// Invalid public key.
     case invalidRelayPublicKey
 
+    /// Device is offline
+    case offline
+
     /// Unidentified reason.
     case unknown
+
+    /// Indicates if this error state is recoverable, i.e., if at any point should the packet tunnel try to reconnect from this state.
+    public func recoverableError() -> Bool {
+        switch self {
+        case .deviceLocked, .multihopEntryEqualsExit, .outdatedSchema, .noRelaysSatisfyingConstraints,
+            .noRelaysSatisfyingPortConstraints, .noRelaysSatisfyingDaitaConstraints,
+            .noRelaysSatisfyingFilterConstraints, .noRelaysSatisfyingObfuscationSettings, .readSettings,
+            .invalidRelayPublicKey, .offline:
+            return true
+        case .deviceRevoked, .deviceLoggedOut, .tunnelAdapter, .accountExpired, .invalidAccount, .unknown:
+            return false
+        }
+    }
 }
 
 extension State.BlockingData {
@@ -244,7 +266,7 @@ extension State.BlockingData {
 }
 
 /// Describes which relay the tunnel should connect to next.
-public enum NextRelays: Equatable, Codable {
+public enum NextRelays: Equatable, Codable, Sendable {
     /// Select next relays randomly.
     case random
 
@@ -256,11 +278,14 @@ public enum NextRelays: Equatable, Codable {
 }
 
 /// Describes the reason for reconnection request.
-public enum ActorReconnectReason: Equatable {
+public enum ActorReconnectReason: Equatable, Sendable {
     /// Initiated by user.
     case userInitiated
 
     /// Initiated by tunnel monitor due to loss of connectivity, or if ephemeral peer negotiation times out.
     /// Actor will increment the connection attempt counter before picking next relay.
     case connectionLoss
+
+    /// Restored  connectivity
+    case restoredConnectivity
 }

@@ -3,12 +3,13 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-10.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import XCTest
 
+@MainActor
 class Page {
     let app: XCUIApplication
 
@@ -22,7 +23,7 @@ class Page {
     func waitForPageToBeShown() {
         if let pageElement {
             XCTAssertTrue(
-                pageElement.waitForExistence(timeout: BaseUITestCase.defaultTimeout),
+                pageElement.existsAfterWait(timeout: .extremelyLong),
                 "Page is shown"
             )
         }
@@ -45,7 +46,7 @@ class Page {
     }
 
     @discardableResult func tapKeyboardDoneButton() -> Self {
-        app.toolbars.buttons["Done"].tap()
+        app.toolbars.buttons[NSLocalizedString("Done", comment: "")].tap()
         return self
     }
 

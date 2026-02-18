@@ -1,5 +1,5 @@
-use crate::{api, settings, Daemon};
-use mullvad_api::{proxy::ApiConnectionMode, rest, ApiProxy};
+use crate::{Daemon, settings};
+use mullvad_api::{ApiProxy, access_mode, proxy::ApiConnectionMode, rest};
 use mullvad_types::{
     access_method::{self, AccessMethod, AccessMethodSetting},
     settings::Settings,
@@ -13,10 +13,10 @@ pub enum Error {
     /// Can not find access method
     #[error("Cannot find custom access method {0}")]
     NoSuchMethod(access_method::Id),
-    /// Some error occured in the daemon's state of handling
+    /// Some error occurred in the daemon's state of handling
     /// [`AccessMethodSetting`]s & [`ApiConnectionMode`]s
-    #[error("Error occured when handling connection settings & details")]
-    ApiService(#[from] api::Error),
+    #[error("Error occurred when handling connection settings & details")]
+    ApiService(#[from] access_mode::Error),
     /// A REST request failed
     #[error("Reset request failed")]
     Rest(#[from] rest::Error),
@@ -39,12 +39,13 @@ impl Daemon {
         name: String,
         enabled: bool,
         access_method: AccessMethod,
-    ) -> Result<access_method::Id, Error> {
+    ) -> Result<access_method::Id, crate::Error> {
         let access_method_setting = AccessMethodSetting::new(name, enabled, access_method);
         let id = access_method_setting.get_id();
         self.settings
-            .update(|settings| settings.api_access_methods.append(access_method_setting))
-            .await?;
+            .try_update(|settings| settings.api_access_methods.append(access_method_setting))
+            .await
+            .map_err(crate::Error::SettingsError)?;
         Ok(id)
     }
 
@@ -80,11 +81,12 @@ impl Daemon {
         access_method: access_method::Id,
     ) -> Result<(), Error> {
         self.settings
-            .update(|settings| {
+            .try_update(|settings| -> Result<(), Error> {
                 settings.api_access_methods.update(
                     |setting| setting.get_id() == access_method,
                     |setting| setting.enable(),
-                );
+                )?;
+                Ok(())
             })
             .await?;
         self.access_mode_handler
@@ -111,16 +113,20 @@ impl Daemon {
     pub async fn update_access_method(
         &mut self,
         access_method_update: AccessMethodSetting,
-    ) -> Result<(), Error> {
+    ) -> Result<(), crate::Error> {
         self.settings
-            .update(|settings: &mut Settings| {
-                let target = access_method_update.get_id();
-                settings.api_access_methods.update(
-                    |access_method| access_method.get_id() == target,
-                    |method| *method = access_method_update,
-                );
-            })
-            .await?;
+            .try_update(
+                |settings: &mut Settings| -> Result<(), access_method::Error> {
+                    let target = access_method_update.get_id();
+                    settings.api_access_methods.update(
+                        |access_method| access_method.get_id() == target,
+                        |method| *method = access_method_update,
+                    )?;
+                    Ok(())
+                },
+            )
+            .await
+            .map_err(crate::Error::SettingsError)?;
 
         Ok(())
     }
@@ -153,9 +159,9 @@ impl Daemon {
     #[cfg(not(target_os = "android"))]
     pub(crate) async fn test_access_method(
         proxy: talpid_types::net::AllowedEndpoint,
-        access_method_selector: api::AccessModeSelectorHandle,
+        access_method_selector: access_mode::AccessModeSelectorHandle,
         daemon_event_sender: crate::DaemonEventSender<(
-            api::AccessMethodEvent,
+            access_mode::AccessMethodEvent,
             futures::channel::oneshot::Sender<()>,
         )>,
         api_proxy: ApiProxy,
@@ -165,14 +171,14 @@ impl Daemon {
             .await
             .map(|connection_mode| connection_mode.endpoint)?;
 
-        api::AccessMethodEvent::Allow { endpoint: proxy }
-            .send(daemon_event_sender.clone())
+        access_mode::AccessMethodEvent::Allow { endpoint: proxy }
+            .send(daemon_event_sender.to_unbounded_sender())
             .await?;
 
         let result = Self::perform_api_request(api_proxy).await;
 
-        api::AccessMethodEvent::Allow { endpoint: reset }
-            .send(daemon_event_sender)
+        access_mode::AccessMethodEvent::Allow { endpoint: reset }
+            .send(daemon_event_sender.to_unbounded_sender())
             .await?;
 
         result
@@ -181,9 +187,9 @@ impl Daemon {
     #[cfg(target_os = "android")]
     pub(crate) async fn test_access_method(
         _: talpid_types::net::AllowedEndpoint,
-        _: api::AccessModeSelectorHandle,
+        _: access_mode::AccessModeSelectorHandle,
         _: crate::DaemonEventSender<(
-            api::AccessMethodEvent,
+            access_mode::AccessMethodEvent,
             futures::channel::oneshot::Sender<()>,
         )>,
         api_proxy: ApiProxy,

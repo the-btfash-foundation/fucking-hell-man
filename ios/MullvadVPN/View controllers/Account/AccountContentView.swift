@@ -3,62 +3,37 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 08/07/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
 class AccountContentView: UIView {
+    let debugOptionsButton: AppButton = {
+        let button = AppButton(style: .default)
+        button.setAccessibilityIdentifier(.debugOptionsButton)
+        button.setTitle(NSLocalizedString("Debug options", comment: ""), for: .normal)
+        return button
+    }()
+
     let purchaseButton: InAppPurchaseButton = {
         let button = InAppPurchaseButton()
         button.setAccessibilityIdentifier(.purchaseButton)
-        return button
-    }()
-
-    let storeKit2Button: AppButton = {
-        let button = AppButton(style: .success)
-        button.setTitle(NSLocalizedString(
-            "BUY_SUBSCRIPTION_STOREKIT_2",
-            tableName: "Account",
-            value: "Make a purchase with StoreKit2",
-            comment: ""
-        ), for: .normal)
-        return button
-    }()
-
-    let redeemVoucherButton: AppButton = {
-        let button = AppButton(style: .success)
-        button.setAccessibilityIdentifier(.redeemVoucherButton)
-        button.setTitle(NSLocalizedString(
-            "REDEEM_VOUCHER_BUTTON_TITLE",
-            tableName: "Account",
-            value: "Redeem voucher",
-            comment: ""
-        ), for: .normal)
+        button.setTitle(NSLocalizedString("Add time", comment: ""), for: .normal)
         return button
     }()
 
     let logoutButton: AppButton = {
         let button = AppButton(style: .danger)
         button.setAccessibilityIdentifier(.logoutButton)
-        button.setTitle(NSLocalizedString(
-            "LOGOUT_BUTTON_TITLE",
-            tableName: "Account",
-            value: "Log out",
-            comment: ""
-        ), for: .normal)
+        button.setTitle(NSLocalizedString("Log out", comment: ""), for: .normal)
         return button
     }()
 
     let deleteButton: AppButton = {
         let button = AppButton(style: .danger)
         button.setAccessibilityIdentifier(.deleteButton)
-        button.setTitle(NSLocalizedString(
-            "DELETE_BUTTON_TITLE",
-            tableName: "Account",
-            value: "Delete account",
-            comment: ""
-        ), for: .normal)
+        button.setTitle(NSLocalizedString("Delete account", comment: ""), for: .normal)
         return button
     }()
 
@@ -95,14 +70,14 @@ class AccountContentView: UIView {
     lazy var buttonStackView: UIStackView = {
         var arrangedSubviews = [UIView]()
         #if DEBUG
-        arrangedSubviews.append(redeemVoucherButton)
-        arrangedSubviews.append(storeKit2Button)
+            arrangedSubviews.append(debugOptionsButton)
         #endif
         arrangedSubviews.append(contentsOf: [
             purchaseButton,
             logoutButton,
             deleteButton,
         ])
+        arrangedSubviews.forEach { $0.isExclusiveTouch = true }
         let stackView = UIStackView(arrangedSubviews: arrangedSubviews)
         stackView.axis = .vertical
         stackView.spacing = UIMetrics.padding16
@@ -111,17 +86,36 @@ class AccountContentView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-
-        directionalLayoutMargins = UIMetrics.contentLayoutMargins
         setAccessibilityIdentifier(.accountView)
+        addScrollView()
+    }
 
-        addConstrainedSubviews([contentStackView, buttonStackView]) {
+    private func addScrollView() {
+        let scrollView = UIScrollView()
+        let contentView = UIView()
+
+        addConstrainedSubviews([scrollView]) {
+            scrollView.pinEdgesToSuperviewMargins()
+        }
+
+        scrollView.addConstrainedSubviews([contentView]) {
+            contentView.pinEdgesToSuperview()
+            contentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor)
+            contentView.heightAnchor.constraint(greaterThanOrEqualTo: scrollView.frameLayoutGuide.heightAnchor)
+        }
+
+        let spacer = UIView()
+
+        contentView.addConstrainedSubviews([contentStackView, spacer, buttonStackView]) {
             contentStackView.pinEdgesToSuperviewMargins(.all().excluding(.bottom))
-            buttonStackView.topAnchor.constraint(
-                greaterThanOrEqualTo: contentStackView.bottomAnchor,
+            spacer.pinEdgesToSuperviewMargins(.all().excluding(.top).excluding(.bottom))
+            buttonStackView.pinEdgesToSuperviewMargins(.all().excluding(.top))
+
+            spacer.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor)
+            spacer.topAnchor.constraint(
+                equalTo: contentStackView.bottomAnchor,
                 constant: UIMetrics.TableView.sectionSpacing
             )
-            buttonStackView.pinEdgesToSuperviewMargins(.all().excluding(.top))
         }
     }
 

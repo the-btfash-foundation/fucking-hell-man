@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 20/03/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -95,7 +95,7 @@ extension UIColor {
             static let indentationLevelTwo = UIColor(red: 0.11, green: 0.20, blue: 0.31, alpha: 1.0)
             static let indentationLevelThree = UIColor(red: 0.11, green: 0.19, blue: 0.29, alpha: 1.0)
 
-            static let normal = indentationLevelZero
+            static let normal = UIColor.primaryColor
             static let disabled = normal.darkened(by: 0.1)!
             static let selected = successColor
             static let disabledSelected = selected.darkened(by: 0.3)!
@@ -144,6 +144,10 @@ extension UIColor {
         static let selectedColor = successColor
     }
 
+    enum AlertController {
+        static let tintColor = UIColor(red: 0.0, green: 0.59, blue: 1.0, alpha: 1)
+    }
+
     // Common colors
     static let primaryColor = UIColor(red: 0.16, green: 0.30, blue: 0.45, alpha: 1.0)
     static let secondaryColor = UIColor(red: 0.10, green: 0.18, blue: 0.27, alpha: 1.0)
@@ -153,4 +157,10 @@ extension UIColor {
 
     static let primaryTextColor = UIColor.white
     static let secondaryTextColor = UIColor(white: 1.0, alpha: 0.8)
+}
+
+extension CGColor {
+    enum ReduceAnonymityWarningView {
+        static let backroundColor = CGColor(red: 0.06, green: 0.09, blue: 0.14, alpha: 0.4)
+    }
 }

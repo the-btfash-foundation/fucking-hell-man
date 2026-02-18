@@ -3,15 +3,16 @@
 //  MullvadPostQuantumTests
 //
 //  Created by Mojgan on 2024-07-18.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
+
+import XCTest
 
 @testable import MullvadMockData
 @testable import MullvadREST
 @testable import MullvadRustRuntime
 @testable import MullvadTypes
 @testable import WireGuardKitTypes
-import XCTest
 
 final class MultiHopEphemeralPeerExchangerTests: XCTestCase {
     var exitRelay: SelectedRelay!
@@ -48,14 +49,28 @@ final class MultiHopEphemeralPeerExchangerTests: XCTestCase {
         )
 
         entryRelay = SelectedRelay(
-            endpoint: entryMatch.endpoint,
+            endpoint: SelectedEndpoint(
+                socketAddress: .ipv4(entryMatch.endpoint.ipv4Relay),
+                ipv4Gateway: entryMatch.endpoint.ipv4Gateway,
+                ipv6Gateway: entryMatch.endpoint.ipv6Gateway,
+                publicKey: entryMatch.endpoint.publicKey,
+                obfuscation: .off
+            ),
             hostname: entryMatch.relay.hostname,
-            location: entryMatch.location
+            location: entryMatch.location,
+            features: nil
         )
         exitRelay = SelectedRelay(
-            endpoint: exitMatch.endpoint,
+            endpoint: SelectedEndpoint(
+                socketAddress: .ipv4(exitMatch.endpoint.ipv4Relay),
+                ipv4Gateway: exitMatch.endpoint.ipv4Gateway,
+                ipv6Gateway: exitMatch.endpoint.ipv6Gateway,
+                publicKey: exitMatch.endpoint.publicKey,
+                obfuscation: .off
+            ),
             hostname: exitMatch.relay.hostname,
-            location: exitMatch.location
+            location: exitMatch.location,
+            features: nil
         )
     }
 
@@ -90,8 +105,8 @@ final class MultiHopEphemeralPeerExchangerTests: XCTestCase {
 
         await multiHopExchanger.start()
 
-        wait(
-            for: [expectedNegotiationFailure, reconfigurationExpectation, negotiationSuccessful],
+        await fulfillment(
+            of: [expectedNegotiationFailure, reconfigurationExpectation, negotiationSuccessful],
             timeout: .UnitTest.invertedTimeout
         )
     }
@@ -133,8 +148,8 @@ final class MultiHopEphemeralPeerExchangerTests: XCTestCase {
             })
         await multiHopPeerExchanger.start()
 
-        wait(
-            for: [unexpectedNegotiationFailure, reconfigurationExpectation, negotiationSuccessful],
+        await fulfillment(
+            of: [unexpectedNegotiationFailure, reconfigurationExpectation, negotiationSuccessful],
             timeout: .UnitTest.invertedTimeout
         )
     }
@@ -171,8 +186,50 @@ final class MultiHopEphemeralPeerExchangerTests: XCTestCase {
         })
         await multiHopPeerExchanger.start()
 
-        wait(
-            for: [unexpectedNegotiationFailure, reconfigurationExpectation, negotiationSuccessful],
+        await fulfillment(
+            of: [unexpectedNegotiationFailure, reconfigurationExpectation, negotiationSuccessful],
+            timeout: .UnitTest.invertedTimeout
+        )
+    }
+
+    func testEphemeralPeerExchangeSuccessPassesDaitaParameters() async throws {
+        let unexpectedNegotiationFailure = expectation(description: "Negotiation failed.")
+        unexpectedNegotiationFailure.isInverted = true
+
+        let reconfigurationExpectation = expectation(description: "Tunnel reconfiguration took place")
+        reconfigurationExpectation.expectedFulfillmentCount = 3
+
+        let negotiationSuccessful = expectation(description: "Negotiation succeeded.")
+        negotiationSuccessful.expectedFulfillmentCount = 1
+
+        let peerExchangeActor = EphemeralPeerExchangeActorStub()
+        let preSharedKey = try XCTUnwrap(PreSharedKey(hexKey: PrivateKey().hexKey))
+        peerExchangeActor.result = .success((preSharedKey, PrivateKey()))
+
+        let multiHopPeerExchanger = MultiHopEphemeralPeerExchanger(
+            entry: entryRelay,
+            exit: exitRelay,
+            devicePrivateKey: PrivateKey(),
+            keyExchanger: peerExchangeActor,
+            enablePostQuantum: false,
+            enableDaita: true
+        ) { params in
+            if case let .multi(entry, exit) = params {
+                XCTAssertNotNil(entry.configuration.daitaParameters)
+                XCTAssertNil(exit.configuration.daitaParameters)
+            }
+            reconfigurationExpectation.fulfill()
+        } onFinish: {
+            negotiationSuccessful.fulfill()
+        }
+
+        peerExchangeActor.delegate = KeyExchangingResultStub(onReceiveEphemeralPeerPrivateKey: { ephemeralKey, daita in
+            await multiHopPeerExchanger.receiveEphemeralPeerPrivateKey(ephemeralKey, daitaParameters: daita)
+        })
+        await multiHopPeerExchanger.start()
+
+        await fulfillment(
+            of: [unexpectedNegotiationFailure, reconfigurationExpectation, negotiationSuccessful],
             timeout: .UnitTest.invertedTimeout
         )
     }

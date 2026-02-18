@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 09/08/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -47,18 +47,21 @@ struct AccountDataThrottling {
             break
 
         case .whenCloseToExpiryAndBeyond:
-            guard let closeToExpiry = Calendar.current.date(
-                byAdding: .day,
-                value: Self.closeToExpiryDays * -1,
-                to: accountData.expiry
-            ) else { return }
+            guard
+                let closeToExpiry = Calendar.current.date(
+                    byAdding: .day,
+                    value: Self.closeToExpiryDays * -1,
+                    to: accountData.expiry
+                )
+            else { return }
 
             if closeToExpiry > now {
                 return
             }
         }
 
-        let waitInterval = accountData.expiry > now
+        let waitInterval =
+            accountData.expiry > now
             ? Self.defaultWaitInterval
             : Self.waitIntervalForExpiredAccount
 

@@ -3,11 +3,12 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 08/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import MullvadSettings
+import MullvadTypes
 import Routing
 import UIKit
 
@@ -51,26 +52,11 @@ class AddAccessMethodCoordinator: Coordinator, Presentable, Presenting {
     }
 
     private func setUpControllerNavigationItem(_ controller: MethodSettingsViewController) {
-        controller.navigationItem.prompt = NSLocalizedString(
-            "METHOD_SETTINGS_NAVIGATION_ADD_PROMPT",
-            tableName: "APIAccess",
-            value: "The app will test the method before saving.",
-            comment: ""
-        )
+        controller.navigationItem.prompt = NSLocalizedString("The app will test the method before saving.", comment: "")
 
-        controller.navigationItem.title = NSLocalizedString(
-            "METHOD_SETTINGS_NAVIGATION_ADD_TITLE",
-            tableName: "APIAccess",
-            value: "Add access method",
-            comment: ""
-        )
+        controller.navigationItem.title = NSLocalizedString("Add method", comment: "")
 
-        controller.saveBarButton.title = NSLocalizedString(
-            "METHOD_SETTINGS_NAVIGATION_ADD_BUTTON",
-            tableName: "APIAccess",
-            value: "Add",
-            comment: ""
-        )
+        controller.saveBarButton.title = NSLocalizedString("Add", comment: "")
 
         controller.navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel,
@@ -81,7 +67,7 @@ class AddAccessMethodCoordinator: Coordinator, Presentable, Presenting {
     }
 }
 
-extension AddAccessMethodCoordinator: MethodSettingsViewControllerDelegate {
+extension AddAccessMethodCoordinator: @preconcurrency MethodSettingsViewControllerDelegate {
     func accessMethodDidSave(_ accessMethod: PersistentAccessMethod) {
         dismiss(animated: true)
     }

@@ -1,21 +1,12 @@
-import React, { useCallback, useContext, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../../config.json';
+import { IconButton } from '../../lib/components';
+import { colors } from '../../lib/foundations';
 import { useBoolean, useCombinedRefs, useEffectEvent, useStyledRef } from '../../lib/utility-hooks';
 import { normalText } from '../common-styles';
-import ImageView from '../ImageView';
-import { BackAction } from '../KeyboardNavigation';
-import StandaloneSwitch from '../Switch';
+import { BackAction } from '../keyboard-navigation';
 import { CellDisabledContext, Container } from './Container';
-
-export const Switch = React.forwardRef(function SwitchT(
-  props: StandaloneSwitch['props'],
-  ref: React.Ref<StandaloneSwitch>,
-) {
-  const disabled = useContext(CellDisabledContext);
-  return <StandaloneSwitch ref={ref} disabled={disabled} {...props} />;
-});
 
 const inputTextStyles: React.CSSProperties = {
   ...normalText,
@@ -26,13 +17,13 @@ const inputTextStyles: React.CSSProperties = {
 
 const StyledInput = styled.input<{ $focused: boolean; $valid?: boolean }>((props) => ({
   ...inputTextStyles,
-  backgroundColor: 'transparent',
+  backgroundColor: colors.transparent,
   border: 'none',
   width: '100%',
   height: '100%',
   color: props.$valid === false ? colors.red : props.$focused ? colors.blue : colors.white,
   '&&::placeholder': {
-    color: props.$focused ? colors.blue60 : colors.white60,
+    color: props.$focused ? colors.blue60 : colors.whiteAlpha60,
   },
 }));
 
@@ -143,10 +134,15 @@ function InputWithRef(props: IInputProps, forwardedRef: React.Ref<HTMLInputEleme
     }
   });
 
-  // If the the initialValue changes in the uncontrolled mode when the user isn't currently writing,
+  // If the initialValue changes in the uncontrolled mode when the user isn't currently writing,
   // then we want to update the value.
   useEffect(() => {
     handleInitialValueChange(props.initialValue);
+    // These lint rules are disabled for now because the react plugin for eslint does
+    // not understand that useEffectEvent should not be added to the dependency array.
+    // Enable these rules again when eslint can lint useEffectEvent properly.
+    // eslint-disable-next-line react-compiler/react-compiler
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.initialValue]);
 
   const valid = validateValue?.(value);
@@ -178,7 +174,7 @@ export const Input = React.memo(React.forwardRef(InputWithRef));
 const InputFrame = styled.div<{ $focused: boolean }>((props) => ({
   display: 'flex',
   flexGrow: 0,
-  backgroundColor: props.$focused ? colors.white : 'rgba(255,255,255,0.1)',
+  backgroundColor: props.$focused ? colors.white : colors.whiteOnBlue10,
   borderRadius: '4px',
   padding: '6px 8px',
 }));
@@ -190,7 +186,7 @@ const StyledAutoSizingTextInputContainer = styled.div({
 const StyledAutoSizingTextInputFiller = styled.pre({
   ...inputTextStyles,
   minWidth: '80px',
-  color: 'transparent',
+  color: colors.transparent,
 });
 
 const StyledAutoSizingTextInputWrapper = styled.div({
@@ -256,12 +252,6 @@ const StyledCellInputRowContainer = styled(Container)({
   marginBottom: '1px',
 });
 
-const StyledSubmitButton = styled.button({
-  border: 'none',
-  backgroundColor: 'transparent',
-  padding: '10px 0',
-});
-
 const StyledInputWrapper = styled.div<{ $marginLeft: number }>(normalText, (props) => ({
   position: 'relative',
   flex: 1,
@@ -294,9 +284,18 @@ const StyledInputFiller = styled.div({
   whiteSpace: 'pre-wrap',
   overflowWrap: 'break-word',
   minHeight: '24px',
-  color: 'transparent',
+  color: colors.transparent,
   marginRight: '25px',
 });
+
+const StyledIconButton = styled(IconButton)<{ $disabled: boolean }>(({ $disabled }) => ({
+  ['> div']: {
+    backgroundColor: $disabled ? colors.blue60 : colors.blue,
+  },
+  ['&&:hover > div']: {
+    backgroundColor: $disabled ? colors.blue60 : colors.blue80,
+  },
+}));
 
 interface IRowInputProps {
   initialValue?: string;
@@ -355,7 +354,6 @@ export function RowInput(props: IRowInputProps) {
     const input = textAreaRef.current;
     if (input) {
       input.focus();
-      // eslint-disable-next-line react-compiler/react-compiler
       input.selectionStart = input.selectionEnd = value.length;
     }
   }, [textAreaRef, value.length]);
@@ -370,6 +368,11 @@ export function RowInput(props: IRowInputProps) {
 
   useEffect(() => {
     focusOnMount();
+    // These lint rules are disabled for now because the react plugin for eslint does
+    // not understand that useEffectEvent should not be added to the dependency array.
+    // Enable these rules again when eslint can lint useEffectEvent properly.
+    // eslint-disable-next-line react-compiler/react-compiler
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -395,14 +398,9 @@ export function RowInput(props: IRowInputProps) {
             placeholder={props.placeholder}
           />
         </StyledInputWrapper>
-        <StyledSubmitButton onClick={submit}>
-          <ImageView
-            source="icon-check"
-            height={18}
-            tintColor={value === '' ? colors.blue60 : colors.blue}
-            tintHoverColor={value === '' ? colors.blue60 : colors.blue80}
-          />
-        </StyledSubmitButton>
+        <StyledIconButton variant="secondary" onClick={submit} $disabled={value === ''}>
+          <IconButton.Icon icon="checkmark-circle" />
+        </StyledIconButton>
       </StyledCellInputRowContainer>
     </BackAction>
   );

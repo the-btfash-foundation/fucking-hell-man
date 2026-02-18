@@ -1,20 +1,18 @@
-mod command;
-
-use command::command_stdout_lossy;
+use crate::command::command_stdout_lossy;
 use std::{cmp::Ordering, fmt, fmt::Formatter, io};
 
 pub fn version() -> String {
     let version = MacosVersion::new()
         .map(|version| version.version())
         .unwrap_or(String::from("N/A"));
-    format!("macOS {}", version)
+    format!("macOS {version}")
 }
 
 pub fn short_version() -> String {
     let version = MacosVersion::new()
         .map(|version| version.short_version())
         .unwrap_or(String::from("N/A"));
-    format!("macOS {}", version)
+    format!("macOS {version}")
 }
 
 pub fn extra_metadata() -> impl Iterator<Item = (String, String)> {

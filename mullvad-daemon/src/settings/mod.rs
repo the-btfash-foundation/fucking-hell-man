@@ -1,5 +1,6 @@
 use futures::TryFutureExt;
 use mullvad_types::{
+    access_method::Error as ApiAccessMethodError,
     custom_list::Error as CustomListError,
     relay_constraints::{RelayConstraints, RelaySettings, WireguardConstraints},
     settings::{DnsState, Settings},
@@ -39,6 +40,9 @@ pub enum Error {
 
     #[error("Failed to apply settings update")]
     UpdateFailed(Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("Failed to parse IP network from string: {0}")]
+    ParseIp(String),
 }
 
 /// Converts an [Error] to a management interface status
@@ -57,10 +61,29 @@ impl From<Error> for mullvad_management_interface::Status {
                 let custom_list_err = *err.downcast::<CustomListError>().unwrap();
                 handle_custom_list_error(custom_list_err)
             }
-            Error::SerializeError(..) | Error::ParseError(..) | Error::UpdateFailed(..) => {
-                Status::new(Code::Internal, error.to_string())
+            Error::UpdateFailed(err) if err.downcast_ref::<ApiAccessMethodError>().is_some() => {
+                let api_access_method_err = *err.downcast::<ApiAccessMethodError>().unwrap();
+                handle_api_access_method_error(api_access_method_err)
             }
+            Error::SerializeError(..)
+            | Error::ParseError(..)
+            | Error::UpdateFailed(..)
+            | Error::ParseIp(..) => Status::new(Code::Internal, error.to_string()),
         }
+    }
+}
+
+fn handle_api_access_method_error(
+    api_access_method_err: ApiAccessMethodError,
+) -> mullvad_management_interface::Status {
+    use mullvad_management_interface::{Code, Status};
+    match api_access_method_err {
+        error @ ApiAccessMethodError::DuplicateName => Status::with_details(
+            Code::AlreadyExists,
+            error.to_string(),
+            mullvad_management_interface::API_ACCESS_METHOD_EXISTS_DETAILS.into(),
+        ),
+        error => Status::unknown(error.to_string()),
     }
 }
 
@@ -92,33 +115,21 @@ fn handle_custom_list_error(
 pub struct SettingsPersister {
     settings: Settings,
     path: PathBuf,
-    #[allow(clippy::type_complexity)]
-    on_change_listeners: Vec<Box<dyn Fn(&Settings) + Send + Sync>>,
+    #[expect(clippy::type_complexity)]
+    on_change_listeners: Vec<Box<dyn FnMut(&Settings) + Send + Sync>>,
 }
 
 pub type MadeChanges = bool;
 
 impl SettingsPersister {
-    /// Loads user settings from file. If it fails, it returns the defaults.
+    /// Loads user settings from file. If it fails, it returns the defaults, and overwrites the old
+    /// settings.
     pub async fn load(settings_dir: &Path) -> Self {
         let path = settings_dir.join(SETTINGS_FILE);
         let LoadSettingsResult {
-            mut settings,
-            mut should_save,
+            settings,
+            should_save,
         } = Self::load_inner(|| Self::load_from_file(&path)).await;
-
-        // Force IPv6 to be enabled on Android
-        if cfg!(target_os = "android") {
-            should_save |= !settings.tunnel_options.generic.enable_ipv6;
-            settings.tunnel_options.generic.enable_ipv6 = true;
-
-            // Auto-connect is managed by Android itself.
-            settings.auto_connect = false;
-        }
-        if crate::version::is_beta_version() {
-            should_save |= !settings.show_beta_releases;
-            settings.show_beta_releases = true;
-        }
 
         let mut persister = SettingsPersister {
             settings,
@@ -126,16 +137,23 @@ impl SettingsPersister {
             on_change_listeners: vec![],
         };
 
-        if should_save {
-            if let Err(error) = persister.save().await {
-                log::error!(
-                    "{}",
-                    error.display_chain_with_msg("Failed to save updated settings")
-                );
-            }
+        if should_save && let Err(error) = persister.save().await {
+            log::error!(
+                "{}",
+                error.display_chain_with_msg("Failed to save updated settings")
+            );
         }
 
         persister
+    }
+
+    /// Loads user settings from file. The only difference between this and [Self::load] is that
+    /// it is read-only.
+    pub async fn read_only(settings_dir: &Path) -> Settings {
+        let path = settings_dir.join(SETTINGS_FILE);
+        let LoadSettingsResult { settings, .. } =
+            Self::load_inner(|| Self::load_from_file(&path)).await;
+        settings
     }
 
     /// Loads user settings, returning default settings if it should fail.
@@ -151,7 +169,7 @@ impl SettingsPersister {
         F: FnOnce() -> R,
         R: std::future::Future<Output = Result<Settings, Error>>,
     {
-        match load_settings().await {
+        let mut result = match load_settings().await {
             Ok(settings) => LoadSettingsResult {
                 settings,
                 should_save: false,
@@ -175,7 +193,7 @@ impl SettingsPersister {
                     // On android lockdown mode is handled by the OS so setting this to true
                     // has no effect.
                     #[cfg(not(target_os = "android"))]
-                    block_when_disconnected: true,
+                    lockdown_mode: true,
                     ..Self::default_settings()
                 };
 
@@ -184,7 +202,18 @@ impl SettingsPersister {
                     should_save: true,
                 }
             }
+        };
+
+        if cfg!(target_os = "android") {
+            // Auto-connect is managed by Android itself.
+            result.settings.auto_connect = false;
         }
+        if crate::version::is_beta_version() {
+            result.should_save |= !result.settings.show_beta_releases;
+            result.settings.show_beta_releases = true;
+        }
+
+        result
     }
 
     async fn load_from_file<P>(path: P) -> Result<Settings, Error>
@@ -226,7 +255,7 @@ impl SettingsPersister {
         Ok(())
     }
 
-    /// Resets default settings
+    /// Resets to default settings
     pub async fn reset(&mut self) -> Result<(), Error> {
         self.settings = Self::default_settings();
         let path = self.path.clone();
@@ -237,15 +266,21 @@ impl SettingsPersister {
                     e.display_chain_with_msg("Unable to save default settings")
                 );
                 log::info!("Will attempt to remove settings file");
-                fs::remove_file(&path)
-                    .map_err(|e| Error::DeleteError(path.display().to_string(), e))
-                    .await
+                match fs::remove_file(&path).await {
+                    Ok(()) => Ok(()),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+                    Err(e) => Err(Error::DeleteError(path.display().to_string(), e)),
+                }
             })
             .await?;
 
         self.notify_listeners();
 
         Ok(())
+    }
+
+    pub const fn settings(&self) -> &Settings {
+        &self.settings
     }
 
     pub fn to_settings(&self) -> Settings {
@@ -260,6 +295,7 @@ impl SettingsPersister {
         if crate::version::is_beta_version() {
             settings.show_beta_releases = true;
         }
+
         settings
     }
 
@@ -366,8 +402,8 @@ impl SettingsPersister {
         self.on_change_listeners.push(Box::new(change_listener));
     }
 
-    fn notify_listeners(&self) {
-        for listener in &self.on_change_listeners {
+    fn notify_listeners(&mut self) {
+        for listener in &mut self.on_change_listeners {
             listener(&self.settings);
         }
     }
@@ -394,17 +430,11 @@ pub struct SettingsSummary<'a> {
 impl Display for SettingsSummary<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let bool_to_label = |state| {
-            if state {
-                "on"
-            } else {
-                "off"
-            }
+            if state { "on" } else { "off" }
         };
 
         let relay_settings = self.settings.get_relay_settings();
 
-        write!(f, "openvpn mssfix: ")?;
-        Self::fmt_option(f, self.settings.tunnel_options.openvpn.mssfix)?;
         write!(f, ", wg mtu: ")?;
         Self::fmt_option(f, self.settings.tunnel_options.wireguard.mtu)?;
 
@@ -476,6 +506,7 @@ impl Display for SettingsSummary<'_> {
                     .custom_options
                     .addresses
                     .iter()
+                    .copied()
                     .any(is_local_address);
                 let contains_public = self
                     .settings
@@ -484,6 +515,7 @@ impl Display for SettingsSummary<'_> {
                     .custom_options
                     .addresses
                     .iter()
+                    .copied()
                     .any(|addr| !is_local_address(addr));
 
                 match (contains_public, contains_local) {
@@ -500,10 +532,9 @@ impl Display for SettingsSummary<'_> {
 
 impl SettingsSummary<'_> {
     fn fmt_option<T: Display>(f: &mut fmt::Formatter<'_>, val: Option<T>) -> fmt::Result {
-        if let Some(inner) = &val {
-            inner.fmt(f)
-        } else {
-            f.write_str("unset")
+        match &val {
+            Some(inner) => inner.fmt(f),
+            _ => f.write_str("unset"),
         }
     }
 }
@@ -551,9 +582,7 @@ mod test {
                       }
                     }
                   },
-                  "tunnel_protocol": {
-                    "only": "wireguard"
-                  },
+                  "tunnel_protocol": "wireguard",
                   "wireguard_constraints": {
                     "port": "any"
                   },
@@ -580,7 +609,7 @@ mod test {
               },
               "bridge_state": "auto",
               "allow_lan": true,
-              "block_when_disconnected": false,
+              "lockdown_mode": false,
               "auto_connect": true,
               "tunnel_options": {
                 "openvpn": {
@@ -598,8 +627,35 @@ mod test {
               "show_beta_releases": false,
               "custom_lists": {
                 "custom_lists": []
-              }
-        }"#;
+              },
+              "recents": [
+                {
+                  "Multihop": {
+                    "entry": {
+                      "location": {
+                        "country": "se"
+                      }
+                    },
+                    "exit": {
+                      "custom_list": {
+                        "list_id": "df612270-79a4-47e9-92e7-3405c92f7678"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Singlehop": {
+                    "location": {
+                      "hostname": [
+                        "be",
+                        "bru",
+                        "be-bru-wg-103"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }"#;
 
         let _ = SettingsPersister::load_from_bytes(settings).unwrap();
     }
@@ -630,7 +686,7 @@ mod test {
         );
 
         assert!(
-            !settings.block_when_disconnected,
+            !settings.lockdown_mode,
             "The daemon should not block the internet if settings are missing"
         );
     }
@@ -660,8 +716,18 @@ mod test {
         );
 
         assert!(
-            settings.block_when_disconnected,
+            settings.lockdown_mode,
             "The daemon should block the internet if settings are corrupt"
         );
+    }
+
+    #[tokio::test]
+    async fn test_deserialize_recents() {
+        let default: Settings = serde_json::from_str("{}").expect("Failed to deserialize");
+        assert_eq!(default.recents, Some(vec![]));
+
+        let disabled: Settings =
+            serde_json::from_str(r#"{"recents": null}"#).expect("Failed to deserialize");
+        assert_eq!(disabled.recents, None);
     }
 }

@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 12/12/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -11,13 +11,15 @@ import Foundation
 import MullvadLogging
 import MullvadTypes
 
-public class AccessMethodRepository: AccessMethodRepositoryProtocol {
+public class AccessMethodRepository: AccessMethodRepositoryProtocol, @unchecked Sendable {
     public static let directId = UUID(uuidString: "C9DB7457-2A55-42C3-A926-C07F82131994")!
     public static let bridgeId = UUID(uuidString: "8586E75A-CA7B-4432-B70D-EE65F3F95084")!
     public static let encryptedDNSId = UUID(uuidString: "831CB1F8-1829-42DD-B9DC-82902F298EC0")!
 
     private let logger = Logger(label: "AccessMethodRepository")
 
+    // The access method names will be localised on creation time. As they are persisted
+    // to on-device storage, they will not be relocalised if the user changes language.
     private let direct = PersistentAccessMethod(
         id: AccessMethodRepository.directId,
         name: "Direct",
@@ -44,26 +46,43 @@ public class AccessMethodRepository: AccessMethodRepositoryProtocol {
         accessMethodsSubject.eraseToAnyPublisher()
     }
 
-    private let lastReachableAccessMethodSubject: CurrentValueSubject<PersistentAccessMethod, Never>
-    public var lastReachableAccessMethodPublisher: AnyPublisher<PersistentAccessMethod, Never> {
-        lastReachableAccessMethodSubject.eraseToAnyPublisher()
+    private let requestAccessMethodSubject: PassthroughSubject<PersistentAccessMethod, Never>
+    public var requestAccessMethodPublisher: AnyPublisher<PersistentAccessMethod, Never> {
+        requestAccessMethodSubject.eraseToAnyPublisher()
+    }
+
+    private let currentAccessMethodSubject: CurrentValueSubject<PersistentAccessMethod, Never>
+    public var currentAccessMethodPublisher: AnyPublisher<PersistentAccessMethod, Never> {
+        currentAccessMethodSubject.eraseToAnyPublisher()
     }
 
     public var directAccess: PersistentAccessMethod {
         direct
     }
 
+    private var cancellables: Set<Combine.AnyCancellable> = []
+
     public init() {
         accessMethodsSubject = CurrentValueSubject([])
-        lastReachableAccessMethodSubject = CurrentValueSubject(direct)
+        requestAccessMethodSubject = PassthroughSubject()
+        currentAccessMethodSubject = CurrentValueSubject(direct)
 
         addDefaultsMethods()
 
+        let lastReachable = fetchLastReachable()
         accessMethodsSubject.send(fetchAll())
-        lastReachableAccessMethodSubject.send(fetchLastReachable())
+        requestAccessMethodSubject.send(lastReachable)
+        // Set the correct access method, as opposed to the default value "direct" above.
+        currentAccessMethodSubject.value = lastReachable
+
+        currentAccessMethodPublisher
+            .removeDuplicates()
+            .sink { [weak self] currentAccessMethod in
+                self?.saveCurrentAccessMethod(currentAccessMethod)
+            }.store(in: &cancellables)
     }
 
-    public func save(_ method: PersistentAccessMethod) {
+    public func save(_ method: PersistentAccessMethod, notifyingAPI: Bool = false) {
         var methodStore = readApiAccessMethodStore()
 
         var method = method
@@ -77,19 +96,24 @@ public class AccessMethodRepository: AccessMethodRepositoryProtocol {
 
         do {
             try writeApiAccessMethodStore(methodStore)
-            accessMethodsSubject.send(methodStore.accessMethods)
+            if notifyingAPI {
+                accessMethodsSubject.send(methodStore.accessMethods)
+            }
         } catch {
             logger.error("Could not save access method: \(method) \nError: \(error)")
         }
     }
 
-    public func saveLastReachable(_ method: PersistentAccessMethod) {
+    public func requestAccessMethod(_ method: PersistentAccessMethod) {
+        requestAccessMethodSubject.send(method)
+    }
+
+    private func saveCurrentAccessMethod(_ method: PersistentAccessMethod) {
         var methodStore = readApiAccessMethodStore()
         methodStore.lastReachableAccessMethod = method
 
         do {
             try writeApiAccessMethodStore(methodStore)
-            lastReachableAccessMethodSubject.send(method)
         } catch {
             logger.error("Could not save last reachable access method: \(method) \nError: \(error)")
         }
@@ -171,5 +195,19 @@ public class AccessMethodRepository: AccessMethodRepositoryProtocol {
 
     private func makeParser() -> SettingsParser {
         SettingsParser(decoder: JSONDecoder(), encoder: JSONEncoder())
+    }
+}
+
+extension AccessMethodRepository: MullvadAccessMethodChangeListening {
+    public func accessMethodChangedTo(_ uuid: UUID) {
+        guard let method = accessMethodsSubject.value.first(where: { $0.id == uuid }) else {
+            logger.warning("Change reported to method with unknown ID: \(uuid)")
+            return
+        }
+
+        Task {
+            logger.debug("Mullvad API changed access method to \(method.name)")
+            currentAccessMethodSubject.send(method)
+        }
     }
 }

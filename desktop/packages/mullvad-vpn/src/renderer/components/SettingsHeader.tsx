@@ -1,16 +1,15 @@
 import * as React from 'react';
 import styled from 'styled-components';
 
-import { Flex, LabelTiny, TitleBig } from '../lib/components';
-import { Colors, Spacings } from '../lib/foundations';
+import { Flex, LabelTinySemiBold, TitleBig } from '../lib/components';
 
 export const HeaderTitle = styled(TitleBig)({
   wordWrap: 'break-word',
   hyphens: 'auto',
 });
 
-export const HeaderSubTitle = styled(LabelTiny).attrs({
-  color: Colors.white60,
+export const HeaderSubTitle = styled(LabelTinySemiBold).attrs({
+  color: 'whiteAlpha60',
 })({});
 
 interface SettingsHeaderProps {
@@ -22,13 +21,9 @@ function SettingsHeader(props: SettingsHeaderProps, forwardRef: React.Ref<HTMLDi
   return (
     <Flex
       ref={forwardRef}
-      $flexDirection="column"
-      $gap={Spacings.spacing3}
-      $margin={{
-        top: Spacings.spacing3,
-        horizontal: Spacings.spacing5,
-        bottom: Spacings.spacing4,
-      }}
+      flexDirection="column"
+      gap="small"
+      margin={{ horizontal: 'medium', bottom: 'medium' }}
       className={props.className}>
       {props.children}
     </Flex>

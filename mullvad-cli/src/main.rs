@@ -8,7 +8,7 @@ use cmds::*;
 pub const BIN_NAME: &str = env!("CARGO_BIN_NAME");
 
 #[derive(Debug, Parser)]
-#[command(author, version = mullvad_version::VERSION, about, long_about = None)]
+#[command(version = mullvad_version::VERSION, about, long_about = None)]
 #[command(propagate_version = true)]
 enum Cli {
     /// Control and display information about your Mullvad account
@@ -63,19 +63,12 @@ enum Cli {
         wait: bool,
     },
 
-    /// Manage use of bridges, socks proxies and Shadowsocks for OpenVPN.
-    /// Can make OpenVPN tunnels use Shadowsocks via one of the Mullvad bridge servers.
-    /// Can also make OpenVPN connect through any custom SOCKS5 proxy.
-    /// These settings also affect how the app reaches the API over Shadowsocks.
-    #[clap(subcommand)]
-    Bridge(bridge::Bridge),
-
     /// Manage relay and tunnel constraints
     #[clap(subcommand)]
     Relay(relay::Relay),
     /// Manage Mullvad API access methods.
     ///
-    /// Access methods are used to connect to the the Mullvad API via one of
+    /// Access methods are used to connect to the Mullvad API via one of
     /// Mullvad's bridge servers or a custom proxy (SOCKS5 & Shadowsocks) when
     /// and where establishing a direct connection does not work.
     ///
@@ -90,11 +83,11 @@ enum Cli {
     #[clap(subcommand)]
     ApiAccess(api_access::ApiAccess),
 
-    /// Manage use of obfuscation protocols for WireGuard.
+    /// Manage use of anti censorship methods for WireGuard.
     /// Can make WireGuard traffic look like something else on the network.
     /// Helps circumvent censorship and to establish a tunnel when on restricted networks
     #[clap(subcommand)]
-    Obfuscation(obfuscation::Obfuscation),
+    AntiCensorship(anti_censorship::AntiCensorship),
 
     #[clap(subcommand)]
     SplitTunnel(split_tunnel::SplitTunnel),
@@ -129,7 +122,16 @@ enum Cli {
     },
 
     /// Reset settings, caches, and logs
-    FactoryReset,
+    FactoryReset {
+        #[clap(long, short = 'y', default_value_t = false)]
+        assume_yes: bool,
+    },
+
+    /// Reset settings only, but remain logged in and keep logs and caches
+    ResetSettings {
+        #[clap(long, short = 'y', default_value_t = false)]
+        assume_yes: bool,
+    },
 
     /// Manage custom lists
     #[clap(subcommand)]
@@ -148,13 +150,22 @@ enum Cli {
         /// File to write to. If this is "-", write to standard output
         file: String,
     },
+
+    /// Manage logs and tracing
+    #[clap(subcommand)]
+    Log(log::Log),
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle SIGPIPE
+    // https://stackoverflow.com/questions/65755853/simple-word-count-rust-program-outputs-valid-stdout-but-panicks-when-piped-to-he/65760807
+    // https://github.com/typst/typst/pull/5444
+    #[cfg(unix)]
+    handle_sigpipe().unwrap();
+
     match Cli::parse() {
         Cli::Account(cmd) => cmd.handle().await,
-        Cli::Bridge(cmd) => cmd.handle().await,
         Cli::Connect { wait } => tunnel_state::connect(wait).await,
         Cli::Reconnect { wait } => tunnel_state::reconnect(wait).await,
         Cli::Debug(cmd) => cmd.handle().await,
@@ -164,10 +175,11 @@ async fn main() -> Result<()> {
         Cli::LockdownMode(cmd) => cmd.handle().await,
         Cli::Dns(cmd) => cmd.handle().await,
         Cli::Lan(cmd) => cmd.handle().await,
-        Cli::Obfuscation(cmd) => cmd.handle().await,
+        Cli::AntiCensorship(cmd) => cmd.handle().await,
         Cli::ApiAccess(cmd) => cmd.handle().await,
         Cli::Version => version::print().await,
-        Cli::FactoryReset => reset::handle().await,
+        Cli::FactoryReset { assume_yes } => reset::handle_factory_reset(assume_yes).await,
+        Cli::ResetSettings { assume_yes } => reset::handle_settings_reset(assume_yes).await,
         Cli::Relay(cmd) => cmd.handle().await,
         Cli::Tunnel(cmd) => cmd.handle().await,
         Cli::SplitTunnel(cmd) => cmd.handle().await,
@@ -175,6 +187,7 @@ async fn main() -> Result<()> {
         Cli::CustomList(cmd) => cmd.handle().await,
         Cli::ImportSettings { file } => patch::import(file).await,
         Cli::ExportSettings { file } => patch::export(file).await,
+        Cli::Log(cmd) => cmd.handle().await,
 
         #[cfg(all(unix, not(target_os = "android")))]
         Cli::ShellCompletions { shell, dir } => {
@@ -188,4 +201,16 @@ async fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Install the default signal handler for `SIGPIPE`.
+///
+/// By default, Rust replaces it with an empty handler because reasons: https://github.com/rust-lang/rust/issues/119980
+#[cfg(unix)]
+fn handle_sigpipe() -> Result<(), nix::errno::Errno> {
+    use nix::sys::signal::{SigHandler, Signal, signal};
+    // SAFETY: We do not use the previous signal handler, which could cause UB if done carelessly:
+    // https://pubs.opengroup.org/onlinepubs/9699919799/functions/signal.html
+    unsafe { signal(Signal::SIGPIPE, SigHandler::SigDfl) }?;
+    Ok(())
 }

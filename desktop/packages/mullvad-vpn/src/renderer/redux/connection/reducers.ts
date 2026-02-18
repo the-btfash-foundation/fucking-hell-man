@@ -7,7 +7,6 @@ export interface IConnectionReduxState {
   ipv4?: Ip;
   ipv6?: Ip;
   hostname?: string;
-  bridgeHostname?: string;
   entryHostname?: string;
   latitude?: number;
   longitude?: number;
@@ -16,12 +15,11 @@ export interface IConnectionReduxState {
 }
 
 const initialState: IConnectionReduxState = {
-  status: { state: 'disconnected' },
+  status: { state: 'disconnected', lockedDown: true },
   isBlocked: false,
   ipv4: undefined,
   ipv6: undefined,
   hostname: undefined,
-  bridgeHostname: undefined,
   entryHostname: undefined,
   latitude: undefined,
   longitude: undefined,
@@ -44,7 +42,6 @@ export default function (
         latitude: action.newLocation.latitude,
         longitude: action.newLocation.longitude,
         hostname: action.newLocation.hostname,
-        bridgeHostname: action.newLocation.bridgeHostname,
         entryHostname: action.newLocation.entryHostname,
       };
 
@@ -74,7 +71,7 @@ export default function (
     case 'DISCONNECTED':
       return {
         ...state,
-        status: { state: 'disconnected' },
+        status: { state: 'disconnected', lockedDown: action.lockedDown },
       };
 
     case 'DISCONNECTING':

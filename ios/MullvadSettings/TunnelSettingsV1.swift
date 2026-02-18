@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 19/06/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -22,7 +22,7 @@ public struct TunnelSettingsV1: Codable, Equatable, TunnelSettings {
 }
 
 /// A struct that holds a tun interface configuration.
-public struct InterfaceSettings: Codable, Equatable {
+public struct InterfaceSettings: Codable, Equatable, @unchecked Sendable {
     public var privateKey: PrivateKeyWithMetadata
     public var nextPrivateKey: PrivateKeyWithMetadata?
 
@@ -58,7 +58,8 @@ public struct InterfaceSettings: Codable, Equatable {
         )
 
         // Provide default value, since `dnsSettings` key does not exist in <= 2021.2
-        dnsSettings = try container.decodeIfPresent(DNSSettings.self, forKey: .dnsSettings)
+        dnsSettings =
+            try container.decodeIfPresent(DNSSettings.self, forKey: .dnsSettings)
             ?? DNSSettings()
     }
 
@@ -75,7 +76,8 @@ public struct InterfaceSettings: Codable, Equatable {
 /// A struct holding a private WireGuard key with associated metadata
 public struct PrivateKeyWithMetadata: Equatable, Codable {
     private enum CodingKeys: String, CodingKey {
-        case privateKey = "privateKeyData", creationDate
+        case privateKey = "privateKeyData"
+        case creationDate
     }
 
     /// When the key was created

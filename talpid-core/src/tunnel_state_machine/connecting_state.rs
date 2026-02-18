@@ -9,9 +9,11 @@ use futures::{FutureExt, StreamExt};
 use talpid_routing::RouteManagerHandle;
 use talpid_tunnel::tun_provider::TunProvider;
 use talpid_tunnel::{EventHook, TunnelArgs, TunnelEvent, TunnelMetadata};
-use talpid_types::net::{AllowedClients, AllowedEndpoint, AllowedTunnelTraffic, TunnelParameters};
-use talpid_types::tunnel::{ErrorStateCause, FirewallPolicyError};
 use talpid_types::ErrorExt;
+use talpid_types::net::{
+    AllowedClients, AllowedEndpoint, AllowedTunnelTraffic, wireguard::TunnelParameters,
+};
+use talpid_types::tunnel::{ErrorStateCause, FirewallPolicyError};
 
 use super::connected_state::TunnelEventsReceiver;
 use super::{
@@ -20,12 +22,12 @@ use super::{
     TunnelStateTransition,
 };
 
-#[cfg(target_os = "macos")]
-use crate::dns::DnsConfig;
 use crate::firewall::FirewallPolicy;
 #[cfg(target_os = "macos")]
 use crate::resolver::LOCAL_DNS_RESOLVER;
-use crate::tunnel::{self, TunnelMonitor};
+use crate::tunnel_state_machine::tunnel_monitor::{self, TunnelMonitor};
+#[cfg(target_os = "macos")]
+use talpid_dns::DnsConfig;
 
 pub(crate) type TunnelCloseEvent = Fuse<oneshot::Receiver<Option<ErrorStateCause>>>;
 
@@ -57,8 +59,8 @@ impl ConnectingState {
         if *LOCAL_DNS_RESOLVER {
             // Set system DNS to our local DNS resolver
             let system_dns = DnsConfig::default().resolve(
-                &[std::net::Ipv4Addr::LOCALHOST.into()],
-                shared_values.filtering_resolver.listening_port(),
+                &[shared_values.filtering_resolver.listening_addr().ip()],
+                shared_values.filtering_resolver.listening_addr().port(),
             );
             let _ = shared_values
                 .dns_monitor
@@ -73,19 +75,24 @@ impl ConnectingState {
                 });
         }
 
-        if shared_values.connectivity.is_offline() {
-            // FIXME: Temporary: Nudge route manager to update the default interface
-            #[cfg(target_os = "macos")]
-            {
-                log::debug!("Poking route manager to update default routes");
-                let _ = shared_values.route_manager.refresh_routes();
+        let ip_availability = match shared_values.connectivity.availability() {
+            Some(ip_availability) => ip_availability,
+            // If we're offline, enter the offline state
+            None => {
+                // FIXME: Temporary: Nudge route manager to update the default interface
+                #[cfg(target_os = "macos")]
+                {
+                    log::debug!("Poking route manager to update default routes");
+                    let _ = shared_values.route_manager.refresh_routes();
+                }
+                return ErrorState::enter(shared_values, ErrorStateCause::IsOffline);
             }
-            return ErrorState::enter(shared_values, ErrorStateCause::IsOffline);
-        }
+        };
+
         match shared_values.runtime.block_on(
             shared_values
                 .tunnel_parameters_generator
-                .generate(retry_attempt, shared_values.connectivity.has_ipv6()),
+                .generate(retry_attempt, ip_availability),
         ) {
             Err(err) => {
                 ErrorState::enter(shared_values, ErrorStateCause::TunnelParameterError(err))
@@ -114,18 +121,22 @@ impl ConnectingState {
                         ErrorStateCause::SetFirewallPolicyError(error),
                     )
                 } else {
+                    // HACK: On Android, DNS is part of creating the VPN interface, this call
+                    // ensures that the vpn_config is prepared with correct DNS servers in case they
+                    // previously set to something else, e.g. in the case of blocking. This call
+                    // should probably be part of start_tunnel call.
                     #[cfg(target_os = "android")]
                     {
                         shared_values.prepare_tun_config(false);
-                        if retry_attempt > 0 && retry_attempt % MAX_ATTEMPTS_WITH_SAME_TUN == 0 {
-                            if let Err(error) =
-                                { shared_values.tun_provider.lock().unwrap().open_tun_forced() }
-                            {
-                                log::error!(
-                                    "{}",
-                                    error.display_chain_with_msg("Failed to recreate tun device")
-                                );
-                            }
+                        if retry_attempt > 0
+                            && retry_attempt.is_multiple_of(MAX_ATTEMPTS_WITH_SAME_TUN)
+                            && let Err(error) =
+                                shared_values.tun_provider.lock().unwrap().open_tun_forced()
+                        {
+                            log::error!(
+                                "{}",
+                                error.display_chain_with_msg("Failed to recreate tun device")
+                            );
                         }
                     }
 
@@ -138,6 +149,7 @@ impl ConnectingState {
                         &shared_values.route_manager,
                         retry_attempt,
                     );
+
                     let params = connecting_state.tunnel_parameters.clone();
                     (
                         Box::new(connecting_state),
@@ -157,23 +169,24 @@ impl ConnectingState {
         #[cfg(target_os = "linux")]
         shared_values.disable_connectivity_check();
 
-        let endpoint = params.get_next_hop_endpoint();
+        let endpoints = params.get_next_hop_endpoints();
 
         #[cfg(target_os = "windows")]
-        let clients = AllowedClients::from(
-            TunnelMonitor::get_relay_client(&shared_values.resource_dir, params)
-                .into_iter()
-                .collect::<Vec<_>>(),
-        );
+        let clients = AllowedClients::from(vec![std::env::current_exe().unwrap()]);
 
         #[cfg(not(target_os = "windows"))]
-        let clients = if params.get_openvpn_local_proxy_settings().is_some() {
-            AllowedClients::All
-        } else {
-            AllowedClients::Root
-        };
+        let clients = AllowedClients::Root;
 
-        let peer_endpoint = AllowedEndpoint { endpoint, clients };
+        #[cfg(target_os = "windows")]
+        let exit_endpoint_ip = params.get_exit_hop_endpoint().map(|ep| ep.address.ip());
+
+        let peer_endpoints = endpoints
+            .into_iter()
+            .map(|endpoint| AllowedEndpoint {
+                endpoint,
+                clients: clients.clone(),
+            })
+            .collect();
 
         #[cfg(target_os = "macos")]
         let redirect_interface = shared_values
@@ -181,15 +194,15 @@ impl ConnectingState {
             .block_on(shared_values.split_tunnel.interface());
 
         let policy = FirewallPolicy::Connecting {
-            peer_endpoint,
+            peer_endpoints,
+            #[cfg(target_os = "windows")]
+            exit_endpoint_ip,
             tunnel: tunnel_metadata.clone(),
             allow_lan: shared_values.allow_lan,
             allowed_endpoint: shared_values.allowed_endpoint.clone(),
             allowed_tunnel_traffic,
             #[cfg(target_os = "macos")]
             redirect_interface,
-            #[cfg(target_os = "macos")]
-            dns_redirect_port: shared_values.filtering_resolver.listening_port(),
         };
         shared_values
             .firewall
@@ -233,6 +246,9 @@ impl ConnectingState {
         tokio::task::spawn_blocking(move || {
             let start = Instant::now();
 
+            #[cfg(target_os = "windows")]
+            let runtime2 = runtime.clone();
+
             let args = TunnelArgs {
                 runtime,
                 resource_dir: &resource_dir,
@@ -242,6 +258,19 @@ impl ConnectingState {
                 retry_attempt,
                 route_manager,
             };
+
+            #[cfg(target_os = "windows")]
+            async fn maybe_dump_device_logs(log_dir: Option<&Path>, error: &tunnel_monitor::Error) {
+                if error.get_tunnel_device_error().is_some()
+                    && let Some(log_dir) = log_dir
+                {
+                    log::debug!("Logging device info");
+                    if let Err(err) = crate::logging::diag::windows::log_device_info(log_dir).await
+                    {
+                        log::error!("Failed to dump device logs: {err}");
+                    }
+                }
+            }
 
             let block_reason = match TunnelMonitor::start(&tunnel_parameters, &log_dir, args) {
                 Ok(monitor) => {
@@ -256,18 +285,26 @@ impl ConnectingState {
                             "Retrying to connect after failing to start tunnel"
                         )
                     );
+                    #[cfg(target_os = "windows")]
+                    runtime2.block_on(async {
+                        maybe_dump_device_logs(log_dir.as_deref(), &error).await;
+                    });
                     None
                 }
                 Err(error) => {
                     log::error!("{}", error.display_chain_with_msg("Failed to start tunnel"));
+                    #[cfg(target_os = "windows")]
+                    runtime2.block_on(async {
+                        maybe_dump_device_logs(log_dir.as_deref(), &error).await;
+                    });
                     Some(error.into())
                 }
             };
 
-            if block_reason.is_none() {
-                if let Some(remaining_time) = MIN_TUNNEL_ALIVE_TIME.checked_sub(start.elapsed()) {
-                    thread::sleep(remaining_time);
-                }
+            if block_reason.is_none()
+                && let Some(remaining_time) = MIN_TUNNEL_ALIVE_TIME.checked_sub(start.elapsed())
+            {
+                thread::sleep(remaining_time);
             }
 
             if tunnel_close_event_tx.send(block_reason).is_err() {
@@ -295,13 +332,11 @@ impl ConnectingState {
         match tunnel_monitor.wait() {
             Ok(_) => None,
             Err(error) => match error {
-                tunnel::Error::WireguardTunnelMonitoringError(
-                    talpid_wireguard::Error::TimeoutError,
-                ) => {
+                tunnel_monitor::Error::TunnelMonitoring(talpid_wireguard::Error::TimeoutError) => {
                     log::debug!("WireGuard tunnel timed out");
                     None
                 }
-                error @ tunnel::Error::WireguardTunnelMonitoringError(..)
+                error @ tunnel_monitor::Error::TunnelMonitoring(..)
                     if !should_retry(&error, retry_attempt) =>
                 {
                     log::error!(
@@ -385,14 +420,7 @@ impl ConnectingState {
                 let consequence = if shared_values.set_allow_lan(allow_lan) {
                     #[cfg(target_os = "android")]
                     {
-                        if let Err(_err) = shared_values.restart_tunnel(false) {
-                            self.disconnect(
-                                shared_values,
-                                AfterDisconnect::Block(ErrorStateCause::StartTunnelError),
-                            )
-                        } else {
-                            self.disconnect(shared_values, AfterDisconnect::Reconnect(0))
-                        }
+                        self.disconnect(shared_values, AfterDisconnect::Reconnect(0))
                     }
                     #[cfg(not(target_os = "android"))]
                     self.reset_firewall(shared_values)
@@ -426,14 +454,7 @@ impl ConnectingState {
                 let consequence = if shared_values.set_dns_config(servers) {
                     #[cfg(target_os = "android")]
                     {
-                        if let Err(_err) = shared_values.restart_tunnel(false) {
-                            self.disconnect(
-                                shared_values,
-                                AfterDisconnect::Block(ErrorStateCause::StartTunnelError),
-                            )
-                        } else {
-                            self.disconnect(shared_values, AfterDisconnect::Reconnect(0))
-                        }
+                        self.disconnect(shared_values, AfterDisconnect::Reconnect(0))
                     }
                     #[cfg(not(target_os = "android"))]
                     SameState(self)
@@ -445,8 +466,8 @@ impl ConnectingState {
                 consequence
             }
             #[cfg(not(target_os = "android"))]
-            Some(TunnelCommand::BlockWhenDisconnected(block_when_disconnected, complete_tx)) => {
-                shared_values.block_when_disconnected = block_when_disconnected;
+            Some(TunnelCommand::LockdownMode(lockdown_mode, complete_tx)) => {
+                shared_values.lockdown_mode = lockdown_mode;
                 let _ = complete_tx.send(());
                 SameState(self)
             }
@@ -483,17 +504,8 @@ impl ConnectingState {
             #[cfg(target_os = "android")]
             Some(TunnelCommand::SetExcludedApps(result_tx, paths)) => {
                 if shared_values.set_excluded_paths(paths) {
-                    if let Err(err) = shared_values.restart_tunnel(false) {
-                        let _ =
-                            result_tx.send(Err(crate::split_tunnel::Error::SetExcludedApps(err)));
-                        self.disconnect(
-                            shared_values,
-                            AfterDisconnect::Block(ErrorStateCause::SplitTunnelError),
-                        )
-                    } else {
-                        let _ = result_tx.send(Ok(()));
-                        self.disconnect(shared_values, AfterDisconnect::Reconnect(0))
-                    }
+                    let _ = result_tx.send(Ok(()));
+                    self.disconnect(shared_values, AfterDisconnect::Reconnect(0))
                 } else {
                     let _ = result_tx.send(Ok(()));
                     SameState(self)
@@ -505,20 +517,20 @@ impl ConnectingState {
                     Ok(added_device) => {
                         let _ = result_tx.send(Ok(()));
 
-                        if added_device {
-                            if let Err(error) = Self::set_firewall_policy(
+                        if added_device
+                            && let Err(error) = Self::set_firewall_policy(
                                 shared_values,
                                 &self.tunnel_parameters,
                                 &self.tunnel_metadata,
                                 self.allowed_tunnel_traffic.clone(),
-                            ) {
-                                return self.disconnect(
-                                    shared_values,
-                                    AfterDisconnect::Block(
-                                        ErrorStateCause::SetFirewallPolicyError(error),
-                                    ),
-                                );
-                            }
+                            )
+                        {
+                            return self.disconnect(
+                                shared_values,
+                                AfterDisconnect::Block(ErrorStateCause::SetFirewallPolicyError(
+                                    error,
+                                )),
+                            );
                         }
                     }
                     Err(error) => {
@@ -534,7 +546,7 @@ impl ConnectingState {
 
     fn handle_tunnel_events(
         mut self: Box<Self>,
-        event: Option<(tunnel::TunnelEvent, oneshot::Sender<()>)>,
+        event: Option<(TunnelEvent, oneshot::Sender<()>)>,
         shared_values: &mut SharedTunnelStateValues,
     ) -> EventConsequence {
         use self::EventConsequence::*;
@@ -633,8 +645,8 @@ impl ConnectingState {
     }
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
-fn should_retry(error: &tunnel::Error, retry_attempt: u32) -> bool {
+#[cfg_attr(not(target_os = "windows"), expect(unused_variables))]
+fn should_retry(error: &tunnel_monitor::Error, retry_attempt: u32) -> bool {
     #[cfg(target_os = "windows")]
     if error.get_tunnel_device_error().is_some() {
         return retry_attempt < MAX_ATTEMPT_CREATE_TUN;

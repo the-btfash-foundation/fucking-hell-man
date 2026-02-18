@@ -1,9 +1,8 @@
 import {
+  IpVersion,
   LiftedConstraint,
   Ownership,
-  RelayEndpointType,
   RelayLocation,
-  TunnelProtocol,
 } from '../../shared/daemon-rpc-types';
 import { relayLocations } from '../../shared/gettext';
 import {
@@ -17,25 +16,47 @@ import {
   IRelayLocationCityRedux,
   IRelayLocationCountryRedux,
   IRelayLocationRelayRedux,
-  NormalRelaySettingsRedux,
 } from '../redux/settings/reducers';
+import { IpAddress, IPv4Address, IPv6Address } from './ip';
 
-export enum EndpointType {
-  any,
-  entry,
-  exit,
+export function filterLocationsByQuic(
+  locations: IRelayLocationCountryRedux[],
+  quic: boolean,
+  locationType: LocationType,
+  multihop: boolean,
+  ipVersion: LiftedConstraint<IpVersion>,
+): IRelayLocationCountryRedux[] {
+  const quickOnRelay = (relay: IRelayLocationRelayRedux) =>
+    relay.quic !== undefined && containsIpVersionAddr(relay.quic.addrIn, ipVersion);
+  return quicFilterActive(quic, locationType, multihop)
+    ? filterLocationsImpl(locations, quickOnRelay)
+    : locations;
 }
 
-export function filterLocationsByEndPointType(
+export function filterLocationsByLwo(
   locations: IRelayLocationCountryRedux[],
-  endpointType: EndpointType,
-  tunnelProtocol: LiftedConstraint<TunnelProtocol>,
-  relaySettings?: NormalRelaySettingsRedux,
+  lwo: boolean,
+  locationType: LocationType,
+  multihop: boolean,
 ): IRelayLocationCountryRedux[] {
-  return filterLocationsImpl(
-    locations,
-    getTunnelProtocolFilter(endpointType, tunnelProtocol, relaySettings),
-  );
+  const lwoOnRelay = (relay: IRelayLocationRelayRedux) => relay.lwo;
+  return lwoFilterActive(lwo, locationType, multihop)
+    ? filterLocationsImpl(locations, lwoOnRelay)
+    : locations;
+}
+
+export function quicFilterActive(quic: boolean, locationType: LocationType, multihop: boolean) {
+  const isEntry = multihop
+    ? locationType === LocationType.entry
+    : locationType === LocationType.exit;
+  return quic && isEntry;
+}
+
+export function lwoFilterActive(lwo: boolean, locationType: LocationType, multihop: boolean) {
+  const isEntry = multihop
+    ? locationType === LocationType.entry
+    : locationType === LocationType.exit;
+  return lwo && isEntry;
 }
 
 export function filterLocationsByDaita(
@@ -43,10 +64,9 @@ export function filterLocationsByDaita(
   daita: boolean,
   directOnly: boolean,
   locationType: LocationType,
-  tunnelProtocol: LiftedConstraint<TunnelProtocol>,
   multihop: boolean,
 ): IRelayLocationCountryRedux[] {
-  return daitaFilterActive(daita, directOnly, locationType, tunnelProtocol, multihop)
+  return daitaFilterActive(daita, directOnly, locationType, multihop)
     ? filterLocationsImpl(locations, (relay: IRelayLocationRelayRedux) => relay.daita)
     : locations;
 }
@@ -55,13 +75,12 @@ export function daitaFilterActive(
   daita: boolean,
   directOnly: boolean,
   locationType: LocationType,
-  tunnelProtocol: LiftedConstraint<TunnelProtocol>,
   multihop: boolean,
 ) {
   const isEntry = multihop
     ? locationType === LocationType.entry
     : locationType === LocationType.exit;
-  return daita && (directOnly || multihop) && isEntry && tunnelProtocol !== 'openvpn';
+  return daita && (directOnly || multihop) && isEntry;
 }
 
 export function filterLocations(
@@ -76,24 +95,21 @@ export function filterLocations(
     : locations;
 }
 
-function getTunnelProtocolFilter(
-  endpointType: EndpointType,
-  tunnelProtocol: LiftedConstraint<TunnelProtocol>,
-  relaySettings?: NormalRelaySettingsRedux,
-): (relay: IRelayLocationRelayRedux) => boolean {
-  const endpointTypes: Array<RelayEndpointType> = [];
-  if (endpointType !== EndpointType.exit && tunnelProtocol === 'openvpn') {
-    endpointTypes.push('bridge');
-  } else if (tunnelProtocol === 'any') {
-    endpointTypes.push('wireguard');
-    if (!relaySettings?.wireguard.useMultihop) {
-      endpointTypes.push('openvpn');
-    }
-  } else {
-    endpointTypes.push(tunnelProtocol);
+function containsIpVersionAddr(addrs: string[], version: LiftedConstraint<IpVersion>): boolean {
+  if (version === 'any') {
+    return addrs.length > 0;
   }
-
-  return (relay) => endpointTypes.includes(relay.endpointType);
+  return addrs.some((strAddr) => {
+    try {
+      const addr = IpAddress.fromString(strAddr);
+      return (
+        (addr instanceof IPv4Address && version === 'ipv4') ||
+        (addr instanceof IPv6Address && version === 'ipv6')
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 function getOwnershipFilter(

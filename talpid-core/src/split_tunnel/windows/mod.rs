@@ -1,28 +1,33 @@
+#![allow(clippy::undocumented_unsafe_blocks)] // Remove me if you dare.
+
 mod driver;
 mod path_monitor;
 mod service;
 mod volume_monitor;
 mod windows;
 
-use crate::{tunnel::TunnelMetadata, tunnel_state_machine::TunnelCommand};
+use crate::tunnel_state_machine::TunnelCommand;
 use futures::channel::{mpsc, oneshot};
 use std::{
     collections::HashMap,
     ffi::{OsStr, OsString},
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    os::windows::io::AsRawHandle,
     path::{Path, PathBuf},
     sync::{
+        Arc, Mutex, MutexGuard, RwLock, Weak,
         atomic::{AtomicBool, Ordering},
-        mpsc as sync_mpsc, Arc, Mutex, MutexGuard, RwLock, Weak,
+        mpsc as sync_mpsc,
     },
     time::Duration,
 };
-use talpid_routing::{get_best_default_route, CallbackHandle, EventType, RouteManagerHandle};
-use talpid_types::{split_tunnel::ExcludedProcess, tunnel::ErrorStateCause, ErrorExt};
+use talpid_routing::{CallbackHandle, EventType, RouteManagerHandle, get_best_default_route};
+use talpid_tunnel::TunnelMetadata;
+use talpid_types::{ErrorExt, split_tunnel::ExcludedProcess, tunnel::ErrorStateCause};
 use talpid_windows::{
     io::Overlapped,
-    net::{get_ip_address_for_interface, AddressFamily},
+    net::{AddressFamily, get_ip_address_for_interface},
     sync::Event,
 };
 use windows_sys::Win32::Foundation::ERROR_OPERATION_ABORTED;
@@ -100,10 +105,213 @@ pub enum Error {
     /// Resetting in the engaged state risks leaking into the tunnel
     #[error("Failed to reset driver because it is engaged")]
     CannotResetEngaged,
+
+    /// Split tunneling is unavailable
+    #[error("Split tunneling is unavailable. Review logs for details.")]
+    Unavailable,
 }
 
 /// Manages applications whose traffic to exclude from the tunnel.
 pub struct SplitTunnel {
+    state: SplitTunnelState,
+}
+
+enum SplitTunnelState {
+    Initialized(InitializedSplitTunnelState),
+    Failed(FailedSplitTunnelState),
+}
+
+impl SplitTunnel {
+    /// Initialize the split tunnel device.
+    ///
+    /// If initialization fails, split tunneling will be disabled/unavailable.
+    pub fn new<T: AsRef<OsStr>>(
+        runtime: tokio::runtime::Handle,
+        resource_dir: PathBuf,
+        daemon_tx: Weak<mpsc::UnboundedSender<TunnelCommand>>,
+        volume_update_rx: mpsc::UnboundedReceiver<()>,
+        route_manager: RouteManagerHandle,
+        initial_paths: &[T],
+    ) -> Self {
+        let state = InitializedSplitTunnelState::new(
+            runtime,
+            resource_dir,
+            daemon_tx,
+            volume_update_rx,
+            route_manager,
+        )
+        .map(SplitTunnelState::Initialized)
+        .unwrap_or_else(|err| {
+            log::error!(
+                "{}",
+                err.display_chain_with_msg("Failed to initialize split tunneling")
+            );
+            SplitTunnelState::Failed(FailedSplitTunnelState::new())
+        });
+
+        let mut split_tunnel = Self { state };
+
+        // If we fail to exclude anything and later connect, we may end up with a working
+        // tunnel but no split tunneling, meaning apps may appear excluded despite not being so.
+        // Rather than silently risking that, fail loudly instead.
+        if let Err(error) = split_tunnel.set_paths_sync(initial_paths) {
+            log::error!(
+                "{}",
+                error.display_chain_with_msg("Failed to set initial split tunnel paths")
+            );
+            // This will deinitialize split tunneling
+            // TODO: We may want to make it possible to retry initialization instead of
+            //       failing permanently.
+            split_tunnel.state = SplitTunnelState::Failed(FailedSplitTunnelState::new());
+            split_tunnel
+                .set_paths_sync(initial_paths)
+                .expect("failed tunnel cannot fail without VPN addrs set");
+        }
+
+        split_tunnel
+    }
+
+    /// Set a list of applications to exclude from the tunnel.
+    pub fn set_paths<T: AsRef<OsStr>>(
+        &mut self,
+        paths: &[T],
+        result_tx: oneshot::Sender<Result<(), Error>>,
+    ) {
+        match &mut self.state {
+            SplitTunnelState::Initialized(state) => state.set_paths(paths, result_tx),
+            SplitTunnelState::Failed(state) => state.set_paths(paths, result_tx),
+        }
+    }
+
+    /// Set a list of applications to exclude from the tunnel.
+    fn set_paths_sync<T: AsRef<OsStr>>(&mut self, paths: &[T]) -> Result<(), Error> {
+        match &mut self.state {
+            SplitTunnelState::Initialized(state) => state.set_paths_sync(paths),
+            SplitTunnelState::Failed(state) => state.set_paths_sync(paths),
+        }
+    }
+
+    /// Instructs the driver to redirect traffic from sockets bound to 0.0.0.0, ::, or the
+    /// tunnel addresses (if any) to the default route.
+    pub fn set_tunnel_addresses(&mut self, metadata: Option<&TunnelMetadata>) -> Result<(), Error> {
+        match &mut self.state {
+            SplitTunnelState::Initialized(state) => state.set_tunnel_addresses(metadata),
+            SplitTunnelState::Failed(state) => state.set_tunnel_addresses(metadata),
+        }
+    }
+
+    /// Instructs the driver to stop redirecting tunnel traffic and INADDR_ANY.
+    pub fn clear_tunnel_addresses(&mut self) -> Result<(), Error> {
+        match &mut self.state {
+            SplitTunnelState::Initialized(state) => state.clear_tunnel_addresses(),
+            SplitTunnelState::Failed(state) => state.clear_tunnel_addresses(),
+        }
+    }
+
+    /// Returns a handle used for interacting with the split tunnel module.
+    pub fn handle(&self) -> SplitTunnelHandle {
+        match &self.state {
+            SplitTunnelState::Initialized(state) => state.handle(),
+            SplitTunnelState::Failed(state) => state.handle(),
+        }
+    }
+}
+
+/// Dummy implementation of split tunneling that fails in the "engaged" state.
+///
+/// The fake implementation can be considered _engaged_ when two conditions are met:
+/// 1. There is a tunnel (i.e., there are tunnel IP addresses registered).
+/// 2. There are paths to exclude.
+///
+/// Otherwise, it is _non-engaged_.
+///
+/// This is used to fail when split tunneling should be engaged due to user settings,
+/// but work when we would not have been in the engaged state anyway (e.g.
+/// when the user is not excluding any apps, has no tunnel, or has disabled split tunneling).
+struct FailedSplitTunnelState {
+    paths: Vec<OsString>,
+    tunnel_addresses: Vec<IpAddr>,
+}
+
+#[derive(PartialEq, Eq)]
+enum InactiveSplitTunnelStateState {
+    NonEngaged,
+    Engaged,
+}
+
+impl FailedSplitTunnelState {
+    pub fn new() -> Self {
+        Self {
+            paths: vec![],
+            tunnel_addresses: vec![],
+        }
+    }
+
+    pub fn set_paths<T: AsRef<OsStr>>(
+        &mut self,
+        paths: &[T],
+        result_tx: oneshot::Sender<Result<(), Error>>,
+    ) {
+        let _ = result_tx.send(self.set_paths_sync(paths));
+    }
+
+    fn set_paths_sync<T: AsRef<OsStr>>(&mut self, paths: &[T]) -> Result<(), Error> {
+        self.paths = paths.iter().map(|p| p.as_ref().to_owned()).collect();
+        self.get_action_result()
+    }
+
+    pub fn set_tunnel_addresses(&mut self, metadata: Option<&TunnelMetadata>) -> Result<(), Error> {
+        self.tunnel_addresses = metadata.map(|m| m.ips.clone()).unwrap_or_default();
+        self.get_action_result()
+    }
+
+    pub fn clear_tunnel_addresses(&mut self) -> Result<(), Error> {
+        self.tunnel_addresses.clear();
+        self.get_action_result()
+    }
+
+    pub fn handle(&self) -> SplitTunnelHandle {
+        SplitTunnelHandle {
+            loaded: false,
+            excluded_processes: None,
+        }
+    }
+
+    /// Current inactive split tunnel state state.
+    ///
+    /// # Non-engaged state
+    ///
+    /// If there is no tunnel or no paths to exclude, then split tunneling is supposed to be
+    /// inactive.
+    ///
+    /// In this case, no action should fail (unless it causes a transition to 'engaged').
+    ///
+    /// # Engaged state
+    ///
+    /// If there is a tunnel as well as paths to exclude, then split tunneling is supposed to be
+    /// active.
+    ///
+    /// In this case, any action should fail (unless it causes a transition to 'non-engaged').
+    fn current_state(&self) -> InactiveSplitTunnelStateState {
+        if self.tunnel_addresses.is_empty() || self.paths.is_empty() {
+            InactiveSplitTunnelStateState::NonEngaged
+        } else {
+            InactiveSplitTunnelStateState::Engaged
+        }
+    }
+
+    /// Result of an action based on the current state.
+    fn get_action_result(&self) -> Result<(), Error> {
+        if self.current_state() == InactiveSplitTunnelStateState::NonEngaged {
+            Ok(())
+        } else {
+            Err(Error::Unavailable)
+        }
+    }
+}
+
+/// Manages applications whose traffic to exclude from the tunnel.
+struct InitializedSplitTunnelState {
     runtime: tokio::runtime::Handle,
     request_tx: RequestTx,
     event_thread: Option<std::thread::JoinHandle<()>>,
@@ -136,19 +344,26 @@ struct InterfaceAddresses {
 /// Cloneable handle for interacting with the split tunnel module.
 #[derive(Debug, Clone)]
 pub struct SplitTunnelHandle {
-    excluded_processes: Weak<RwLock<HashMap<usize, ExcludedProcess>>>,
+    loaded: bool,
+    excluded_processes: Option<Weak<RwLock<HashMap<usize, ExcludedProcess>>>>,
 }
 
 impl SplitTunnelHandle {
     /// Return processes that are currently being excluded, including
     /// their pids, paths, and reason for being excluded.
     pub fn get_processes(&self) -> Result<Vec<ExcludedProcess>, Error> {
-        let processes = self
-            .excluded_processes
-            .upgrade()
-            .ok_or(Error::SplitTunnelDown)?;
+        let Some(excluded_procs) = &self.excluded_processes else {
+            return Ok(vec![]);
+        };
+        let processes = excluded_procs.upgrade().ok_or(Error::SplitTunnelDown)?;
         let processes = processes.read().unwrap();
         Ok(processes.values().cloned().collect())
+    }
+
+    /// Return whether split tunneling was properly initialized.
+    /// This can be `false` if the driver failed to load.
+    pub fn is_loaded(&self) -> bool {
+        self.loaded
     }
 }
 
@@ -159,7 +374,7 @@ enum EventResult {
     Quit,
 }
 
-impl SplitTunnel {
+impl InitializedSplitTunnelState {
     /// Initialize the split tunnel device.
     pub fn new(
         runtime: tokio::runtime::Handle,
@@ -176,7 +391,7 @@ impl SplitTunnel {
         let (event_thread, quit_event) =
             Self::spawn_event_listener(handle, excluded_processes.clone())?;
 
-        Ok(SplitTunnel {
+        Ok(InitializedSplitTunnelState {
             runtime,
             request_tx,
             event_thread: Some(event_thread),
@@ -242,9 +457,7 @@ impl SplitTunnel {
         overlapped: &mut Overlapped,
         data_buffer: &mut Vec<u8>,
     ) -> io::Result<EventResult> {
-        if unsafe { driver::wait_for_single_object(quit_event.as_raw(), Some(Duration::ZERO)) }
-            .is_ok()
-        {
+        if unsafe { driver::wait_for_single_object(quit_event, Some(Duration::ZERO)) }.is_ok() {
             return Ok(EventResult::Quit);
         }
 
@@ -268,8 +481,8 @@ impl SplitTunnel {
         })?;
 
         let event_objects = [
-            overlapped.get_event().unwrap().as_raw(),
-            quit_event.as_raw(),
+            overlapped.get_event().unwrap().as_raw_handle(),
+            quit_event.as_raw_handle(),
         ];
 
         let signaled_object =
@@ -282,7 +495,7 @@ impl SplitTunnel {
                 },
             )?;
 
-        if signaled_object == quit_event.as_raw() {
+        if signaled_object == quit_event.as_raw_handle() {
             // Quit event was signaled
             return Ok(EventResult::Quit);
         }
@@ -309,7 +522,7 @@ impl SplitTunnel {
                     "{}",
                     error.display_chain_with_msg("Failed to parse ST event buffer")
                 );
-                io::Error::new(io::ErrorKind::Other, "Failed to parse ST event buffer")
+                io::Error::other("Failed to parse ST event buffer")
             })
     }
 
@@ -340,7 +553,11 @@ impl SplitTunnel {
                 match event_id {
                     EventId::StartSplittingProcess => {
                         if let Some(prev_entry) = pids.get(&process_id) {
-                            log::error!("PID collision: {process_id} is already in the list of excluded processes. New image: {:?}. Current image: {:?}", image, prev_entry);
+                            log::error!(
+                                "PID collision: {process_id} is already in the list of excluded processes. New image: {:?}. Current image: {:?}",
+                                image,
+                                prev_entry
+                            );
                         }
                         pids.insert(
                             process_id,
@@ -444,7 +661,7 @@ impl SplitTunnel {
                                     error.display_chain_with_msg("Failed to update path monitor")
                                 );
                             }
-                            *monitored_paths_guard = paths.to_vec();
+                            *monitored_paths_guard = paths;
                         }
 
                         result
@@ -471,18 +688,46 @@ impl SplitTunnel {
                             result
                         }
                     }
+                    // INVARIANT: This arm will always the terminate the request thread.
                     Request::Stop => {
-                        if let Err(error) = handle.reset().map_err(Error::ResetError) {
-                            let _ = response_tx.send(Err(error));
-                            continue;
-                        }
+                        // Start by attempting to reset the driver state. Do this first, since
+                        // we'd like to prevent the process monitor from updating `excluded_processes`.
+                        // If reset fails, the driver ends up in a "zombie" state. If that happens,
+                        // the best we can do is try to clean up as much as possible.
+                        let reset_result = handle.reset().map_err(Error::ResetError);
 
                         monitored_paths.lock().unwrap().clear();
                         excluded_processes.write().unwrap().clear();
 
-                        let _ = response_tx.send(Ok(()));
+                        drop(volume_monitor);
+                        if let Err(error) = path_monitor.shutdown() {
+                            log::error!(
+                                "{}",
+                                error.display_chain_with_msg("Failed to shut down path monitor")
+                            );
+                        }
 
-                        // Stop listening to commands
+                        // Device handles must be dropped before unloading the driver.
+                        // Otherwise, it will fail and time out.
+                        drop(handle);
+
+                        // If we failed to reset, make sure to NEVER unload the driver.
+                        // See the safety comment on `stop_driver_service`.
+                        // Unloading without a reset can trigger a BSOD!
+                        let unload_driver = reset_result.is_ok();
+
+                        if unload_driver {
+                            log::debug!("Stopping ST service");
+                            // SAFETY: We have reset the driver before calling this.
+                            if let Err(error) = unsafe { service::stop_driver_service() } {
+                                log::error!(
+                                    "{}",
+                                    error.display_chain_with_msg("Failed to stop ST service")
+                                );
+                            }
+                        }
+
+                        let _ = response_tx.send(reset_result);
                         break;
                     }
                 };
@@ -491,23 +736,7 @@ impl SplitTunnel {
                 }
             }
 
-            drop(volume_monitor);
-            if let Err(error) = path_monitor.shutdown() {
-                log::error!(
-                    "{}",
-                    error.display_chain_with_msg("Failed to shut down path monitor")
-                );
-            }
-
-            drop(handle);
-
-            log::debug!("Stopping ST service");
-            if let Err(error) = service::stop_driver_service() {
-                log::error!(
-                    "{}",
-                    error.display_chain_with_msg("Failed to stop ST service")
-                );
-            }
+            log::info!("Stopping ST request thread");
         });
 
         let handle = init_rx
@@ -519,7 +748,7 @@ impl SplitTunnel {
         std::thread::spawn(move || {
             while let Ok(()) = monitor_rx.recv() {
                 let paths = monitored_paths_copy.lock().unwrap();
-                let result = if paths.len() > 0 {
+                let result = if !paths.is_empty() {
                     log::debug!("Re-resolving excluded paths");
                     handle_copy.set_config(&paths)
                 } else {
@@ -554,7 +783,7 @@ impl SplitTunnel {
     }
 
     /// Set a list of applications to exclude from the tunnel.
-    pub fn set_paths_sync<T: AsRef<OsStr>>(&self, paths: &[T]) -> Result<(), Error> {
+    fn set_paths_sync<T: AsRef<OsStr>>(&mut self, paths: &[T]) -> Result<(), Error> {
         self.send_request(Request::SetPaths(
             paths
                 .iter()
@@ -565,7 +794,7 @@ impl SplitTunnel {
 
     /// Set a list of applications to exclude from the tunnel.
     pub fn set_paths<T: AsRef<OsStr>>(
-        &self,
+        &mut self,
         paths: &[T],
         result_tx: oneshot::Sender<Result<(), Error>>,
     ) {
@@ -671,20 +900,21 @@ impl SplitTunnel {
     /// Returns a handle used for interacting with the split tunnel module.
     pub fn handle(&self) -> SplitTunnelHandle {
         SplitTunnelHandle {
-            excluded_processes: Arc::downgrade(&self.excluded_processes),
+            loaded: true,
+            excluded_processes: Some(Arc::downgrade(&self.excluded_processes)),
         }
     }
 }
 
-impl Drop for SplitTunnel {
+impl Drop for InitializedSplitTunnelState {
     fn drop(&mut self) {
-        if let Some(_event_thread) = self.event_thread.take() {
-            if let Err(error) = self.quit_event.set() {
-                log::error!(
-                    "{}",
-                    error.display_chain_with_msg("Failed to close ST event thread")
-                );
-            }
+        if let Some(_event_thread) = self.event_thread.take()
+            && let Err(error) = self.quit_event.set()
+        {
+            log::error!(
+                "{}",
+                error.display_chain_with_msg("Failed to close ST event thread")
+            );
             // Not joining `event_thread`: It may be unresponsive.
         }
 
@@ -723,7 +953,7 @@ impl SplitTunnelDefaultRouteChangeHandlerContext {
     }
 
     pub fn register_ips(&self) -> Result<(), Error> {
-        SplitTunnel::send_request_inner(
+        InitializedSplitTunnelState::send_request_inner(
             &self.request_tx,
             Request::RegisterIps(self.addresses.clone()),
         )

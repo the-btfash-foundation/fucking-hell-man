@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 12/02/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -16,9 +16,9 @@ class StatusImageView: UIImageView {
         fileprivate var image: UIImage? {
             switch self {
             case .success:
-                return UIImage(named: "IconSuccess")
+                return UIImage.Status.success
             case .failure:
-                return UIImage(named: "IconFail")
+                return UIImage.Status.failure
             }
         }
     }
@@ -39,14 +39,9 @@ class StatusImageView: UIImageView {
             }
         }
 
-        // swiftlint:disable:next unused_setter_value
         set {
             fatalError("This accessibilityValue property is get only")
         }
-    }
-
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: 60, height: 60)
     }
 
     override init(frame: CGRect) {
@@ -58,6 +53,7 @@ class StatusImageView: UIImageView {
         self.style = style
         super.init(image: style.image)
         image = style.image
+        self.adjustsImageSizeForAccessibilityContentSizeCategory = true
         setAccessibilityIdentifier(.statusImageView)
     }
 

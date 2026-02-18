@@ -3,12 +3,13 @@
 //  ExponentialBackoffTests
 //
 //  Created by pronebird on 05/11/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadREST
 import MullvadTypes
 import XCTest
+
+@testable import MullvadREST
 
 final class ExponentialBackoffTests: XCTestCase {
     func testExponentialBackoff() {
@@ -22,9 +23,9 @@ final class ExponentialBackoffTests: XCTestCase {
     func testAtMaximumValue() {
         var backoff = ExponentialBackoff(initial: .milliseconds(.max - 1), multiplier: 2, maxDelay: .seconds(.max - 1))
 
-        XCTAssertEqual(backoff.next(), .milliseconds(.max - 1))
-        XCTAssertEqual(backoff.next(), .milliseconds(.max))
-        XCTAssertEqual(backoff.next(), .milliseconds(.max))
+        XCTAssertEqual(backoff.next(), .milliseconds(Int.max - 1))
+        XCTAssertEqual(backoff.next(), .milliseconds(Int.max))
+        XCTAssertEqual(backoff.next(), .milliseconds(Int.max))
     }
 
     func testMaximumBound() {

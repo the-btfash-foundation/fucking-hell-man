@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 01/02/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
@@ -12,13 +12,7 @@ import UIKit
 
 class TunnelCoordinator: Coordinator, Presenting {
     private let tunnelManager: TunnelManager
-
-    #if DEBUG
-    private let controller: FI_TunnelViewController
-    #else
     private let controller: TunnelViewController
-    #endif
-
     private var tunnelObserver: TunnelObserver?
 
     var presentationContext: UIViewController {
@@ -30,6 +24,7 @@ class TunnelCoordinator: Coordinator, Presenting {
     }
 
     var showSelectLocationPicker: (() -> Void)?
+    var showFeatureSetting: ((AppRoute) -> Void)?
 
     init(
         tunnelManager: TunnelManager,
@@ -44,11 +39,7 @@ class TunnelCoordinator: Coordinator, Presenting {
             ipOverrideRepository: ipOverrideRepository
         )
 
-        #if DEBUG
-        controller = FI_TunnelViewController(interactor: interactor)
-        #else
         controller = TunnelViewController(interactor: interactor)
-        #endif
 
         super.init()
 
@@ -58,6 +49,25 @@ class TunnelCoordinator: Coordinator, Presenting {
 
         controller.shouldShowCancelTunnelAlert = { [weak self] in
             self?.showCancelTunnelAlert()
+        }
+
+        controller.shouldShowSettingsForFeature = { [weak self] feature in
+            switch feature {
+            case .daita:
+                self?.showFeatureSetting?(.daita)
+            case .multihop:
+                self?.showFeatureSetting?(.multihop)
+            case .quantumResistance:
+                self?.showFeatureSetting?(.vpnSettings(.quantumResistance))
+            case .obfuscation:
+                self?.showFeatureSetting?(.vpnSettings(.obfuscation))
+            case .dns:
+                self?.showFeatureSetting?(.dnsSettings)
+            case .ipOverrides:
+                self?.showFeatureSetting?(.ipOverrides)
+            case .includeAllNetworks, .localNetworkSharing:
+                self?.showFeatureSetting?(.includeAllNetworks)
+            }
         }
     }
 
@@ -85,31 +95,19 @@ class TunnelCoordinator: Coordinator, Presenting {
             id: "main-cancel-tunnel-alert",
             icon: .alert,
             message: NSLocalizedString(
-                "CANCEL_TUNNEL_ALERT_MESSAGE",
-                tableName: "Main",
-                value: "If you disconnect now, you won’t be able to secure your connection until the device is online.",
+                "If you disconnect now, you won’t be able to secure your connection until the device is online.",
                 comment: ""
             ),
             buttons: [
                 AlertAction(
-                    title: NSLocalizedString(
-                        "CANCEL_TUNNEL_ALERT_DISCONNECT_ACTION",
-                        tableName: "Main",
-                        value: "Disconnect",
-                        comment: ""
-                    ),
+                    title: NSLocalizedString("Disconnect", comment: ""),
                     style: .destructive,
                     handler: { [weak self] in
                         self?.tunnelManager.stopTunnel()
                     }
                 ),
                 AlertAction(
-                    title: NSLocalizedString(
-                        "CANCEL_TUNNEL_ALERT_CANCEL_ACTION",
-                        tableName: "Main",
-                        value: "Cancel",
-                        comment: ""
-                    ),
+                    title: NSLocalizedString("Cancel", comment: ""),
                     style: .default
                 ),
             ]

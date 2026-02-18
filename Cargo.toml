@@ -1,154 +1,180 @@
-[workspace.package]
-authors = ["Mullvad VPN"]
-repository = "https://github.com/mullvad/mullvadvpn-app/"
-license = "GPL-3.0"
-edition = "2021"
-rust-version = "1.80.0"
-
 [workspace]
 resolver = "2"
 members = [
-    "android/translations-converter",
-    "desktop/packages/nseventforwarder",
-    "mullvad-api",
-    "mullvad-cli",
-    "mullvad-daemon",
-    "mullvad-exclude",
-    "mullvad-fs",
-    "mullvad-ios",
-    "mullvad-jni",
-    "mullvad-management-interface",
-    "mullvad-nsis",
-    "mullvad-encrypted-dns-proxy",
-    "mullvad-paths",
-    "mullvad-problem-report",
-    "mullvad-relay-selector",
-    "mullvad-setup",
-    "mullvad-types",
-    "mullvad-types/intersection-derive",
-    "mullvad-version",
-    "talpid-core",
-    "talpid-dbus",
-    "talpid-future",
-    "talpid-macos",
-    "talpid-net",
-    "talpid-openvpn",
-    "talpid-openvpn-plugin",
-    "talpid-platform-metadata",
-    "talpid-routing",
-    "talpid-time",
-    "talpid-tunnel",
-    "talpid-tunnel-config-client",
-    "talpid-windows",
-    "talpid-wireguard",
-    "tunnel-obfuscation",
-    "wireguard-go-rs",
-    "windows-installer",
+  "android/translations-converter",
+  "desktop/packages/nseventforwarder",
+  "desktop/packages/windows-utils",
+  "installer-downloader",
+  "mullvad-api",
+  "mullvad-cli",
+  "mullvad-daemon",
+  "mullvad-encrypted-dns-proxy",
+  "mullvad-exclude",
+  "mullvad-fs",
+  "mullvad-ios",
+  "mullvad-jni",
+  "mullvad-leak-checker",
+  "mullvad-logging",
+  "mullvad-management-interface",
+  "mullvad-masque-proxy",
+  "mullvad-nsis",
+  "mullvad-paths",
+  "mullvad-problem-report",
+  "mullvad-relay-selector",
+  "mullvad-release-android",
+  "mullvad-setup",
+  "mullvad-types",
+  "mullvad-types/intersection-derive",
+  "mullvad-update",
+  "mullvad-update/mullvad-release",
+  "mullvad-version",
+  "talpid-core",
+  "talpid-dbus",
+  "talpid-dns",
+  "talpid-future",
+  "talpid-macos",
+  "talpid-net",
+  "talpid-platform-metadata",
+  "talpid-routing",
+  "talpid-time",
+  "talpid-tunnel",
+  "talpid-tunnel-config-client",
+  "talpid-windows",
+  "talpid-wireguard",
+  "tunnel-obfuscation",
+  "windows-installer",
+  "wireguard-go-rs",
 ]
-# The default members may exclude packages that cannot be built for all targets, or that do not always
-# need to be built
+exclude = ["ci/ios/test-router/raas"]
+# Default members dictate what is built when running `cargo build` in the root directory.
+# This is set to a minimal set of packages to speed up the build process and avoid building
+# crates which might not compile without additional input, such as the `windows-installer` crate.
+# To build or test everything, add `--workspace` to your cargo commands.
 default-members = [
-    "android/translations-converter",
-    "desktop/packages/nseventforwarder",
-    "mullvad-api",
-    "mullvad-cli",
-    "mullvad-daemon",
-    "mullvad-exclude",
-    "mullvad-fs",
-    "mullvad-ios",
-    "mullvad-jni",
-    "mullvad-management-interface",
-    "mullvad-nsis",
-    "mullvad-encrypted-dns-proxy",
-    "mullvad-paths",
-    "mullvad-problem-report",
-    "mullvad-relay-selector",
-    "mullvad-setup",
-    "mullvad-types",
-    "mullvad-types/intersection-derive",
-    "mullvad-version",
-    "talpid-core",
-    "talpid-dbus",
-    "talpid-future",
-    "talpid-macos",
-    "talpid-net",
-    "talpid-openvpn",
-    "talpid-openvpn-plugin",
-    "talpid-platform-metadata",
-    "talpid-routing",
-    "talpid-time",
-    "talpid-tunnel",
-    "talpid-tunnel-config-client",
-    "talpid-windows",
-    "talpid-wireguard",
-    "tunnel-obfuscation",
-    "wireguard-go-rs",
+  "mullvad-cli",
+  "mullvad-daemon",
+  "mullvad-problem-report",
+  "mullvad-version"
 ]
+
+[workspace.package]
+edition = "2024"
+# Must be less than or equal to `channel` in `rust-toolchain.toml`
+rust-version = "1.91.0"
+repository = "https://github.com/mullvad/mullvadvpn-app/"
+license = "GPL-3.0-only"
+
+[workspace.dependencies]
+anyhow = "1.0"
+bytes = "1.11.1"
+chrono = { version = "0.4.26", default-features = false }
+clap = { version = "4.4.18", features = ["cargo", "derive"] }
+dirs = "6.0.0"
+futures = "0.3.15"
+gotatun = { version = "0.2.0" }
+hickory-proto = "0.25.2"
+hickory-resolver = "0.25.2"
+hickory-server = { version = "0.25.2", features = ["resolver"] }
+hyper-util = { version = "0.1.8", features = [
+  "client",
+  "client-legacy",
+  "http1",
+  "http2",
+] }
+insta = { version = "1.42", features = ["yaml"] }
+ipnetwork = "0.21.1"
+itertools = "0.14"
+log = "0.4"
+netlink-packet-core = "0.8.0"
+netlink-packet-route = "0.25"
+netlink-proto = "0.12"
+netlink-sys = "0.8.3"
+nix = "0.30.1"
+once_cell = "1.16"
+pnet_packet = "0.35.0"
+proptest = "1.9"
+prost = "0.13.3"
+prost-types = "0.13.3"
+rand = "0.9"
+reqwest = { version = "0.12.23", default-features = false, features = [
+  "rustls-tls"
+] }
+rtnetlink = "0.18"
+rustls = { version = "0.23", default-features = false }
+rustls-pki-types = "1.13.1"
+serde = "1.0.204"
+serde_json = "1.0.122"
+sha2 = "0.10"
+shadowsocks = "1.23.2"
+socket2 = "0.5.7"
+strum = { version = "0.27" }
+thiserror = "2.0"
+tipsy = "0.6.5"
+tokio = { version = "1.44" }
+tokio-util = "0.7"
+tonic = "0.13.1"
+tonic-build = { version = "0.13.1", default-features = false }
+tower = { version = "0.5.1", features = ["util"] }
+tracing-appender = "0.2.4"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+tun = { version = "0.5.5", features = ["async"] }
+vec1 = "1.12"
+webpki-roots = "1.0.4"
+widestring = "1.2"
+windows = "0.62.2"
+windows-sys = "0.61.2"
+winreg = "0.55"
+zerocopy = "0.8.27"
+zeroize = "1.8.2"
+
+[workspace.lints.clippy]
+allow_attributes = "warn"
+as_ptr_cast_mut = "warn"
+as_underscore = "warn"
+borrow_as_ptr = "warn"
+implicit_clone = "warn"
+undocumented_unsafe_blocks = "warn"
+unicode_not_nfc = "warn"
+unused_async = "deny"
+wildcard_dependencies = "deny"
 
 # Keep all lints in sync with `test/Cargo.toml`
 [workspace.lints.rust]
-# Security
-non_ascii_idents = "forbid"
-
-# Deny old style Rust
-rust_2018_idioms = { level = "deny", priority = -1 }
-macro_use_extern_crate = "deny"
 absolute_paths_not_starting_with_crate = "deny"
-
 # Easy to read style and opinionated best practices
 explicit_outlives_requirements = "warn"
+macro_use_extern_crate = "deny"
 missing_abi = "deny"
+# Security
+non_ascii_idents = "forbid"
+# Deny old style Rust
+rust_2018_idioms = { level = "deny", priority = -1 }
+single_use_lifetimes = "warn"
 unused_lifetimes = "warn"
 unused_macro_rules = "warn"
-single_use_lifetimes = "warn"
 
-
-[workspace.lints.clippy]
-unused_async = "deny"
-
-[workspace.dependencies]
-hickory-proto = "0.24.2"
-hickory-resolver = "0.24.2"
-hickory-server = { version = "0.24.2", features = ["resolver"] }
-tokio = { version = "1.42" }
-parity-tokio-ipc = "0.9"
-futures = "0.3.15"
-# Tonic and related crates
-tonic = "0.12.3"
-tonic-build = { version = "0.10.0", default-features = false }
-tower = { version = "0.5.1", features = ["util"] }
-prost = "0.13.3"
-prost-types = "0.13.3"
-hyper-util = {version = "0.1.8", features = ["client", "client-legacy", "http2", "http1"]}
-
-env_logger = "0.10.0"
-thiserror = "2.0"
-log = "0.4"
-
-shadowsocks = "1.20.3"
-shadowsocks-service = "1.20.3"
-
-windows-sys = "0.52.0"
-
-chrono = { version = "0.4.26", default-features = false }
-clap = { version = "4.4.18", features = ["cargo", "derive"] }
-once_cell = "1.16"
-serde = "1.0.204"
-serde_json = "1.0.122"
-
-ipnetwork = "0.20"
-tun = { version = "0.7", features = ["async"] }
-
-# Test dependencies
-proptest = "1.4"
+# Configuration for the helper tool https://crates.io/crates/cargo-shear
+[workspace.metadata.cargo-shear]
+# The way prost is only used by generated code makes it really hard for dependency
+# usage checkers to see that it's not unused
+ignored = ["prost"]
 
 [profile.release]
 opt-level = "s"
-lto = true
 strip = true
+lto = true
 
-# Key generation may take over one minute without optimizations enabled.
-[profile.dev.package."classic-mceliece-rust"]
-opt-level = 3
-[profile.release.package."classic-mceliece-rust"]
-opt-level = 3
+# Selectively optimize packages where we know it makes a difference
+[profile.release.package]
+gotatun.opt-level = 3
+mullvad-masque-proxy.opt-level = 3
+pqcrypto-hqc.opt-level = 3
+quinn.opt-level = 3
+quinn-proto.opt-level = 3
+quinn-udp.opt-level = 3
+ring.opt-level = 3
+
+[profile.release-debuginfo]
+inherits = "release"
+debug = true
+strip = false

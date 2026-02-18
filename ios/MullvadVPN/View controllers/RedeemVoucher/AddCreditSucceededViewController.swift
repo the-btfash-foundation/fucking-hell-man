@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Sajad Vishkai on 2022-09-23.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -63,10 +63,6 @@ class AddCreditSucceededViewController: UIViewController, RootContainment {
         true
     }
 
-    var prefersNotificationBarHidden: Bool {
-        true
-    }
-
     weak var delegate: AddCreditSucceededViewControllerDelegate? {
         didSet {
             dismissButton.setTitle(delegate?.titleForAction(in: self), for: .normal)
@@ -81,12 +77,7 @@ class AddCreditSucceededViewController: UIViewController, RootContainment {
         view.directionalLayoutMargins = UIMetrics.contentLayoutMargins
 
         messageLabel.text = String(
-            format: NSLocalizedString(
-                "ADDED_TIME_SUCCESS_MESSAGE",
-                tableName: "AddedTime",
-                value: "%@ were added to your account.",
-                comment: ""
-            ),
+            format: NSLocalizedString("%@ was added to your account.", comment: ""),
             timeAddedComponents.formattedAddedDay
         )
     }

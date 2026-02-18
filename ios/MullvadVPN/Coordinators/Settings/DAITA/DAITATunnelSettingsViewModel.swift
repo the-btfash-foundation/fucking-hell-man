@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-11-21.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadREST
@@ -14,6 +14,8 @@ class DAITATunnelSettingsViewModel: TunnelSettingsObserver, ObservableObject {
 
     let tunnelManager: TunnelManager
     var tunnelObserver: TunnelObserver?
+
+    var isAutomaticRoutingActive: Bool
 
     var didFailDAITAValidation: (((item: DAITASettingsPromptItem, setting: DAITASettings)) -> Void)?
 
@@ -30,9 +32,20 @@ class DAITATunnelSettingsViewModel: TunnelSettingsObserver, ObservableObject {
         self.tunnelManager = tunnelManager
         value = tunnelManager.settings.daita
 
-        tunnelObserver = TunnelBlockObserver(didUpdateTunnelSettings: { [weak self] _, newSettings in
-            self?.value = newSettings.daita
+        var isAutomaticRoutingActive: Bool {
+            tunnelManager.tunnelStatus.state.isMultihop && !tunnelManager.settings.tunnelMultihopState.isEnabled
+        }
+        self.isAutomaticRoutingActive = isAutomaticRoutingActive
+
+        let tunnelObserver = TunnelBlockObserver(didUpdateTunnelStatus: { [weak self] _, _ in
+            if isAutomaticRoutingActive != self?.isAutomaticRoutingActive {
+                self?.isAutomaticRoutingActive = isAutomaticRoutingActive
+                self?.objectWillChange.send()
+            }
         })
+        self.tunnelObserver = tunnelObserver
+
+        tunnelManager.addObserver(tunnelObserver)
     }
 
     func evaluate(setting: DAITASettings) {
@@ -52,11 +65,12 @@ extension DAITATunnelSettingsViewModel {
         from error: DAITASettingsCompatibilityError,
         setting: DAITASettings
     ) -> DAITASettingsPromptItem {
-        let promptItemSetting: DAITASettingsPromptItem.Setting = if setting.daitaState != value.daitaState {
-            .daita
-        } else {
-            .directOnly
-        }
+        let promptItemSetting: DAITASettingsPromptItem.Setting =
+            if setting.daitaState != value.daitaState {
+                .daita
+            } else {
+                .directOnly
+            }
 
         var promptItem: DAITASettingsPromptItem
 
@@ -78,19 +92,16 @@ extension DAITATunnelSettingsViewModel {
 
         var compatibilityError: DAITASettingsCompatibilityError?
 
-        do {
-            _ = try tunnelManager.selectRelays(tunnelSettings: tunnelSettings)
-        } catch let error as NoRelaysSatisfyingConstraintsError where error.reason == .noDaitaRelaysFound {
-            // Return error if no relays could be selected due to DAITA constraints.
-            compatibilityError = tunnelSettings.tunnelMultihopState.isEnabled ? .multihop : .singlehop
-        } catch _ as NoRelaysSatisfyingConstraintsError {
-            // Even if the constraints error is not DAITA specific, if both DAITA and Direct only are enabled,
-            // we should return a DAITA related error since the current settings would have resulted in the
-            // relay selector not being able to select a DAITA relay anyway.
-            if settings.isDirectOnly {
+        if settings.isDirectOnly {
+            let relays = try? tunnelManager.selectRelays(tunnelSettings: tunnelSettings)
+
+            // Even if the reason for not finding any relays is not DAITA specific, if both DAITA and Direct
+            // only are enabled, we should return a DAITA related error since the current settings would have
+            // resulted in the relay selector not being able to select a DAITA relay anyway.
+            if relays == nil {
                 compatibilityError = tunnelSettings.tunnelMultihopState.isEnabled ? .multihop : .singlehop
             }
-        } catch {}
+        }
 
         return compatibilityError
     }

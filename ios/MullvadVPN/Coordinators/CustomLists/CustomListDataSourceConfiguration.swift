@@ -3,11 +3,12 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-02-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
+@MainActor
 class CustomListDataSourceConfiguration: NSObject {
     let dataSource: UITableViewDiffableDataSource<CustomListSectionIdentifier, CustomListItemIdentifier>
     var validationErrors: Set<CustomListFieldValidationError> = []
@@ -78,10 +79,6 @@ extension CustomListDataSourceConfiguration: UITableViewDelegate {
         }
     }
 
-    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        UIMetrics.SettingsCell.customListsCellHeight
-    }
-
     func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
         let snapshot = dataSource.snapshot()
 
@@ -113,6 +110,17 @@ extension CustomListDataSourceConfiguration: UITableViewDelegate {
             return view
         default:
             return nil
+        }
+    }
+
+    func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
+        let snapshot = dataSource.snapshot()
+        let sectionIdentifier = snapshot.sectionIdentifiers[section]
+        switch sectionIdentifier {
+        case .name:
+            return UITableView.automaticDimension
+        default:
+            return 24.0
         }
     }
 

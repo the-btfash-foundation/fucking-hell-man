@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 13/01/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -16,18 +16,20 @@ import UIKit
 /**
  Application coordinator managing split view and two navigation contexts.
  */
-final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewControllerDelegate,
-    UISplitViewControllerDelegate, ApplicationRouterDelegate, NotificationManagerDelegate {
+final class ApplicationCoordinator: Coordinator, Presenting, @preconcurrency RootContainerViewControllerDelegate,
+    UISplitViewControllerDelegate, @preconcurrency ApplicationRouterDelegate,
+    @preconcurrency NotificationManagerDelegate
+{
     typealias RouteType = AppRoute
 
     /**
      Application router.
      */
-    private(set) var router: ApplicationRouter<AppRoute>!
+    nonisolated(unsafe) private(set) var router: ApplicationRouter<AppRoute>!
 
     /**
      Navigation container.
-
+    
      Used as a container for horizontal flows (TOS, Login, Revoked, Out-of-time).
      */
     private let navigationContainer = RootContainerViewController()
@@ -51,8 +53,8 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
     private var appPreferences: AppPreferencesDataSource
     private var outgoingConnectionService: OutgoingConnectionServiceHandling
     private var accessMethodRepository: AccessMethodRepositoryProtocol
-    private let configuredTransportProvider: ProxyConfigurationTransportProvider
     private let ipOverrideRepository: IPOverrideRepository
+    private let relaySelectorWrapper: RelaySelectorWrapper
 
     private var outOfTimeTimer: Timer?
 
@@ -70,9 +72,8 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         outgoingConnectionService: OutgoingConnectionServiceHandling,
         appPreferences: AppPreferencesDataSource,
         accessMethodRepository: AccessMethodRepositoryProtocol,
-        transportProvider: ProxyConfigurationTransportProvider,
-        ipOverrideRepository: IPOverrideRepository
-
+        ipOverrideRepository: IPOverrideRepository,
+        relaySelectorWrapper: RelaySelectorWrapper
     ) {
         self.tunnelManager = tunnelManager
         self.storePaymentManager = storePaymentManager
@@ -83,11 +84,10 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         self.appPreferences = appPreferences
         self.outgoingConnectionService = outgoingConnectionService
         self.accessMethodRepository = accessMethodRepository
-        self.configuredTransportProvider = transportProvider
         self.ipOverrideRepository = ipOverrideRepository
+        self.relaySelectorWrapper = relaySelectorWrapper
 
         super.init()
-
         navigationContainer.delegate = self
 
         router = ApplicationRouter(self)
@@ -99,8 +99,15 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
 
     func start() {
         navigationContainer.notificationController = notificationController
-
-        continueFlow(animated: false)
+        if !appPreferences.isNotificationPermissionAsked {
+            Task {
+                let isAllowed = await UNUserNotificationCenter.isAllowed
+                appPreferences.isNotificationPermissionAsked = isAllowed
+                continueFlow(animated: false)
+            }
+        } else {
+            continueFlow(animated: false)
+        }
     }
 
     // MARK: - ApplicationRouterDelegate
@@ -109,7 +116,7 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         _ router: ApplicationRouter<RouteType>,
         presentWithContext context: RoutePresentationContext<RouteType>,
         animated: Bool,
-        completion: @escaping (Coordinator) -> Void
+        completion: @escaping @Sendable (Coordinator) -> Void
     ) {
         switch context.route {
         case .account:
@@ -117,6 +124,12 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
 
         case let .settings(subRoute):
             presentSettings(route: subRoute, animated: animated, completion: completion)
+
+        case .daita:
+            presentDAITA(animated: animated, completion: completion)
+
+        case .includeAllNetworks:
+            presentIncludeAllNetworks(animated: animated, completion: completion)
 
         case .selectLocation:
             presentSelectLocation(animated: animated, completion: completion)
@@ -144,13 +157,25 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
 
         case .alert:
             presentAlert(animated: animated, context: context, completion: completion)
+        case let .vpnSettings(section):
+            presentVPNSettings(
+                section: section,
+                animated: animated,
+                completion: completion
+            )
+        case .multihop:
+            presentMultihop(animated: animated, completion: completion)
+        case .dnsSettings:
+            presentDNSSettings(animated: animated, completion: completion)
+        case .ipOverrides:
+            presentIPOverride(animated: animated, completion: completion)
         }
     }
 
     func applicationRouter(
         _ router: ApplicationRouter<RouteType>,
         dismissWithContext context: RouteDismissalContext<RouteType>,
-        completion: @escaping () -> Void
+        completion: @escaping @Sendable () -> Void
     ) {
         let dismissedRoute = context.dismissedRoutes.first!
 
@@ -230,7 +255,7 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
     func applicationRouter(
         _ router: ApplicationRouter<RouteType>,
         handleSubNavigationWithContext context: RouteSubnavigationContext<RouteType>,
-        completion: @escaping () -> Void
+        completion: @escaping @Sendable @MainActor () -> Void
     ) {
         switch context.route {
         case let .settings(subRoute):
@@ -292,11 +317,6 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
             }
         }
 
-        // Change log can be presented simultaneously with other routes.
-        if !appPreferences.hasSeenLastChanges {
-            routes.append(.changelog)
-        }
-
         return routes
     }
 
@@ -319,7 +339,7 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
     private func presentTOS(animated: Bool, completion: @escaping (Coordinator) -> Void) {
         let coordinator = TermsOfServiceCoordinator(navigationController: navigationContainer)
 
-        coordinator.didFinish = { [weak self] _ in
+        coordinator.didAgreeToTermsOfService = { [weak self] in
             self?.appPreferences.isAgreedToTermsOfService = true
             self?.continueFlow(animated: true)
         }
@@ -331,27 +351,36 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
     }
 
     private func presentChangeLog(animated: Bool, completion: @escaping (Coordinator) -> Void) {
-        let coordinator = ChangeLogCoordinator(interactor: ChangeLogInteractor())
+        let coordinator = ChangeLogCoordinator(
+            route: .changelog,
+            navigationController: CustomNavigationController(),
+            viewModel: ChangeLogViewModel(changeLogReader: ChangeLogReader())
+        )
 
         coordinator.didFinish = { [weak self] _ in
-            self?.appPreferences.markChangeLogSeen()
-            self?.router.dismiss(.changelog)
+            self?.router.dismiss(.changelog, animated: animated)
         }
 
-        coordinator.start()
+        coordinator.start(animated: false)
 
         presentChild(coordinator, animated: animated) {
             completion(coordinator)
         }
     }
 
-    private func presentMain(animated: Bool, completion: @escaping (Coordinator) -> Void) {
+    private func presentMain(animated: Bool, completion: @Sendable @escaping (Coordinator) -> Void) {
         let tunnelCoordinator = makeTunnelCoordinator()
 
         navigationContainer.pushViewController(
             tunnelCoordinator.rootViewController,
             animated: animated
-        )
+        ) { [weak self] in
+            guard let self, appPreferences.isNotificationPermissionAsked == false else {
+                completion(tunnelCoordinator)
+                return
+            }
+            presentNotificationsPrompt(animated: animated, completion: completion)
+        }
 
         addChild(tunnelCoordinator)
         tunnelCoordinator.start()
@@ -385,9 +414,11 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         coordinator.didFinishPayment = { [weak self] _ in
             guard let self = self else { return }
 
-            if shouldDismissOutOfTime() {
-                router.dismiss(.outOfTime, animated: true)
-                continueFlow(animated: true)
+            Task { @MainActor in
+                if shouldDismissOutOfTime() {
+                    router.dismiss(.outOfTime, animated: true)
+                    continueFlow(animated: true)
+                }
             }
         }
 
@@ -398,6 +429,8 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
     }
 
     private func presentWelcome(animated: Bool, completion: @escaping (Coordinator) -> Void) {
+        appPreferences.isShownOnboarding = true
+
         let coordinator = WelcomeCoordinator(
             navigationController: navigationContainer,
             storePaymentManager: storePaymentManager,
@@ -406,9 +439,19 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         )
         coordinator.didFinish = { [weak self] in
             guard let self else { return }
-            appPreferences.isShownOnboarding = true
             router.dismiss(.welcome, animated: false)
-            continueFlow(animated: false)
+            #if DEBUG
+                if appPreferences.isNotificationPermissionAsked == false {
+                    presentNotificationsPrompt(animated: animated) { coordinator in
+                        self.continueFlow(animated: false)
+                    }
+                } else {
+                    self.continueFlow(animated: false)
+                }
+            #else
+                self.continueFlow(animated: false)
+            #endif
+
         }
         coordinator.didLogout = { [weak self] preferredAccountNumber in
             guard let self else { return }
@@ -448,10 +491,20 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         coordinator.preferredAccountNumberPublisher = preferredAccountNumberSubject.eraseToAnyPublisher()
 
         coordinator.didFinish = { [weak self] _ in
-            self?.continueFlow(animated: true)
+            guard let self else { return }
+            appPreferences.hasDoneFirstTimeLogin = true
+            if appPreferences.isNotificationPermissionAsked == false && appPreferences.isShownOnboarding {
+                presentNotificationsPrompt(animated: animated) { coordinator in
+                    self.continueFlow(animated: true)
+                }
+            } else {
+                continueFlow(animated: true)
+            }
         }
+
         coordinator.didCreateAccount = { [weak self] in
-            self?.appPreferences.isShownOnboarding = false
+            guard let self else { return }
+            appPreferences.isShownOnboarding = false
         }
 
         addChild(coordinator)
@@ -494,19 +547,25 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
             self?.router.present(.selectLocation, animated: true)
         }
 
+        tunnelCoordinator.showFeatureSetting = { [weak self] route in
+            self?.router.present(route, animated: true)
+        }
+
         return tunnelCoordinator
     }
 
     private func makeLocationCoordinator(forModalPresentation isModalPresentation: Bool)
-        -> LocationCoordinator {
+        -> LocationCoordinator
+    {
         let navigationController = CustomNavigationController()
         navigationController.isNavigationBarHidden = !isModalPresentation
 
         let locationCoordinator = LocationCoordinator(
             navigationController: navigationController,
             tunnelManager: tunnelManager,
-            relayCacheTracker: relayCacheTracker,
-            customListRepository: CustomListRepository()
+            relaySelectorWrapper: relaySelectorWrapper,
+            customListRepository: CustomListRepository(),
+            recentConnectionsRepository: RecentConnectionsRepository(store: SettingsManager.store)
         )
 
         locationCoordinator.didFinish = { [weak self] _ in
@@ -520,15 +579,16 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
 
     private func presentAccount(animated: Bool, completion: @escaping (Coordinator) -> Void) {
         let accountInteractor = AccountInteractor(
-            storePaymentManager: storePaymentManager,
             tunnelManager: tunnelManager,
             accountsProxy: accountsProxy,
-            apiProxy: apiProxy
+            apiProxy: apiProxy,
+            deviceProxy: devicesProxy
         )
 
         let coordinator = AccountCoordinator(
             navigationController: CustomNavigationController(),
-            interactor: accountInteractor
+            interactor: accountInteractor,
+            storePaymentManager: storePaymentManager
         )
 
         coordinator.didFinish = { [weak self] _, reason in
@@ -550,10 +610,9 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
     private func presentSettings(
         route: SettingsNavigationRoute?,
         animated: Bool,
-        completion: @escaping (Coordinator) -> Void
+        completion: @escaping @Sendable (Coordinator) -> Void
     ) {
         let interactorFactory = SettingsInteractorFactory(
-            storePaymentManager: storePaymentManager,
             tunnelManager: tunnelManager,
             apiProxy: apiProxy,
             relayCacheTracker: relayCacheTracker,
@@ -563,18 +622,29 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         let navigationController = CustomNavigationController()
         navigationController.view.setAccessibilityIdentifier(.settingsContainerView)
 
-        let configurationTester = ProxyConfigurationTester(transportProvider: configuredTransportProvider)
+        let configurationTester = ProxyConfigurationTester(
+            apiProxy: apiProxy
+        )
 
         let coordinator = SettingsCoordinator(
             navigationController: navigationController,
             interactorFactory: interactorFactory,
             accessMethodRepository: accessMethodRepository,
             proxyConfigurationTester: configurationTester,
-            ipOverrideRepository: ipOverrideRepository
+            ipOverrideRepository: ipOverrideRepository,
+            appPreferences: appPreferences
         )
 
+        coordinator.didUpdateNotificationSettings = { [weak self] notificationSettings in
+            guard let self = self else { return }
+            appPreferences.notificationSettings = notificationSettings
+            onNewNotificationSettings?(notificationSettings)
+        }
+
         coordinator.didFinish = { [weak self] _ in
-            self?.router.dismissAll(.settings, animated: true)
+            Task { @MainActor in
+                self?.router.dismissAll(.settings, animated: true)
+            }
         }
 
         coordinator.willNavigate = { [weak self] _, _, to in
@@ -593,12 +663,168 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         }
     }
 
+    func presentVPNSettings(
+        section: VPNSettingsSection?,
+        animated: Bool,
+        completion: @escaping @Sendable (Coordinator) -> Void
+    ) {
+        let interactorFactory = SettingsInteractorFactory(
+            tunnelManager: tunnelManager,
+            apiProxy: apiProxy,
+            relayCacheTracker: relayCacheTracker,
+            ipOverrideRepository: ipOverrideRepository
+        )
+        let coordinator = VPNSettingsCoordinator(
+            navigationController: CustomNavigationController(),
+            interactorFactory: interactorFactory,
+            ipOverrideRepository: ipOverrideRepository,
+            route: .vpnSettings(section)
+        )
+
+        coordinator.didFinish = { [weak self] _ in
+            self?.router.dismiss(.vpnSettings(section), animated: true)
+        }
+
+        coordinator.start(animated: animated)
+
+        presentChild(coordinator, animated: animated) {
+            completion(coordinator)
+        }
+    }
+
+    private func presentDAITA(animated: Bool, completion: @escaping @Sendable (Coordinator) -> Void) {
+        let viewModel = DAITATunnelSettingsViewModel(tunnelManager: tunnelManager)
+        let coordinator = DAITASettingsCoordinator(
+            navigationController: CustomNavigationController(),
+            route: .daita,
+            viewModel: viewModel
+        )
+
+        coordinator.didFinish = { [weak self] _ in
+            self?.router.dismiss(.daita, animated: true)
+        }
+
+        coordinator.start(animated: animated)
+
+        presentChild(coordinator, animated: animated) {
+            completion(coordinator)
+        }
+    }
+
+    private func presentIncludeAllNetworks(animated: Bool, completion: @escaping @Sendable (Coordinator) -> Void) {
+        let viewModel = IncludeAllNetworksSettingsViewModelImpl(
+            tunnelManager: tunnelManager,
+            appPreferences: appPreferences
+        )
+        let coordinator = IncludeAllNetworksSettingsCoordinator(
+            navigationController: CustomNavigationController(),
+            route: .includeAllNetworks,
+            viewModel: viewModel
+        )
+
+        coordinator.didFinish = { [weak self] _ in
+            self?.router.dismiss(.includeAllNetworks, animated: true)
+        }
+
+        coordinator.start(animated: animated)
+
+        presentChild(coordinator, animated: animated) {
+            completion(coordinator)
+        }
+    }
+
+    private func presentMultihop(animated: Bool, completion: @escaping @Sendable (Coordinator) -> Void) {
+        let viewModel = MultihopTunnelSettingsViewModel(
+            tunnelManager: tunnelManager
+        )
+        let coordinator = MultihopSettingsCoordinator(
+            navigationController: CustomNavigationController(),
+            route: .multihop,
+            viewModel: viewModel
+        )
+
+        coordinator.didFinish = { [weak self] _ in
+            self?.router.dismiss(.multihop, animated: true)
+        }
+
+        coordinator.start(animated: animated)
+
+        presentChild(coordinator, animated: animated) {
+            completion(coordinator)
+        }
+    }
+
+    private func presentIPOverride(animated: Bool, completion: @escaping @Sendable (Coordinator) -> Void) {
+        let coordinator = IPOverrideCoordinator(
+            navigationController: CustomNavigationController(),
+            repository: ipOverrideRepository,
+            tunnelManager: tunnelManager,
+            route: .ipOverrides
+        )
+
+        coordinator.didFinish = { [weak self] _ in
+            self?.router.dismiss(.ipOverrides, animated: true)
+        }
+
+        coordinator.start(animated: animated)
+
+        presentChild(coordinator, animated: animated) {
+            completion(coordinator)
+        }
+    }
+
+    private func presentDNSSettings(animated: Bool, completion: @escaping @Sendable (Coordinator) -> Void) {
+        let coordinator = CustomDNSCoordinator(
+            navigationController: CustomNavigationController(),
+            interactor: VPNSettingsInteractor(
+                tunnelManager: tunnelManager,
+                relayCacheTracker: relayCacheTracker
+            ),
+            route: .dnsSettings
+        )
+
+        coordinator.didFinish = { [weak self] _ in
+            self?.router.dismiss(.dnsSettings, animated: true)
+        }
+
+        coordinator.start(animated: animated)
+
+        presentChild(coordinator, animated: animated) {
+            completion(coordinator)
+        }
+    }
+
+    private func presentNotificationsPrompt(
+        animated: Bool, completion: @escaping @MainActor @Sendable (Coordinator) -> Void
+    ) {
+        let coordinator = NotificationPromptCoordinator(navigationController: CustomNavigationController())
+
+        coordinator.start(animated: animated)
+        coordinator.didConclude = { [weak self] coordinator in
+            self?.appPreferences.isNotificationPermissionAsked = true
+            coordinator.dismiss(animated: animated) {
+                completion(coordinator)
+            }
+        }
+        coordinator.onInteractiveDismissal { [weak self] coordinator in
+            self?.appPreferences.isNotificationPermissionAsked = true
+            completion(coordinator)
+        }
+        presentChild(
+            coordinator,
+            animated: true,
+            configuration: ModalPresentationConfiguration(modalPresentationStyle: .automatic)
+        )
+
+    }
+
     private func addTunnelObserver() {
         let tunnelObserver =
             TunnelBlockObserver(
                 didUpdateTunnelStatus: { [weak self] _, tunnelStatus in
                     if case let .error(observedState) = tunnelStatus.observedState,
-                       observedState.reason == .accountExpired {
+                        observedState.reason == .accountExpired
+                    {
                         self?.router.present(.outOfTime)
                     }
                 },
@@ -619,7 +845,6 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
 
         switch deviceState {
         case let .loggedIn(accountData, _):
-
             // Account creation is being shown
             guard !isPresentingWelcome && !appPreferences.isShownOnboarding else { return }
 
@@ -662,9 +887,13 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
 
         guard !accountData.isExpired else { return }
 
-        let timer = Timer(fire: accountData.expiry, interval: 0, repeats: false, block: { [weak self] _ in
-            self?.router.present(.outOfTime, animated: true)
-        })
+        let timer = Timer(
+            fire: accountData.expiry, interval: 0, repeats: false,
+            block: { [weak self] _ in
+                Task { @MainActor in
+                    self?.router.present(.outOfTime, animated: true)
+                }
+            })
 
         RunLoop.main.add(timer, forMode: .common)
 
@@ -683,6 +912,11 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
      settings back to root.
      */
     var onShowSettings: (() -> Void)?
+
+    /**
+     This closure is called each time the notification settings are changed.
+     */
+    var onNewNotificationSettings: ((NotificationSettings) -> Void)?
 
     /// This closure is called each time when account controller is being presented.
     var onShowAccount: (() -> Void)?
@@ -705,12 +939,14 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
     // MARK: - UISplitViewControllerDelegate
 
     func primaryViewController(forExpanding splitViewController: UISplitViewController)
-        -> UIViewController? {
+        -> UIViewController?
+    {
         splitLocationCoordinator?.navigationController
     }
 
     func primaryViewController(forCollapsing splitViewController: UISplitViewController)
-        -> UIViewController? {
+        -> UIViewController?
+    {
         splitTunnelCoordinator?.rootViewController
     }
 
@@ -751,17 +987,19 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
     }
 
     func rootContainerViewSupportedInterfaceOrientations(_ controller: RootContainerViewController)
-        -> UIInterfaceOrientationMask {
+        -> UIInterfaceOrientationMask
+    {
         return [.portrait]
     }
 
     func rootContainerViewAccessibilityPerformMagicTap(_ controller: RootContainerViewController)
-        -> Bool {
+        -> Bool
+    {
         guard tunnelManager.deviceState.isLoggedIn else { return false }
 
         switch tunnelManager.tunnelStatus.state {
         case .connected, .connecting, .reconnecting, .waitingForConnectivity(.noConnection), .error,
-             .negotiatingEphemeralPeer:
+            .negotiatingEphemeralPeer:
             tunnelManager.reconnectTunnel(selectNewRelay: true)
 
         case .disconnecting, .disconnected:
@@ -779,7 +1017,8 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         _ manager: NotificationManager,
         notifications: [InAppNotificationDescriptor]
     ) {
-        isPresentingAccountExpiryBanner = notifications
+        isPresentingAccountExpiryBanner =
+            notifications
             .contains(where: { $0.identifier == .accountExpiryInAppNotification })
         updateDeviceInfo(deviceState: tunnelManager.deviceState)
         notificationController.setNotifications(notifications, animated: true)
@@ -789,9 +1028,19 @@ final class ApplicationCoordinator: Coordinator, Presenting, RootContainerViewCo
         switch response.providerIdentifier {
         case .accountExpirySystemNotification:
             router.present(.account)
+        case .newAppVersionSystemNotification:
+            router.present(.settings(.vpnSettings))
         case .accountExpiryInAppNotification:
             isPresentingAccountExpiryBanner = false
             updateDeviceInfo(deviceState: tunnelManager.deviceState)
+        case .latestChangesInAppNotificationProvider:
+            router.present(.changelog)
+        case .tunnelStatusNotificationProvider:
+            switch response.actionIdentifier {
+            case TunnelStatusNotificationProvider.ActionIdentifier.showVPNSettings.rawValue:
+                router.present(.settings(.vpnSettings))
+            default: break
+            }
         default: return
         }
     }
@@ -807,17 +1056,4 @@ extension DeviceState {
     var splitViewMode: UISplitViewController.DisplayMode {
         isLoggedIn ? UISplitViewController.DisplayMode.oneBesideSecondary : .secondaryOnly
     }
-}
-
-fileprivate extension AppPreferencesDataSource {
-    var hasSeenLastChanges: Bool {
-        !ChangeLogInteractor().hasNewChanges ||
-            (lastSeenChangeLogVersion == Bundle.main.shortVersion)
-    }
-
-    mutating func markChangeLogSeen() {
-        lastSeenChangeLogVersion = Bundle.main.shortVersion
-    }
-
-    // swiftlint:disable:next file_length
 }

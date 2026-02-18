@@ -3,7 +3,7 @@
 //  MullvadVPNScreenshots
 //
 //  Created by Jon Petersson on 2024-05-28.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import XCTest
@@ -22,26 +22,12 @@ class ScreenshotTests: LoggedInWithTimeUITestCase {
         try await super.setUp()
     }
 
-    func testTakeScreenshotOfQuantumSecuredConnection() async throws {
+    func testTakeScreenshotOfAQuantumSecuredConnection() async throws {
         // We can't close banners in the screenshot tests due to how the NotificationController view
         // is overridden, so we need to restart the app once to make sure the "new device" notification
         // isn't visible.
         app.terminate()
         app.launch()
-
-        HeaderBar(app)
-            .tapSettingsButton()
-
-        SettingsPage(app)
-            .tapVPNSettingsCell()
-
-        VPNSettingsPage(app)
-            .tapQuantumResistantTunnelExpandButton()
-            .tapQuantumResistantTunnelOnCell()
-            .tapBackButton()
-
-        SettingsPage(app)
-            .tapDoneButton()
 
         TunnelControlPage(app)
             .tapSelectLocationButton()
@@ -50,7 +36,7 @@ class ScreenshotTests: LoggedInWithTimeUITestCase {
             .tapLocationCell(withName: "Sweden")
 
         TunnelControlPage(app)
-            .waitForSecureConnectionLabel()
+            .waitForConnectedLabel()
 
         snapshot("QuantumConnectionSecured")
     }
@@ -63,7 +49,6 @@ class ScreenshotTests: LoggedInWithTimeUITestCase {
 
         SelectLocationPage(app)
             .tapWhereStatusBarShouldBeToScrollToTopMostPosition()
-            .tapCustomListEllipsisButton()
             .tapAddNewCustomList()
 
         CustomListPage(app)
@@ -102,11 +87,8 @@ class ScreenshotTests: LoggedInWithTimeUITestCase {
             .tapSelectLocationButton()
 
         SelectLocationPage(app)
+            .tapMenuButton()
             .tapFilterButton()
-
-        SelectLocationFilterPage(app)
-            .tapOwnershipCellExpandButton()
-            .tapProvidersCellExpandButton()
 
         snapshot("RelayFilter")
     }

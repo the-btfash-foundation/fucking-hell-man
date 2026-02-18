@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by pronebird on 09/02/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -13,7 +13,7 @@ import Network
 import NetworkExtension
 
 /// Tunnel monitor.
-public final class TunnelMonitor: TunnelMonitorProtocol {
+public final class TunnelMonitor: TunnelMonitorProtocol, @unchecked Sendable {
     private let tunnelDeviceInfo: TunnelDeviceInfoProtocol
 
     private let nslock = NSLock()
@@ -22,7 +22,6 @@ public final class TunnelMonitor: TunnelMonitorProtocol {
     private let timings: TunnelMonitorTimings
 
     private var pinger: PingerProtocol
-    private var isObservingDefaultPath = false
     private var timer: DispatchSourceTimer?
 
     private var state: TunnelMonitorState
@@ -122,10 +121,9 @@ public final class TunnelMonitor: TunnelMonitorProtocol {
         stopConnectivityCheckTimer()
     }
 
-    public func handleNetworkPathUpdate(_ networkPath: NetworkPath) {
+    public func handleNetworkPathUpdate(_ networkPath: Network.NWPath.Status) {
         nslock.withLock {
-            let pathStatus = networkPath.status
-            let isReachable = pathStatus == .satisfiable || pathStatus == .satisfied
+            let isReachable = networkPath.networkReachability == .reachable
 
             switch state.connectionState {
             case .pendingStart:
@@ -179,12 +177,12 @@ public final class TunnelMonitor: TunnelMonitorProtocol {
         defer { nslock.unlock() }
 
         guard let newStats = getStats(),
-              state.connectionState == .connecting || state.connectionState == .connected
+            state.connectionState == .connecting || state.connectionState == .connected
         else { return }
 
         // Check if counters were reset.
-        let isStatsReset = newStats.bytesReceived < state.netStats.bytesReceived ||
-            newStats.bytesSent < state.netStats.bytesSent
+        let isStatsReset =
+            newStats.bytesReceived < state.netStats.bytesReceived || newStats.bytesSent < state.netStats.bytesSent
 
         guard !isStatsReset else {
             logger.trace("Stats was being reset.")
@@ -193,7 +191,7 @@ public final class TunnelMonitor: TunnelMonitorProtocol {
         }
 
         #if DEBUG
-        logCounters(currentStats: state.netStats, newStats: newStats)
+            logCounters(currentStats: state.netStats, newStats: newStats)
         #endif
 
         let now = Date()
@@ -217,7 +215,7 @@ public final class TunnelMonitor: TunnelMonitorProtocol {
             state.isHeartbeatSuspended = true
 
         case .sendHeartbeatPing, .retryHeartbeatPing, .sendNextPing, .sendInitialPing,
-             .inboundTrafficTimeout, .trafficTimeout:
+            .inboundTrafficTimeout, .trafficTimeout:
             if state.isHeartbeatSuspended {
                 state.isHeartbeatSuspended = false
                 state.timeoutReference = now
@@ -227,19 +225,19 @@ public final class TunnelMonitor: TunnelMonitorProtocol {
     }
 
     #if DEBUG
-    private func logCounters(currentStats: WgStats, newStats: WgStats) {
-        let rxDelta = newStats.bytesReceived.saturatingSubtraction(currentStats.bytesReceived)
-        let txDelta = newStats.bytesSent.saturatingSubtraction(currentStats.bytesSent)
+        private func logCounters(currentStats: WgStats, newStats: WgStats) {
+            let rxDelta = newStats.bytesReceived.saturatingSubtraction(currentStats.bytesReceived)
+            let txDelta = newStats.bytesSent.saturatingSubtraction(currentStats.bytesSent)
 
-        guard rxDelta > 0 || txDelta > 0 else { return }
+            guard rxDelta > 0 || txDelta > 0 else { return }
 
-        logger.trace(
-            """
-            rx: \(newStats.bytesReceived) (+\(rxDelta)) \
-            tx: \(newStats.bytesSent) (+\(txDelta))
-            """
-        )
-    }
+            logger.trace(
+                """
+                rx: \(newStats.bytesReceived) (+\(rxDelta)) \
+                tx: \(newStats.bytesSent) (+\(txDelta))
+                """
+            )
+        }
     #endif
 
     private func startConnectionRecovery() {
@@ -279,15 +277,16 @@ public final class TunnelMonitor: TunnelMonitorProtocol {
             return
         }
 
-        logger.trace({
-            let time = now.timeIntervalSince(pingTimestamp) * 1000
-            let message = String(
-                format: "Received reply icmp_seq=%d, time=%.2f ms.",
-                sequenceNumber,
-                time
-            )
-            return Logger.Message(stringLiteral: message)
-        }())
+        logger.trace(
+            {
+                let time = now.timeIntervalSince(pingTimestamp) * 1000
+                let message = String(
+                    format: "Received reply icmp_seq=%d, time=%.2f ms.",
+                    sequenceNumber,
+                    time
+                )
+                return Logger.Message(stringLiteral: message)
+            }())
 
         if case .connecting = state.connectionState {
             state.connectionState = .connected
@@ -334,12 +333,12 @@ public final class TunnelMonitor: TunnelMonitorProtocol {
             self?.checkConnectivity()
         }
         timer.schedule(wallDeadline: .now(), repeating: timings.connectivityCheckInterval.timeInterval)
+        /// The timeout reference must be set before the timer is activated as the scheduled task will read from it.
+        state.timeoutReference = Date()
         timer.activate()
 
         self.timer?.cancel()
         self.timer = timer
-
-        state.timeoutReference = Date()
 
         logger.trace("Start connectivity check timer.")
     }

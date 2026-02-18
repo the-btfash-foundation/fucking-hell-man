@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 28/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -15,31 +15,23 @@ import MullvadTypes
 /// A concrete implementation of an access method proxy configuration.
 class ProxyConfigurationTester: ProxyConfigurationTesterProtocol {
     private var cancellable: MullvadTypes.Cancellable?
-    private let transportProvider: ProxyConfigurationTransportProvider
-    private var headRequest: REST.APIAvailabilityTestRequest?
+    private let apiProxy: APIQuerying
 
-    init(transportProvider: ProxyConfigurationTransportProvider) {
-        self.transportProvider = transportProvider
+    init(apiProxy: APIQuerying) {
+        self.apiProxy = apiProxy
     }
 
-    func start(configuration: PersistentProxyConfiguration, completion: @escaping (Error?) -> Void) {
-        do {
-            let transport = try transportProvider.makeTransport(with: configuration)
-            let request = REST.APIAvailabilityTestRequest(transport: transport)
-            headRequest = request
-            cancellable = request.makeRequest { error in
-                DispatchQueue.main.async {
-                    completion(error)
-                }
+    func start(configuration: PersistentAccessMethod, completion: @escaping @Sendable (Error?) -> Void) {
+        cancellable = apiProxy.checkApiAvailability(retryStrategy: .noRetry, accessMethod: configuration) { success in
+            switch success {
+            case .success: completion(nil)
+            case let .failure(error): completion(error)
             }
-        } catch {
-            completion(error)
         }
     }
 
     func cancel() {
         cancellable?.cancel()
         cancellable = nil
-        headRequest = nil
     }
 }

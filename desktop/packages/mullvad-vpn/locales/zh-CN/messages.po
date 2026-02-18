@@ -10,13 +10,19 @@ msgstr ""
 "Project-Id-Version: mullvad-app\n"
 "Language-Team: Chinese Simplified\n"
 "Language: zh_CN\n"
-"PO-Revision-Date: 2024-12-20 14:20\n"
+"PO-Revision-Date: 2026-01-22 08:53\n"
 
 msgid "%(amount)d more..."
 msgstr "其他 %(amount)d 个…"
 
 msgid "%(duration)s was added, account paid until %(expiry)s."
 msgstr "已添加 %(duration)s，帐户到期时间为 %(expiry)s。"
+
+#. The label for the WireGuard port option.
+#. Available placeholders:
+#. %(wireguard)s - will be replaced with WireGuard
+msgid "%(wireguard)s port"
+msgstr "%(wireguard)s 端口"
 
 msgid "1 day"
 msgid_plural "%d days"
@@ -130,7 +136,7 @@ msgid "Direct only"
 msgstr "仅直连"
 
 msgid "Disable"
-msgstr "禁用"
+msgstr "停用"
 
 msgid "Disconnect"
 msgstr "断开连接"
@@ -156,11 +162,17 @@ msgstr "编辑"
 msgid "Enable"
 msgstr "启用"
 
-msgid "Enable \"%(directOnly)s\""
-msgstr "启用“%(directOnly)s”"
-
 msgid "Enable anyway"
 msgstr "仍然启用"
+
+#. A toggle that refers to the setting "Direct only".
+msgid "Enable direct only"
+msgstr "启用仅直连"
+
+#. Error message shown trying to login but the app fails
+#. to fetch the list of registered devices.
+msgid "Failed to fetch list of devices"
+msgstr "无法获取设备列表"
 
 msgid "FAILED TO SECURE CONNECTION"
 msgstr "无法保护连接"
@@ -168,10 +180,10 @@ msgstr "无法保护连接"
 msgid "Filter"
 msgstr "筛选"
 
+#. Button label for system settings.
 msgid "Go to System Settings"
 msgstr "前往“系统设置”"
 
-#. This is a button which closes a dialog.
 msgid "Got it!"
 msgstr "知道了！"
 
@@ -207,6 +219,9 @@ msgstr "下一步"
 msgid "No result for <b>%(searchTerm)s</b>."
 msgstr "没有关于<b>%(searchTerm)s</b>的结果。"
 
+msgid "None"
+msgstr "无"
+
 msgid "Off"
 msgstr "关"
 
@@ -240,6 +255,10 @@ msgstr "退出"
 msgid "Reconnect"
 msgstr "重新连接"
 
+#. Button label in confirmation dialog that confirms a remove action.
+msgid "Remove"
+msgstr "移除"
+
 msgid "Required"
 msgstr "必填"
 
@@ -258,16 +277,8 @@ msgstr "设置"
 msgid "System default"
 msgstr "系统默认值"
 
-msgid "TCP"
-msgstr "TCP"
-
 msgid "Test"
 msgstr "测试"
-
-#. Warning shown in dialog to users when they enable setting that increases
-#. network latency (decreases performance).
-msgid "This setting increases latency. Use only if needed."
-msgstr "此设置会增大延迟。仅在需要时使用。"
 
 msgid "Troubleshoot"
 msgstr "故障排除"
@@ -277,9 +288,6 @@ msgstr "尝试其他搜索词。"
 
 msgid "Type"
 msgstr "类型"
-
-msgid "UDP"
-msgstr "UDP"
 
 msgid "Unblock"
 msgstr "解除阻止"
@@ -297,9 +305,12 @@ msgctxt "accessibility"
 msgid "%(title)s, View loaded"
 msgstr "%(title)s，已加载视图"
 
+#. Text for screen readers to describe the WireGuard port settings navigation button.
+#. Available placeholders:
+#. %(wireguard)s - will be replaced with WireGuard
 msgctxt "accessibility"
-msgid "Add new custom bridge"
-msgstr "添加新的自定义网桥"
+msgid "%(wireguard)s port settings"
+msgstr "%(wireguard)s 端口设置"
 
 msgctxt "accessibility"
 msgid "Close notification"
@@ -315,17 +326,41 @@ msgctxt "accessibility"
 msgid "Copy account number"
 msgstr "复制帐号"
 
+#. Accessibility label for a carousel that explains the DAITA feature to the user.
 msgctxt "accessibility"
-msgid "Edit custom bridge"
-msgstr "编辑自定义网桥"
+msgid "DAITA information carousel"
+msgstr "DAITA 信息轮播"
 
 msgctxt "accessibility"
 msgid "Expand %(location)s"
 msgstr "展开 %(location)s"
 
+#. This is used by screenreaders to communicate the "x" button next to a saved account number.
+#. Available placeholders:
+#. %(accountNumber)s - the account number to the left of the button
 msgctxt "accessibility"
-msgid "Forget %(accountNumber)s"
-msgstr "忘记 %(accountNumber)s"
+msgid "Forget account number %(accountNumber)s"
+msgstr "忘记帐号 %(accountNumber)s"
+
+#. Accessibility label for link to VPN settings where
+#. the user can change WireGuard port.
+#. Available placeholders:
+#. %(wireGuard)s - Will be replaced with WireGuard
+msgctxt "accessibility"
+msgid "Go to anti-censorship settings to change %(wireGuard)s port"
+msgstr "前往反审查设置以更改 %(wireGuard)s 端口"
+
+#. Accessibility label for link to app upgrade view.
+msgctxt "accessibility"
+msgid "Go to app update page"
+msgstr "前往应用更新页面"
+
+#. Accessibility label for carousel indicators that allow navigation between slides.
+#. Available placeholders:
+#. %(index)s - Will be replaced with the slide index number.
+msgctxt "accessibility"
+msgid "Go to slide %(index)s"
+msgstr "转到幻灯片 %(index)s"
 
 #. Provided to accessibility tools such as screenreaders to describe
 #. the button which obscures the account number.
@@ -333,22 +368,59 @@ msgctxt "accessibility"
 msgid "Hide account number"
 msgstr "隐藏帐号"
 
+#. Alt text for an illustration showing VPN traffic with DAITA.
 msgctxt "accessibility"
-msgid "info"
-msgstr "信息"
+msgid "Illustration showing VPN traffic with DAITA enabled"
+msgstr "显示启用了 DAITA 的 VPN 流量的插图"
+
+#. Alt text for an illustration showing VPN traffic without DAITA.
+msgctxt "accessibility"
+msgid "Illustration showing VPN traffic without DAITA"
+msgstr "显示没有 DAITA 的 VPN 流量的插图"
 
 #. This is used by screenreaders to communicate the login button.
 msgctxt "accessibility"
 msgid "Login"
 msgstr "登录"
 
+#. This is used by screenreaders to communicate logging in with a saved account number.
+#. Available placeholders:
+#. %(accountNumber)s - the saved account number
+msgctxt "accessibility"
+msgid "Login with account number %(accountNumber)s"
+msgstr "使用帐号 %(accountNumber)s 登录"
+
 msgctxt "accessibility"
 msgid "More information"
 msgstr "更多信息"
 
+#. Accessibility label for link to go to download page.
+msgctxt "accessibility"
+msgid "New version available, click here to go to download page, opens externally"
+msgstr "有可用的新版本，点击此处前往下载页面，在外部打开"
+
+msgctxt "accessibility"
+msgid "New version available, click here to go to update view"
+msgstr "有可用的新版本，点击此处前往更新视图"
+
+msgctxt "accessibility"
+msgid "New version installed, click here to see the changelog"
+msgstr "已安装新版本，点击此处查看更新日志"
+
+#. Accessibility label for a button that navigates to the next slide in a carousel.
+msgctxt "accessibility"
+msgid "Next slide"
+msgstr "下一张幻灯片"
+
+#. Accessibility label for the button that opens the browser to buy credit.
 msgctxt "accessibility"
 msgid "Opens externally"
 msgstr "在外部打开"
+
+#. Accessibility label for a button that navigates to the previous slide in a carousel.
+msgctxt "accessibility"
+msgid "Previous slide"
+msgstr "上一张幻灯片"
 
 #. Button action description provided to accessibility tools such as screen
 #. readers.
@@ -380,6 +452,10 @@ msgctxt "accessibility"
 msgid "UDP-over-TCP settings"
 msgstr "UDP-over-TCP 设置"
 
+msgctxt "accessibility"
+msgid "Use the right arrow key to focus the settings button."
+msgstr "使用向右箭头键将焦点移至设置按钮。"
+
 #. Title label in navigation bar
 msgctxt "account-view"
 msgid "Account"
@@ -393,9 +469,15 @@ msgctxt "account-view"
 msgid "Currently unavailable"
 msgstr "当前不可用"
 
+#. Button label for logging out.
 msgctxt "account-view"
 msgid "Log out"
 msgstr "退出"
+
+#. Link text in the account view to navigate to the manage devices view.
+msgctxt "account-view"
+msgid "Manage devices"
+msgstr "管理设备"
 
 msgctxt "account-view"
 msgid "OUT OF TIME"
@@ -404,6 +486,26 @@ msgstr "已没有时间"
 msgctxt "account-view"
 msgid "Paid until"
 msgstr "到期时间"
+
+#. Page title for anti censorship settings view
+msgctxt "anti-censorship-view"
+msgid "Anti-censorship"
+msgstr "反审查"
+
+#. The title for the obfuscation method selector.
+msgctxt "anti-censorship-view"
+msgid "Method"
+msgstr "方法"
+
+#. Second paragraph of description text in anti-censorship view
+msgctxt "anti-censorship-view"
+msgid "Please note that these methods do not improve performance, and may increase system utilization and battery consumption."
+msgstr "请注意，这些方法并不能提高性能，反而可能会增加系统资源占用率和电量消耗。"
+
+#. First paragraph of description text in anti-censorship view
+msgctxt "anti-censorship-view"
+msgid "These methods may be useful in situations where you are blocked from reaching Mullvad. When \"Automatic\" is selected, the app will attempt all methods until one works."
+msgstr "这些方法在您无法连接到 Mullvad 时可能会有所帮助。选择“自动”时，应用将尝试所有方法，直到其中一种方法生效。"
 
 msgctxt "api-access-methods-view"
 msgid "Add method"
@@ -471,8 +573,8 @@ msgid "Enter port"
 msgstr "输入端口"
 
 msgctxt "api-access-methods-view"
-msgid "If you are not connected to our VPN, then the Encrypted DNS proxy will use your own non-VPN IP when connecting. The DoH servers are hosted by one of the following providers: Quad 9, CloudFlare, or Google."
-msgstr "如果您未连接到我们的 VPN，加密 DNS 代理将在连接时使用您自己的非 VPN IP。DoH 服务器由下列提供商之一托管：Quad 9、CloudFlare 或 Google。"
+msgid "If you are not connected to our VPN, then the Encrypted DNS proxy will use your own non-VPN IP when connecting. The DoH servers are hosted by one of the following providers: Quad9 or CloudFlare."
+msgstr "如果您未连接到我们的 VPN，加密 DNS 代理将在连接时使用您自己的非 VPN IP。DoH 服务器由下列提供商之一托管：Quad9 或 CloudFlare。"
 
 msgctxt "api-access-methods-view"
 msgid "In use"
@@ -501,6 +603,10 @@ msgstr "请输入有效的 localhost 端口。"
 msgctxt "api-access-methods-view"
 msgid "Please enter a valid remote server port."
 msgstr "请输入有效的远程服务器端口。"
+
+msgctxt "api-access-methods-view"
+msgid "Please select a name for the access method not already in use."
+msgstr "请为尚未使用的访问方法选择一个名称。"
 
 msgctxt "api-access-methods-view"
 msgid "Remote Server"
@@ -582,6 +688,217 @@ msgctxt "api-access-methods-view"
 msgid "With the “Mullvad bridges” method, the app communicates with a Mullvad API server via a Mullvad bridge server. It does this by sending the traffic obfuscated by Shadowsocks."
 msgstr "使用“Mullvad 桥接”方法，应用通过 Mullvad 桥接服务器与 Mullvad API 服务器进行通信。这是通过发送被 Shadowsocks 混淆的流量来实现的。"
 
+#. Title of the app info view.
+msgctxt "app-info-view"
+msgid "App info"
+msgstr "应用信息"
+
+#. Description for version list item when app is out of sync.
+msgctxt "app-info-view"
+msgid "App is out of sync. Please quit and restart."
+msgstr "应用不同步。请退出并重新启动。"
+
+#. Label for switch to toggle beta program.
+msgctxt "app-info-view"
+msgid "Beta program"
+msgstr "测试计划"
+
+msgctxt "app-info-view"
+msgid "Enable to get notified when new beta versions of the app are released."
+msgstr "启用以在新的测试版应用发布时获得通知。"
+
+msgctxt "app-info-view"
+msgid "This option is unavailable while using a beta version."
+msgstr "使用测试版本时此选项不可用。"
+
+#. Label for update available list item.
+msgctxt "app-info-view"
+msgid "Update available"
+msgstr "有可用的更新"
+
+#. Label for version list item.
+msgctxt "app-info-view"
+msgid "Version"
+msgstr "版本"
+
+#. Label for changelog list item.
+msgctxt "app-info-view"
+msgid "What’s new"
+msgstr "最新变化"
+
+#. Status text displayed below a progress bar when the update is being downloaded
+#. with the estimated time of completion is within a few seconds.
+msgctxt "app-upgrade-view"
+msgid "A few seconds remaining..."
+msgstr "剩余几秒钟…"
+
+#. Status text displayed below a progress bar when the update is being downloaded
+#. with the estimated time of completion represented in minutes.
+#. Available placeholders:
+#. %(minutes)s - Will be replaced with remaining minutes until download is complete
+msgctxt "app-upgrade-view"
+msgid "About %(minutes)s minutes remaining..."
+msgstr "大约剩余 %(minutes)s 分钟…"
+
+#. Status text displayed below a progress bar when the update is being downloaded
+#. with the estimated time of completion represented in seconds.
+#. Available placeholders:
+#. %(second)s - Will be replaced with remaining seconds until download is complete
+msgctxt "app-upgrade-view"
+msgid "About %(seconds)s seconds remaining..."
+msgstr "大约剩余 %(seconds)s 秒钟…"
+
+#. Label displayed when an error occurred due to the connection being blocked
+msgctxt "app-upgrade-view"
+msgid "Connection blocked. Try changing server or other settings."
+msgstr "连接被阻止。请尝试更改服务器或其他设置。"
+
+#. Label displayed when an error occurred due to the installer failing to start
+#. and the suggested resolution is to download the update again.
+msgctxt "app-upgrade-view"
+msgid "Could not open installer, please try again or send a problem report."
+msgstr "无法打开安装程序，请重试或发送问题报告。"
+
+#. Button text to download and install an update
+msgctxt "app-upgrade-view"
+msgid "Download & install"
+msgstr "下载并安装"
+
+#. Status text displayed below a progress bar when the download of an update is complete
+msgctxt "app-upgrade-view"
+msgid "Download complete!"
+msgstr "下载完成！"
+
+#. Status text displayed below a progress bar when the download of an update fails
+msgctxt "app-upgrade-view"
+msgid "Download failed"
+msgstr "下载失败"
+
+#. Label displayed when an error occurred due to the download failing
+msgctxt "app-upgrade-view"
+msgid "Download failed, please check your connection/firewall and try again, or send a problem report."
+msgstr "下载失败，请检查您的连接/防火墙并重试，或发送问题报告。"
+
+#. Status text displayed below a progress bar when the download of an update has been paused
+#. Label displayed above a progress bar when the update is verified successfully
+msgctxt "app-upgrade-view"
+msgid "Download paused"
+msgstr "下载已暂停"
+
+#. Label displayed above a progress bar informing the user which server
+#. the update is downloading from
+msgctxt "app-upgrade-view"
+msgid "Downloading from: %(server)s"
+msgstr "正在从以下服务器下载：%(server)s"
+
+#. Label displayed above a progress bar when a download is in progress
+msgctxt "app-upgrade-view"
+msgid "Downloading..."
+msgstr "正在下载…"
+
+#. Link shown to optionally manually download the update
+#. due to repeated errors in the upgrade process.
+msgctxt "app-upgrade-view"
+msgid "Having problems? Try downloading the app from our website"
+msgstr "遇到问题了？请尝试从我们的网站下载应用"
+
+#. Button text to install an update
+msgctxt "app-upgrade-view"
+msgid "Install update"
+msgstr "安装更新"
+
+#. Label displayed when an error occurred within the installer
+msgctxt "app-upgrade-view"
+msgid "Installer quit unexpectedly, please try again or send a problem report."
+msgstr "安装程序意外退出，请重试或发送问题报告。"
+
+#. Info about which directory the app update will be downloaded to
+msgctxt "app-upgrade-view"
+msgid "Installer will be downloaded to <b>%(cacheDir)s</b>."
+msgstr "安装程序将下载到 <b>%(cacheDir)s</b>。"
+
+msgctxt "app-upgrade-view"
+msgid "Latest version: %(version)s"
+msgstr "最新版本：%(version)s"
+
+#. Text displayed when there are no updates for this platform in the next app version
+msgctxt "app-upgrade-view"
+msgid "No updates or changes were made in this release for this platform."
+msgstr "此版本没有针对此平台的更新或更改。"
+
+#. Button text to pause the download of an update
+msgctxt "app-upgrade-view"
+msgid "Pause"
+msgstr "暂停"
+
+#. Button text to report a problem
+msgctxt "app-upgrade-view"
+msgid "Report a problem"
+msgstr "报告问题"
+
+#. Button text to resume updating
+msgctxt "app-upgrade-view"
+msgid "Resume"
+msgstr "恢复"
+
+#. Button text to try again
+msgctxt "app-upgrade-view"
+msgid "Retry"
+msgstr "重试"
+
+#. Button text to try download again
+msgctxt "app-upgrade-view"
+msgid "Retry download"
+msgstr "重试下载"
+
+#. Status text displayed below a progress bar when the download of an update is starting
+msgctxt "app-upgrade-view"
+msgid "Starting download..."
+msgstr "即将开始下载…"
+
+#. Button text to when starting the installer for an update
+msgctxt "app-upgrade-view"
+msgid "Starting installer..."
+msgstr "正在启动安装程序…"
+
+#. Label displayed when an unknown error occurred
+msgctxt "app-upgrade-view"
+msgid "Unknown error occurred. Please try again or send a problem report."
+msgstr "发生未知错误。请重试或发送问题报告。"
+
+#. Title in navigation bar
+#. Main title for the update available view
+msgctxt "app-upgrade-view"
+msgid "Update available"
+msgstr "有可用的更新"
+
+#. Label displayed when an error occurred due to the installer failed verification
+msgctxt "app-upgrade-view"
+msgid "Verification failed, please try again or send a problem report."
+msgstr "验证失败，请重试或发送问题报告。"
+
+#. Label displayed above a progress bar when the update is verified successfully
+msgctxt "app-upgrade-view"
+msgid "Verification successful!"
+msgstr "验证成功！"
+
+#. Label displayed above a progress bar when the update is being verified
+msgctxt "app-upgrade-view"
+msgid "Verifying installer..."
+msgstr "正在验证安装程序…"
+
+#. Heading which shows the version of the app which can be upgraded to.
+#. Available placeholders:
+#. %(version)s - The new version of the app.
+msgctxt "app-upgrade-view"
+msgid "Version %(version)s"
+msgstr "版本 %(version)s"
+
+#. The user has the latest version of the app and does not need to be update
+msgctxt "app-upgrade-view"
+msgid "You are using the latest version"
+msgstr "您正在使用最新版本"
+
 msgctxt "auth-failure"
 msgid "Blocking internet: account is out of time"
 msgstr "正在阻止网络：帐户已没有时间"
@@ -598,9 +915,16 @@ msgctxt "auth-failure"
 msgid "You are logged in with an invalid account number. Please log out and try another one."
 msgstr "您登录时使用的帐号无效。请退出并尝试其他帐号。"
 
-msgctxt "changelog"
-msgid "Changes in this version:"
-msgstr "此版本中的变更："
+#. Text displayed when there are no updates for this platform in the app version
+msgctxt "changelog-view"
+msgid "No updates or changes were made in this release for this platform."
+msgstr "此版本没有针对此平台的更新或更改。"
+
+#. Heading for the view of the changes and updates in the
+#. current version compared to the old version.
+msgctxt "changelog-view"
+msgid "What’s new"
+msgstr "最新变化"
 
 #. The selected location label displayed on the main view, when a user selected a specific host to connect to.
 #. Example: Malmö (se-mma-001)
@@ -610,6 +934,14 @@ msgstr "此版本中的变更："
 msgctxt "connect-container"
 msgid "%(city)s (%(hostname)s)"
 msgstr "%(city)s (%(hostname)s)"
+
+#. This is used as a feature indicator to show that DAITA is enabled through
+#. multihop.
+#. Available placeholders:
+#. %(DAITA)s - Is a non-translatable feature "DAITA"
+msgctxt "connect-view"
+msgid "%(DAITA)s: Multihop"
+msgstr "%(DAITA)s：多跳"
 
 msgctxt "connect-view"
 msgid "Active features"
@@ -623,6 +955,7 @@ msgctxt "connect-view"
 msgid "Connection details"
 msgstr "连接详细信息"
 
+#. Button label for disconnecting from the VPN.
 msgctxt "connect-view"
 msgid "Disconnect"
 msgstr "断开连接"
@@ -643,6 +976,7 @@ msgctxt "connect-view"
 msgid "Here’s your account number. Save it!"
 msgstr "以下是您的帐号。请妥善保存！"
 
+#. Button label for opening privacy information link.
 msgctxt "connect-view"
 msgid "Learn about privacy"
 msgstr "了解隐私"
@@ -651,6 +985,7 @@ msgctxt "connect-view"
 msgid "Out of time"
 msgstr "已没有时间"
 
+#. Button label for navigating to the voucher redemption view.
 msgctxt "connect-view"
 msgid "Redeem voucher"
 msgstr "兑换优惠券"
@@ -659,6 +994,7 @@ msgctxt "connect-view"
 msgid "Remember, turning it off will allow network traffic while the VPN is disconnected until you turn it back on under Advanced settings."
 msgstr "注意，在 VPN 断开连接时关闭此选项将允许网络流量，直到您在“高级”设置下将其重新打开。"
 
+#. Button label for starting the app.
 msgctxt "connect-view"
 msgid "Start using the app"
 msgstr "开始使用应用"
@@ -689,7 +1025,7 @@ msgstr "此帐户没有更多的 VPN 时间了。"
 
 msgctxt "connect-view"
 msgid "You need to disable \"Lockdown mode\" in order to access the Internet to add time."
-msgstr "您需要禁用“锁定模式”来访问网络以增加时间。"
+msgstr "您需要停用“锁定模式”来访问网络以增加时间。"
 
 msgctxt "connect-view"
 msgid "You’re all set!"
@@ -704,40 +1040,12 @@ msgid "%(relay)s via %(entry)s"
 msgstr "%(relay)s，经由 %(entry)s"
 
 msgctxt "connection-info"
-msgid "%(relay)s via Custom bridge"
-msgstr "%(relay)s，经由自定义网桥"
-
-msgctxt "connection-info"
 msgid "In"
 msgstr "内部"
 
 msgctxt "connection-info"
 msgid "Out"
 msgstr "外部"
-
-msgctxt "custom-bridge"
-msgid "Add custom bridge"
-msgstr "添加自定义网桥"
-
-msgctxt "custom-bridge"
-msgid "Delete custom bridge?"
-msgstr "删除自定义网桥？"
-
-msgctxt "custom-bridge"
-msgid "Deleting the custom bridge will take you back to the select location view and the Automatic option will be selected instead."
-msgstr "删除自定义网桥会将您带回“选择位置”视图，并且将改为选择“自动”选项。"
-
-msgctxt "custom-bridge"
-msgid "Edit custom bridge"
-msgstr "编辑自定义网桥"
-
-#. Text displayed above button which logs out another device.
-#. The text enclosed in "<b></b>" will appear bold.
-#. Available placeholders:
-#. %(deviceName)s - The name of the device to log out.
-msgctxt "device-management"
-msgid "Are you sure you want to log <b>%(deviceName)s</b> out?"
-msgstr "确定要退出<b>%(deviceName)s</b>吗？"
 
 #. Button for continuing login process.
 msgctxt "device-management"
@@ -750,6 +1058,11 @@ msgstr "继续登录"
 msgctxt "device-management"
 msgid "Created: %(createdDate)s"
 msgstr "创建日期：%(createdDate)s"
+
+#. Label indicating that this device is the current device.
+msgctxt "device-management"
+msgid "Current device"
+msgstr "当前设备"
 
 msgctxt "device-management"
 msgid "Device is inactive"
@@ -771,6 +1084,7 @@ msgctxt "device-management"
 msgid "Failed to remove device"
 msgstr "无法移除设备"
 
+#. Button label for navigating to login.
 msgctxt "device-management"
 msgid "Go to login"
 msgstr "前往登录"
@@ -783,15 +1097,38 @@ msgctxt "device-management"
 msgid "If you log out, the device and the device name is removed. When you log back in again, the device will get a new name."
 msgstr "如果您退出登录，设备和设备名称将被移除。当您再次登录时，设备将获得新名称。"
 
+#. Title label in navigation bar for the manage devices view.
+#. Title text in the manage devices view
+msgctxt "device-management"
+msgid "Manage devices"
+msgstr "管理设备"
+
 msgctxt "device-management"
 msgid "Please log out of at least one by removing it from the list below. You can find the corresponding device name under the device’s Account settings."
 msgstr "请通过从以下列表中移除的方式退出至少一个帐户。您可以在设备的帐户设置下找到相应设备名称。"
+
+#. Button label for confirming removing a device.
+msgctxt "device-management"
+msgid "Remove"
+msgstr "移除"
+
+#. Text displayed above button which logs out another device.
+#. The text enclosed in "<b></b>" will appear bold.
+#. Available placeholders:
+#. %(deviceName)s - The name of the device to log out.
+msgctxt "device-management"
+msgid "Remove <em>%(deviceName)s?</em>"
+msgstr "是否移除 <em>%(deviceName)s</em>？"
 
 #. Page title informing user that enough devices has been removed to continue
 #. login process.
 msgctxt "device-management"
 msgid "Super!"
 msgstr "太棒了！"
+
+msgctxt "device-management"
+msgid "The device will be removed from the list and logged out."
+msgstr "该设备将从列表中移除并退出登录。"
 
 msgctxt "device-management"
 msgid "This is the name assigned to the device. Each device logged in on a Mullvad account gets a unique name that helps you identify it when you manage your devices in the app or on the website."
@@ -807,10 +1144,16 @@ msgctxt "device-management"
 msgid "Too many devices"
 msgstr "设备过多"
 
-#. Confirmation button when logging out other device.
+#. Button text to retry fetching devices.
 msgctxt "device-management"
-msgid "Yes, log out device"
-msgstr "是，退出设备"
+msgid "Try again"
+msgstr "重试"
+
+#. Subtitle text in the manage devices view, explaining
+#. devices and what they can do in the manage devices view.
+msgctxt "device-management"
+msgid "View and manage all your logged in devices. You can have up to 5 devices on one account at a time. Each device gets a name when logged in to help you tell them apart easily."
+msgstr "查看和管理您所有已登录的设备。一个帐户最多可以同时登录 5 台设备。每台设备登录时都会获得一个名称，以便您能够轻松区分。"
 
 msgctxt "device-management"
 msgid "You can have up to 5 devices logged in on one Mullvad account."
@@ -872,6 +1215,13 @@ msgctxt "in-app-notifications"
 msgid "%(duration)s. Buy more credit."
 msgstr "%(duration)s。购买更多额度。"
 
+#. Notification subtitle when the app upgrade is ready to install.
+#. Available placeholders:
+#. - %(suggestedUpgradeVersion)s: Upgrade version to be installed.
+msgctxt "in-app-notifications"
+msgid "%(suggestedUpgradeVersion)s is ready to be installed."
+msgstr "%(suggestedUpgradeVersion)s 已准备好安装。"
+
 msgctxt "in-app-notifications"
 msgid "ACCOUNT CREDIT EXPIRES SOON"
 msgstr "帐户额度即将到期"
@@ -888,10 +1238,72 @@ msgctxt "in-app-notifications"
 msgid "BLOCKING INTERNET"
 msgstr "正在阻止网络"
 
+#. Notification subtitle when the app upgrade is ready to install.
+msgctxt "in-app-notifications"
+msgid "Click here to install update."
+msgstr "点击此处安装更新。"
+
+#. Notification subtitle when the installer failed.
+msgctxt "in-app-notifications"
+msgid "Click here to retry"
+msgstr "点击此处重试"
+
+#. Notification subtitle when the download of the installer failed
+#. and the user can try downloading again.
+msgctxt "in-app-notifications"
+msgid "Click here to retry download"
+msgstr "点击此处重试下载"
+
+msgctxt "in-app-notifications"
+msgid "Click here to see what’s new."
+msgstr "点击此处查看最新变化。"
+
+#. Link text to go to the app upgrade view
+msgctxt "in-app-notifications"
+msgid "Click here to update"
+msgstr "点击此处进行更新"
+
+#. Notification subtitle when the installer download failed.
+msgctxt "in-app-notifications"
+msgid "Could not download installer."
+msgstr "无法下载安装程序。"
+
+#. Generic notification subtitle when the app upgrade failed.
+msgctxt "in-app-notifications"
+msgid "Could not upgrade the app."
+msgstr "无法升级应用。"
+
+#. Notification title when app upgrade is verifying the installer.
+msgctxt "in-app-notifications"
+msgid "DOWNLOAD COMPLETE! VERIFYING..."
+msgstr "下载完成！正在验证…"
+
+#. Notification title when the installer download failed.
+msgctxt "in-app-notifications"
+msgid "DOWNLOAD FAILED"
+msgstr "下载失败"
+
+#. Generic notification title when app upgrade is downloading the installer.
+msgctxt "in-app-notifications"
+msgid "DOWNLOADING UPDATE..."
+msgstr "正在下载更新…"
+
+#. Notification title when the app upgrade is in progress.
+#. Available placeholders:
+#. - %(appUpgradeDownloadProgressValue)s: The download progress value.
+msgctxt "in-app-notifications"
+msgid "DOWNLOADING UPDATE... %(appUpgradeDownloadProgressValue)s%%"
+msgstr "正在下载更新… %(appUpgradeDownloadProgressValue)s%%"
+
 #. The in-app banner displayed to the user when the app update is available.
 msgctxt "in-app-notifications"
 msgid "Install the latest app version to stay up to date."
 msgstr "安装最新的应用版本以保持最新状态。"
+
+#. Notification title when the installer failed.
+msgctxt "in-app-notifications"
+msgid "INSTALLER FAILED"
+msgstr "安装程序失败"
 
 msgctxt "in-app-notifications"
 msgid "NETWORK TRAFFIC MIGHT BE LEAKING"
@@ -902,12 +1314,61 @@ msgid "NEW DEVICE CREATED"
 msgstr "已创建新设备"
 
 msgctxt "in-app-notifications"
+msgid "NEW VERSION INSTALLED"
+msgstr "已安装新版本"
+
+msgctxt "in-app-notifications"
 msgid "Please quit and restart the app."
 msgstr "请退出后重新启动应用。"
 
+#. Notification title when the app upgrade is ready to install.
+msgctxt "in-app-notifications"
+msgid "READY TO INSTALL UPDATE"
+msgstr "已准备好安装更新"
+
+#. Accessibility label for the button to retry download of the installer.
+msgctxt "in-app-notifications"
+msgid "Retry download of the installer"
+msgstr "重试下载安装程序"
+
+#. Accessibility label for the button to retry the installation.
+msgctxt "in-app-notifications"
+msgid "Retry installation"
+msgstr "重试安装"
+
+#. Button label to send a problem report.
 msgctxt "in-app-notifications"
 msgid "Send problem report"
 msgstr "发送问题报告"
+
+#. Notification subtitle when the installer verification failed.
+msgctxt "in-app-notifications"
+msgid "The installer could not be verified."
+msgstr "安装程序无法验证。"
+
+#. Notification subtitle when the installer failed.
+msgctxt "in-app-notifications"
+msgid "The installer did not complete successfully."
+msgstr "安装程序未能成功完成。"
+
+#. Notification subtitle when the installer failed.
+msgctxt "in-app-notifications"
+msgid "The installer did not start successfully."
+msgstr "安装程序未能成功启动。"
+
+#. Notification subtitle indicating the user is using an unsupported port for WireGuard.
+#. Available placeholders:
+#. %(wireGuard)s - Will be replaced with WireGuard
+msgctxt "in-app-notifications"
+msgid "The selected %(wireGuard)s port is not supported, please <a>change it under VPN settings.</a>"
+msgstr "所选 %(wireGuard)s 端口不受支持，请<a>在“VPN 设置”下更改</a>。"
+
+#. Notification text when a new device has been created.
+#. Available placeholders:
+#. - %(deviceName)s: Name of created device.
+msgctxt "in-app-notifications"
+msgid "This device is now named <em>%(deviceName)s</em>. See more under <a>Manage devices</a> in Account."
+msgstr "此设备现已被命名为 <em>%(deviceName)s</em>。请在“帐户”中的<a>管理设备</a>下查看更多信息。"
 
 #. The in-app banner displayed to the user when the app beta update is
 #. available.
@@ -925,41 +1386,100 @@ msgctxt "in-app-notifications"
 msgid "UPDATE AVAILABLE"
 msgstr "有可用更新"
 
+#. Generic notification title when the app upgrade failed.
 msgctxt "in-app-notifications"
-msgid "Welcome, this device is now called <b>%(deviceName)s</b>. For more details see the info button in Account."
-msgstr "欢迎，此设备现在名为 <b>%(deviceName)s</b>。有关详情，请点击“帐户”中的信息按钮。"
+msgid "UPDATE FAILED"
+msgstr "更新失败"
 
+#. Notification title when app upgrade is ready for the user to launch the installer.
+msgctxt "in-app-notifications"
+msgid "VERIFICATION COMPLETE! INSTALLER READY!"
+msgstr "验证完成！安装程序已就绪！"
+
+#. Notification title when app upgrade is launching the installer.
+msgctxt "in-app-notifications"
+msgid "VERIFICATION COMPLETE! LAUNCHING INSTALLER..."
+msgstr "验证完成！正在启动安装程序…"
+
+#. Notification title when the installer verification failed.
+msgctxt "in-app-notifications"
+msgid "VERIFICATION FAILED"
+msgstr "验证失败"
+
+#. Status text app is trying to connect to the system service.
 msgctxt "launch-view"
 msgid "Connecting to Mullvad system service..."
 msgstr "正在连接到 Mullvad 系统服务…"
 
+#. Button label for opening dialog with troubleshooting details.
+msgctxt "launch-view"
+msgid "Details"
+msgstr "详细信息"
+
+#. List item in troubleshooting modal advising user disable third party antivirus.
+msgctxt "launch-view"
+msgid "Disabling third party antivirus software"
+msgstr "停用第三方防病毒软件"
+
+#. Status text shown when app fails to start.
+msgctxt "launch-view"
+msgid "Failed to start the app, please try again or click “Details” for more info"
+msgstr "无法启动应用，请重试或点击“详细信息”了解更多信息"
+
+#. Message in troubleshooting modal advising user to send a problem report if the steps do not work.
 msgctxt "launch-view"
 msgid "If these steps do not work please send a problem report."
 msgstr "如果这些步骤不起作用，请发送问题报告。"
 
+#. Message in launch view when the background process permissions have been revoked.
 msgctxt "launch-view"
 msgid "Permission for the Mullvad VPN service has been revoked. Please go to System Settings and allow Mullvad VPN under the “Allow in the Background” setting."
 msgstr "Mullvad VPN 服务的权限已被撤销。请前往“系统设置”，并在“允许在后台”设置下允许 Mullvad VPN。"
 
+#. List item in troubleshooting modal advising user to reinstall the app.
 msgctxt "launch-view"
-msgid "Reinstalling the app."
-msgstr "重新安装应用。"
+msgid "Reinstalling the app"
+msgstr "重新安装应用"
 
+#. List item in troubleshooting modal advising user to restart background process.
 msgctxt "launch-view"
-msgid "Restarting your computer."
-msgstr "重新启动计算机。"
+msgid "Restarting the Mullvad background process"
+msgstr "重新启动 Mullvad 后台进程"
 
+#. List item in troubleshooting modal instructing user how to restart the background process.
+msgctxt "launch-view"
+msgid "Restarting the Mullvad background process by clicking \"Back\", then \"Try again\""
+msgstr "通过点击“返回”再点击“重试”来重新启动 Mullvad 后台进程"
+
+#. List item in troubleshooting modal advising user to restart their computer.
+msgctxt "launch-view"
+msgid "Restarting your computer"
+msgstr "重新启动计算机"
+
+#. Button label for sending a problem report.
 msgctxt "launch-view"
 msgid "Send problem report"
 msgstr "发送问题报告"
 
+#. Status text shown when app is starting.
 msgctxt "launch-view"
-msgid "The system service component of the app hasn’t started or can’t be contacted. The system service is responsible for the security, kill switch, and the VPN tunnel. To troubleshoot please try:"
-msgstr "应用的系统服务组件尚未启动或无法联系。系统服务负责安全、安全开关和 VPN 隧道。要排查故障，请尝试："
+msgid "Starting up...."
+msgstr "正在启动…"
 
+#. Message in troubleshooting modal when the background process failed to start.
 msgctxt "launch-view"
-msgid "Unable to contact the Mullvad system service, your connection might be unsecure. Please troubleshoot or send a problem report by clicking the Learn more button."
-msgstr "无法联系 Mulvad 系统服务，您的连接可能不安全。请点击“了解详情”按钮进行故障排查或发送问题报告。"
+msgid "The Mullvad background process failed to start. The background process is responsible for the security, kill switch, and the VPN tunnel. Please try:"
+msgstr "Mullvad 后台进程启动失败。后台进程负责安全、终止开关和 VPN 隧道。请尝试："
+
+#. Button label for trying to restart the daemon again.
+msgctxt "launch-view"
+msgid "Try again"
+msgstr "重试"
+
+#. Message in launch view when the mullvad service cannot be contacted.
+msgctxt "launch-view"
+msgid "Unable to contact the Mullvad system service, your connection might be unsecure. Please troubleshoot or send a problem report by clicking the \"Learn more\" button."
+msgstr "无法联系 Mullvad 系统服务，您的连接可能不安全。请点击“了解详情”按钮进行故障排除或发送问题报告。"
 
 #. This is a warning message shown when the app is blocking the users
 #. internet connection while logged out.
@@ -967,7 +1487,7 @@ msgstr "无法联系 Mulvad 系统服务，您的连接可能不安全。请点�
 #. %(lockdownModeSettingName)s - The translation of "Lockdown mode"
 msgctxt "login-view"
 msgid "<b>%(lockdownModeSettingName)s</b> is enabled. Disable it to unblock your connection."
-msgstr "<b>%(lockdownModeSettingName)s</b>已启用。将其禁用以解除阻止您的连接。"
+msgstr "<b>%(lockdownModeSettingName)s</b>已启用。将其停用以解除阻止您的连接。"
 
 msgctxt "login-view"
 msgid "Account created"
@@ -977,17 +1497,29 @@ msgctxt "login-view"
 msgid "Checking account number"
 msgstr "正在检查帐号"
 
+#. Text in button that allows user to create a new account.
 msgctxt "login-view"
-msgid "Create account"
-msgstr "创建帐户"
+msgid "Create a new account"
+msgstr "创建新帐户"
+
+#. Button which confirms the action to create a new account.
+msgctxt "login-view"
+msgid "Create new account"
+msgstr "创建新帐户"
 
 msgctxt "login-view"
 msgid "Creating account..."
 msgstr "正在创建帐户…"
 
+#. Text that asks the user if they really want to create a new account.
 msgctxt "login-view"
-msgid "Don’t have an account number?"
-msgstr "没有帐号？"
+msgid "Do you want to create a new account?"
+msgstr "是否要创建新帐户？"
+
+#. Text that asks the user if they really want to remove the saved account.
+msgctxt "login-view"
+msgid "Do you want to remove the saved account number?"
+msgstr "是否要移除已保存的帐号？"
 
 msgctxt "login-view"
 msgid "Enter your account number"
@@ -1000,12 +1532,6 @@ msgstr "错误"
 msgctxt "login-view"
 msgid "Failed to create account"
 msgstr "无法创建帐户"
-
-#. Error message shown above login input when trying to login but the app fails
-#. to fetch the list of registered devices.
-msgctxt "login-view"
-msgid "Failed to fetch list of devices"
-msgstr "无法获取设备列表"
 
 msgctxt "login-view"
 msgid "Finishing upgrade."
@@ -1025,6 +1551,7 @@ msgctxt "login-view"
 msgid "Logging in..."
 msgstr "登录中…"
 
+#. Label for the login button.
 msgctxt "login-view"
 msgid "Login"
 msgstr "登录"
@@ -1033,15 +1560,28 @@ msgctxt "login-view"
 msgid "Login failed"
 msgstr "登录失败"
 
+#. Text shown between two horizontal lines above the "create account" button.
+#. In this context it is used to separate the users alternative of logging in
+#. or creating a new account, "Login or Create a new account".
+msgctxt "login-view"
+msgid "Or"
+msgstr "或者"
+
 #. This is a warning message shown when the app is blocking the users
 #. internet connection while logged out.
 msgctxt "login-view"
 msgid "Our kill switch is currently blocking your connection."
-msgstr "我们的安全开关当前正在阻止您的连接。"
+msgstr "我们的终止开关当前正在阻止您的连接。"
 
 msgctxt "login-view"
 msgid "Please wait"
 msgstr "请稍候"
+
+#. Text that informs the user about the consequences of clearing the saved
+#. account number.
+msgctxt "login-view"
+msgid "Removing the saved account number from this device cannot be undone."
+msgstr "从此设备移除已保存的帐号的操作无法撤消。"
 
 #. Error message shown above login input when trying to login to an account
 #. with too many registered devices.
@@ -1061,15 +1601,15 @@ msgctxt "login-view"
 msgid "Valid account number"
 msgstr "有效帐号"
 
+#. Text that informs the users about consequences of creating a new account.
+msgctxt "login-view"
+msgid "You already have a saved account number, by creating a new account the saved account number will be removed from this device. This cannot be undone."
+msgstr "您已保存一个帐号，如果创建新帐户，已保存的帐号将从此设备中移除。此操作无法撤消。"
+
 #. Title label in navigation bar
 msgctxt "navigation-bar"
 msgid "API access"
 msgstr "API 访问"
-
-#. Title label in navigation bar
-msgctxt "navigation-bar"
-msgid "Settings"
-msgstr "设置"
 
 #. The system notification displayed to the user when the account credit is close to expiry.
 #. Available placeholder:
@@ -1126,7 +1666,7 @@ msgstr "连接可能不安全。应用与系统服务失去联系，请排查故
 
 msgctxt "notifications"
 msgid "Could not configure IPv6. Disable it in the app or enable it on your device."
-msgstr "无法配置 IPv6。请在应用中将其禁用或在您的设备上将其启用。"
+msgstr "无法配置 IPv6。请在应用中将其停用或在您的设备上将其启用。"
 
 msgctxt "notifications"
 msgid "Disconnected and unsecure"
@@ -1138,7 +1678,17 @@ msgstr "无法启用分割隧道。"
 
 msgctxt "notifications"
 msgid "Failed to enable split tunneling. Please try reconnecting or disable split tunneling."
-msgstr "无法启用分割隧道。请尝试重新连接或禁用分割隧道。"
+msgstr "无法启用分割隧道。请尝试重新连接或停用分割隧道。"
+
+#. Label for notification when IPv4 is not available.
+msgctxt "notifications"
+msgid "IPv4 is not available, please try changing Device IP version setting."
+msgstr "IPv4 不可用，请尝试更改“设备 IP 版本”设置。"
+
+#. Label for notification when IPv6 is not available.
+msgctxt "notifications"
+msgid "IPv6 is not available, please try changing Device IP version setting."
+msgstr "IPv6 不可用，请尝试更改“设备 IP 版本”设置。"
 
 msgctxt "notifications"
 msgid "Lockdown mode active, connection blocked"
@@ -1147,6 +1697,12 @@ msgstr "锁定模式已激活，阻止连接"
 msgctxt "notifications"
 msgid "No servers match your settings, try changing server or other settings."
 msgstr "没有与您的设置匹配的服务器，请尝试更改服务器或其他设置。"
+
+#. A link in the in-app banner to encourage the user to update the app.
+#. The in-app banner is is displayed to the user when the running app becomes unsupported.
+msgctxt "notifications"
+msgid "Please click here to update now"
+msgstr "请点击此处立即更新"
 
 msgctxt "notifications"
 msgid "Reconnecting"
@@ -1162,7 +1718,7 @@ msgstr "无法应用防火墙规则。"
 
 msgctxt "notifications"
 msgid "Unable to apply firewall rules. Try temporarily disabling any third-party antivirus or security software."
-msgstr "无法应用防火墙规则。请尝试暂时禁用任何第三方防病毒软件或安全软件。"
+msgstr "无法应用防火墙规则。请尝试暂时停用任何第三方防病毒软件或安全软件。"
 
 msgctxt "notifications"
 msgid "Unable to apply firewall rules. Try updating your kernel."
@@ -1174,7 +1730,7 @@ msgstr "无法阻止所有网络流量。请排查问题或发送问题报告。
 
 msgctxt "notifications"
 msgid "Unable to block all network traffic. Try temporarily disabling any third-party antivirus or security software or send a problem report."
-msgstr "无法阻止所有网络流量。请尝试暂时禁用任何第三方防病毒软件或安全软件，或者发送问题报告。"
+msgstr "无法阻止所有网络流量。请尝试暂时停用任何第三方防病毒软件或安全软件，或者发送问题报告。"
 
 msgctxt "notifications"
 msgid "Unable to block all network traffic. Try updating your kernel or send a problem report."
@@ -1208,113 +1764,31 @@ msgctxt "notifications"
 msgid "Upgrade"
 msgstr "升级"
 
-#. Available placeholders:
-#. %(wireguard)s - will be replaced with "WireGuard"
-msgctxt "notifications"
-msgid "Valid %(wireguard)s key is missing. Manage keys under Advanced settings."
-msgstr "缺少有效的 %(wireguard)s 密钥。在“高级”设置下管理密钥。"
-
 msgctxt "notifications"
 msgid "Your device is offline. The tunnel will automatically connect once your device is back online."
 msgstr "您的设备已离线。在您的设备重新上线后，隧道将自动连接。"
 
-#. The in-app banner and system notification which are displayed to the user when the running app becomes unsupported.
+#. The in-app banner which is displayed to the user when the running app becomes unsupported.
+msgctxt "notifications"
+msgid "Your privacy might be at risk with this unsupported app version."
+msgstr "此应用版本不受支持，因此您的隐私可能存在风险。"
+
+#. The system notification which is displayed to the user when the running app becomes unsupported.
 msgctxt "notifications"
 msgid "Your privacy might be at risk with this unsupported app version. Please update now."
 msgstr "此应用版本不受支持，因此您的隐私可能存在风险。请立即更新。"
 
-#. Title label in navigation bar
-#. Available placeholders:
-#. %(openvpn)s - Will be replaced with "OpenVPN"
-msgctxt "openvpn-settings-nav"
-msgid "%(openvpn)s settings"
-msgstr "%(openvpn)s 设置"
-
-#. %(openvpn)s will be replaced with "OpenVPN"
-msgctxt "openvpn-settings-view"
-msgid "%(openvpn)s settings"
-msgstr "%(openvpn)s 设置"
-
-#. The title for the port selector section.
-#. Available placeholders:
-#. %(portType)s - a selected protocol (either TCP or UDP)
-msgctxt "openvpn-settings-view"
-msgid "%(portType)s port"
-msgstr "%(portType)s 端口"
-
-#. The title for the shadowsocks bridge selector section.
-msgctxt "openvpn-settings-view"
-msgid "Bridge mode"
-msgstr "桥接模式"
-
-msgctxt "openvpn-settings-view"
-msgid "Enable bridge mode?"
-msgstr "启用桥接模式？"
-
-#. This is used as a description for the bridge mode
-#. setting.
-#. Available placeholders:
-#. %(openvpn)s - will be replaced with OpenVPN
-msgctxt "openvpn-settings-view"
-msgid "Helps circumvent censorship, by routing your traffic through a bridge server before reaching an %(openvpn)s server. Obfuscation is added to make fingerprinting harder."
-msgstr "通过在到达 %(openvpn)s 服务器之前将您的流量经过桥接服务器，帮助规避审查。添加了混淆以使指纹识别更加困难。"
-
-msgctxt "openvpn-settings-view"
-msgid "Mssfix"
-msgstr "Mssfix"
-
-#. The hint displayed below the Mssfix input field.
-#. Available placeholders:
-#. %(openvpn)s - will be replaced with "OpenVPN"
-#. %(max)d - the maximum possible mssfix value
-#. %(min)d - the minimum possible mssfix value
-msgctxt "openvpn-settings-view"
-msgid "Set %(openvpn)s MSS value. Valid range: %(min)d - %(max)d."
-msgstr "设置 %(openvpn)s MSS 值。值范围：%(min)d - %(max)d。"
-
-#. This is used to instruct users how to make the bridge mode setting
-#. available.
-#. Available placeholders:
-#. %(transportProtocol)s - the name of the transport protocol setting
-#. %(automat)s - the translation of "Automatic"
-#. %(openvpn)s - will be replaced with OpenVPN
-msgctxt "openvpn-settings-view"
-msgid "To activate Bridge mode, change <b>%(transportProtocol)s</b> to <b>%(automatic)s</b> or <b>%(tcp)s</b>."
-msgstr "要激活桥接模式，请将<b>%(transportProtocol)s</b>更改为<b>%(automatic)s</b>或 <b>%(tcp)s</b>。"
-
-#. This is used to instruct users how to make the bridge mode setting
-#. available.
-#. Available placeholders:
-#. %(tunnelProtocol)s - the name of the tunnel protocol setting
-#. %(openvpn)s - will be replaced with OpenVPN
-msgctxt "openvpn-settings-view"
-msgid "To activate Bridge mode, go back and change <b>%(tunnelProtocol)s</b> to <b>%(openvpn)s</b>."
-msgstr "要激活桥接模式，请返回并将<b>%(tunnelProtocol)s</b>更改为 <b>%(openvpn)s</b>。"
-
-#. This is used to instruct users how to make UDP mode
-#. available.
-msgctxt "openvpn-settings-view"
-msgid "To activate UDP, change <b>Bridge mode</b> to <b>Automatic</b> or <b>Off</b>."
-msgstr "要激活 UDP，请将<b>桥接模式</b>更改为<b>自动</b>或<b>关</b>。"
-
-#. This text is shown beneath the bridge mode setting to instruct users how to
-#. configure the feature further.
-msgctxt "openvpn-settings-view"
-msgid "To select a specific bridge server, go to the Select location view."
-msgstr "要选择特定桥接服务器，请转到“选择位置”视图。"
-
-msgctxt "openvpn-settings-view"
-msgid "Transport protocol"
-msgstr "传输协议"
-
+#. Cancel button label for voucher redemption.
 msgctxt "redeem-voucher-alert"
 msgid "Cancel"
 msgstr "取消"
 
+#. Input field label for voucher code.
 msgctxt "redeem-voucher-alert"
 msgid "Enter voucher code"
 msgstr "输入优惠码"
 
+#. Button label for redeeming a voucher.
 msgctxt "redeem-voucher-alert"
 msgid "Redeem voucher"
 msgstr "兑换优惠券"
@@ -1323,6 +1797,11 @@ msgctxt "redeem-voucher-view"
 msgid "An error occurred."
 msgstr "出错了。"
 
+msgctxt "redeem-voucher-view"
+msgid "It looks like you’ve entered an account number instead of a voucher code. If you would like to change the active account, please log out first."
+msgstr "您输入的似乎是帐号，而不是代金券代码。如果您想更改有效帐户，请先退出登录。"
+
+#. Button label for voucher redemption.
 msgctxt "redeem-voucher-view"
 msgid "Redeem"
 msgstr "兑换"
@@ -1366,10 +1845,6 @@ msgctxt "select-location-view"
 msgid "%(location)s (%(info)s)"
 msgstr "%(location)s（%(info)s）"
 
-msgctxt "select-location-view"
-msgid "A custom bridge server can be used to circumvent censorship when regular Mullvad bridge servers don’t work."
-msgstr "当常规的 Mullvad 桥接服务器无法使用时，可以使用自定义桥接服务器来绕过审查。"
-
 #. This is a label shown above a list of options.
 #. Available placeholder:
 #. %(locationType) - Could be either "Country", "City" and "Relay"
@@ -1388,10 +1863,6 @@ msgstr "城市"
 msgctxt "select-location-view"
 msgid "Country"
 msgstr "国家/地区"
-
-msgctxt "select-location-view"
-msgid "Custom bridge"
-msgstr "自定义网桥"
 
 msgctxt "select-location-view"
 msgid "Custom lists"
@@ -1418,16 +1889,23 @@ msgid "Filtered:"
 msgstr "已筛选："
 
 msgctxt "select-location-view"
-msgid "Go to %(daita)s settings"
-msgstr "前往 %(daita)s 设置"
-
-msgctxt "select-location-view"
 msgid "List names must be unique."
 msgstr "列表名称必须唯一。"
 
 msgctxt "select-location-view"
 msgid "Name is already taken."
 msgstr "名称已被占用。"
+
+#. Label for indicator that shows that obfuscation is being used as a filter.
+#. Available placeholders:
+#. %(obfuscation)s - type of obfuscation in use
+msgctxt "select-location-view"
+msgid "Obfuscation: %(obfuscation)s"
+msgstr "混淆：%(obfuscation)s"
+
+msgctxt "select-location-view"
+msgid "Open %(daita)s settings"
+msgstr "打开 %(daita)s 设置"
 
 msgctxt "select-location-view"
 msgid "Providers: %(numberOfProviders)d"
@@ -1442,12 +1920,8 @@ msgid "Setting: %(settingName)s"
 msgstr "设置：%(settingName)s"
 
 msgctxt "select-location-view"
-msgid "The app selects a random bridge server, but servers have a higher probability the closer they are to you."
-msgstr "应用会随机选择一个桥接服务器，但服务器离您越近，被选中的概率就越高。"
-
-msgctxt "select-location-view"
 msgid "The entry server for %(multihop)s is currently overridden by %(daita)s. To select an entry server, please first enable “%(directOnly)s” or disable \"%(daita)s\" in the settings."
-msgstr "%(multihop)s的入口服务器目前被 %(daita)s 覆盖。要选择入口服务器，请先在设置中启用“%(directOnly)s”或禁用“%(daita)s”。"
+msgstr "%(multihop)s的入口服务器目前被 %(daita)s 覆盖。要选择入口服务器，请先在设置中启用“%(directOnly)s”或停用“%(daita)s”。"
 
 msgctxt "settings-import"
 msgid "Clear all overrides"
@@ -1525,25 +1999,29 @@ msgctxt "settings-view"
 msgid "API access"
 msgstr "API 访问"
 
+#. Navigation button to the 'App info' view
 msgctxt "settings-view"
-msgid "App is out of sync. Please quit and restart."
-msgstr "应用不同步。请退出并重新启动。"
-
-msgctxt "settings-view"
-msgid "App version"
-msgstr "应用版本"
+msgid "App info"
+msgstr "应用信息"
 
 msgctxt "settings-view"
 msgid "Multihop"
 msgstr "多跳"
 
+#. Title label in navigation bar
+msgctxt "settings-view"
+msgid "Settings"
+msgstr "设置"
+
+#. Navigation button to the 'Support' view
 msgctxt "settings-view"
 msgid "Support"
 msgstr "支持"
 
+#. Label for the app info list item indicating that an update is available and can be downloaded
 msgctxt "settings-view"
-msgid "Update available. Install the latest app version to stay up to date."
-msgstr "有可用更新。请安装最新的应用版本以保持最新状态。"
+msgid "Update available"
+msgstr "有可用的更新"
 
 #. Navigation button to the 'User interface settings' view
 msgctxt "settings-view"
@@ -1559,6 +2037,13 @@ msgctxt "split-tunneling-view"
 msgid "%(applicationName)s is problematic and can’t be excluded from the VPN tunnel."
 msgstr "%(applicationName)s 出现问题且无法从 VPN 隧道排除。"
 
+#. Information about split tunneling not being supported on the system.
+#. Available placeholders:
+#. %(splitTunneling)s - will be replaced with Split tunneling
+msgctxt "split-tunneling-view"
+msgid "%(splitTunneling)s is not supported by your system."
+msgstr "您的系统不支持%(splitTunneling)s。"
+
 msgctxt "split-tunneling-view"
 msgid "Add"
 msgstr "添加"
@@ -1570,6 +2055,11 @@ msgstr "所有应用"
 msgctxt "split-tunneling-view"
 msgid "Choose the apps you want to exclude from the VPN tunnel."
 msgstr "选择您想要从 VPN 隧道中排除的应用。"
+
+#. Link for learning more
+msgctxt "split-tunneling-view"
+msgid "Click here to learn more"
+msgstr "点击此处了解详情"
 
 msgctxt "split-tunneling-view"
 msgid "Click on an app to launch it. Its traffic will bypass the VPN tunnel until you close it."
@@ -1583,6 +2073,7 @@ msgctxt "split-tunneling-view"
 msgid "Excluded apps"
 msgstr "排除的应用"
 
+#. Button label for browsing applications with split tunneling.
 msgctxt "split-tunneling-view"
 msgid "Find another app"
 msgstr "查找其他应用"
@@ -1591,6 +2082,7 @@ msgctxt "split-tunneling-view"
 msgid "If it’s already running, close %(applicationName)s before launching it from here. Otherwise it might not be excluded from the VPN tunnel."
 msgstr "如果它已经正在运行，请先关闭 %(applicationName)s，然后从此处启动。否则，它可能会被从 VPN 隧道中排除。"
 
+#. Button label for launching an application with split tunneling.
 msgctxt "split-tunneling-view"
 msgid "Launch"
 msgstr "启动"
@@ -1616,6 +2108,14 @@ msgctxt "split-tunneling-view"
 msgid "Restart Mullvad Service"
 msgstr "重新启动 Mullvad 服务"
 
+#. Information about split tunneling being unavailable due to
+#. missing support in the user's operating system.
+#. Available placeholders:
+#. %(splitTunneling)s - will be replaced with Split tunneling
+msgctxt "split-tunneling-view"
+msgid "To use %(splitTunneling)s, please update to a Linux kernel version that supports cgroup v2."
+msgstr "要使用%(splitTunneling)s，请更新为支持 cgroup v2 的 Linux 内核版本。"
+
 msgctxt "split-tunneling-view"
 msgid "To use split tunneling please enable “Full disk access” for “Mullvad VPN” in the macOS system settings."
 msgstr "要使用分割隧道，请在 macOS 系统设置中为“Mullvad VPN”启用“完全磁盘访问权限”。"
@@ -1625,21 +2125,15 @@ msgctxt "split-tunneling-view"
 msgid "Unable to launch selection. %(detailedErrorMessage)s"
 msgstr "无法启动选择。%(detailedErrorMessage)s"
 
-msgctxt "support-view"
-msgid "Beta program"
-msgstr "测试计划"
-
+#. Button label for continuing problem report submission with an outdated app version.
 msgctxt "support-view"
 msgid "Continue anyway"
 msgstr "仍然继续"
 
+#. Button text to edit the message after a failed attempt to send the problem report.
 msgctxt "support-view"
 msgid "Edit message"
 msgstr "编辑消息"
-
-msgctxt "support-view"
-msgid "Enable to get notified when new beta versions of the app are released."
-msgstr "启用以在新的测试版应用发布时获得通知。"
 
 msgctxt "support-view"
 msgid "Failed to send"
@@ -1667,10 +2161,12 @@ msgctxt "support-view"
 msgid "Report a problem"
 msgstr "报告问题"
 
+#. Button label for sending the problem report.
 msgctxt "support-view"
 msgid "Send"
 msgstr "发送"
 
+#. Button label for sending the problem report without an email address.
 msgctxt "support-view"
 msgid "Send anyway"
 msgstr "仍然发送"
@@ -1693,10 +2189,6 @@ msgid "Thanks!"
 msgstr "谢谢！"
 
 msgctxt "support-view"
-msgid "This option is unavailable while using a beta version."
-msgstr "使用测试版本时此选项不可用。"
-
-msgctxt "support-view"
 msgid "To assist you better, please write in English or Swedish and include which country you are connecting from."
 msgstr "为了更好地帮助您，请用英语或瑞典语书写，并包含您连接时所在的国家/地区。"
 
@@ -1704,14 +2196,17 @@ msgctxt "support-view"
 msgid "To help you more effectively, your app’s log file will be attached to this message. Your data will remain secure and private, as it is anonymised before being sent over an encrypted channel."
 msgstr "为了更有效地帮助您，您应用的日志文件将被附加到此消息。您的数据将保持安全和私密，因为所有数据在发送之前都将通过加密通道进行匿名处理。"
 
+#. Button label for retrying problem report submission after a failure.
 msgctxt "support-view"
 msgid "Try again"
 msgstr "重试"
 
+#. Button label for updating the app to the latest version.
 msgctxt "support-view"
-msgid "Upgrade app"
-msgstr "升级应用"
+msgid "Update app"
+msgstr "更新应用"
 
+#. Button label for opening app logs.
 msgctxt "support-view"
 msgid "View app logs"
 msgstr "查看应用日志"
@@ -1751,6 +2246,10 @@ msgstr "已连接。%(location)s"
 msgctxt "tray-icon-tooltip"
 msgid "Connecting. %(location)s"
 msgstr "正在连接。%(location)s"
+
+msgctxt "troubleshoot"
+msgid "Disable split tunneling"
+msgstr "停用分割隧道"
 
 msgctxt "troubleshoot"
 msgid "Enable “Full Disk Access” for “Mullvad VPN” in the macOS system settings."
@@ -1810,7 +2309,7 @@ msgstr "由于创建隧道设备失败，无法启动隧道连接。这通常是
 
 msgctxt "troubleshoot"
 msgid "Uninstall or disable other DNS, networking and ads/website blocking apps."
-msgstr "卸载或禁用其他 DNS、联网和广告/网站拦截应用。"
+msgstr "卸载或停用其他 DNS、联网和广告/网站拦截应用。"
 
 msgctxt "troubleshoot"
 msgid "Update your kernel."
@@ -1834,7 +2333,7 @@ msgstr "为地图移动添加动画效果。"
 
 msgctxt "user-interface-settings-view"
 msgid "Enable or disable system notifications. The critical notifications will always be displayed."
-msgstr "启用或禁用系统通知。将始终显示关键通知。"
+msgstr "启用或停用系统通知。将始终显示关键通知。"
 
 msgctxt "user-interface-settings-view"
 msgid "Enable to move the app around as a free-standing window."
@@ -1874,20 +2373,11 @@ msgctxt "user-interface-settings-view"
 msgid "User interface settings"
 msgstr "用户界面设置"
 
-#. %(openvpn)s will be replaced with the string "OpenVPN"
-msgctxt "vpn-settings-view"
-msgid "%(openvpn)s settings"
-msgstr "%(openvpn)s 设置"
-
-#. %(wireguard)s will be replaced with the string "WireGuard"
-msgctxt "vpn-settings-view"
-msgid "%(wireguard)s settings"
-msgstr "%(wireguard)s 设置"
-
 msgctxt "vpn-settings-view"
 msgid "Add a server"
 msgstr "添加服务器"
 
+#. Button label to add a private IP DNS server despite warning.
 msgctxt "vpn-settings-view"
 msgid "Add anyway"
 msgstr "仍然添加"
@@ -1902,13 +2392,19 @@ msgctxt "vpn-settings-view"
 msgid "Adult content"
 msgstr "成人内容"
 
+#. Label for list item that navigates to anti-censorship
+#. settings view.
+msgctxt "vpn-settings-view"
+msgid "Anti-censorship"
+msgstr "反审查"
+
 msgctxt "vpn-settings-view"
 msgid "Attention: enabling this will always require a Mullvad VPN connection in order to reach the internet."
 msgstr "注意：启用此选项后，将始终需要 Mullvad VPN 才能连接到网络。"
 
 msgctxt "vpn-settings-view"
 msgid "Attention: this setting cannot be used in combination with <b>%(customDnsFeatureName)s</b>"
-msgstr "注意： 此设置不能与<b>%(customDnsFeatureName)s</b>结合使用"
+msgstr "注意：此设置不能与<b>%(customDnsFeatureName)s</b>结合使用"
 
 msgctxt "vpn-settings-view"
 msgid "Auto-connect"
@@ -1923,8 +2419,8 @@ msgstr "在应用启动时自动连接到服务器。"
 #. Available placeholders:
 #. %(customDnsFeatureName)s - The name displayed next to the custom DNS toggle.
 msgctxt "vpn-settings-view"
-msgid "Disable <b>%(customDnsFeatureName)s</b> below to activate these settings."
-msgstr "禁用下方的<b>%(customDnsFeatureName)s</b>以激活这些设置。"
+msgid "Disable \"%(customDnsFeatureName)s\" below to activate these settings."
+msgstr "停用下方的“%(customDnsFeatureName)s”以激活这些设置。"
 
 #. This is displayed when either or both of the block ads/trackers settings are
 #. turned on which makes the custom DNS setting disabled.
@@ -1932,19 +2428,20 @@ msgstr "禁用下方的<b>%(customDnsFeatureName)s</b>以激活这些设置。"
 #. %(preferencesPageName)s - The page title showed on top in the preferences page.
 msgctxt "vpn-settings-view"
 msgid "Disable all <b>DNS content blockers</b> above to activate this setting."
-msgstr "禁用上方的所有 <b>DNS 内容阻止程序</b>以激活此设置。"
+msgstr "停用上方的所有 <b>DNS 内容阻止程序</b>以激活此设置。"
 
 msgctxt "vpn-settings-view"
 msgid "DNS content blockers"
 msgstr "DNS 内容阻止程序"
 
 msgctxt "vpn-settings-view"
-msgid "Enable IPv6"
-msgstr "启用 IPv6"
-
-msgctxt "vpn-settings-view"
 msgid "Enable to add at least one DNS server."
 msgstr "启用以添加至少一个 DNS 服务器。"
+
+#. Description of in-tunnel IPv6 setting.
+msgctxt "vpn-settings-view"
+msgid "Enable to allow IPv6 traffic through the tunnel."
+msgstr "启用以允许 IPv6 流量通过隧道。"
 
 msgctxt "vpn-settings-view"
 msgid "Enter IP"
@@ -1955,9 +2452,20 @@ msgctxt "vpn-settings-view"
 msgid "Gambling"
 msgstr "博彩"
 
+#. Title of in-tunnel IPv6 setting.
+msgctxt "vpn-settings-view"
+msgid "In-tunnel IPv6"
+msgstr "隧道内 IPv6"
+
 msgctxt "vpn-settings-view"
 msgid "IPv4 is always enabled and the majority of websites and applications use this protocol. We do not recommend enabling IPv6 unless you know you need it."
 msgstr "IPv4 始终处于启用状态，大多数网站和应用程序都使用此协议。不建议启用 IPv6，除非您知道自己需要使用该协议。"
+
+#. A complimentary description for the setting Device IP version,
+#. explaining why the user might want to configure the setting.
+msgctxt "vpn-settings-view"
+msgid "It can be useful when you are aware of problems caused by a certain IP version."
+msgstr "当您了解某个 IP 版本导致的问题时，这会很有用。"
 
 msgctxt "vpn-settings-view"
 msgid "It does this by allowing network communication outside the tunnel to local multicast and broadcast ranges as well as to and from these private IP ranges:"
@@ -1965,7 +2473,7 @@ msgstr "此功能通过允许隧道以外到本地组播和广播范围以及与
 
 msgctxt "vpn-settings-view"
 msgid "Kill switch"
-msgstr "安全开关"
+msgstr "终止开关"
 
 msgctxt "vpn-settings-view"
 msgid "Launch app on start-up"
@@ -1995,26 +2503,19 @@ msgstr "社交媒体"
 
 msgctxt "vpn-settings-view"
 msgid "The app’s built-in kill switch is always on. This setting will additionally block the internet if clicking Disconnect or Quit."
-msgstr "应用的内置安全开关始终处于开启状态。如果点击“断开连接”或“退出”，此设置还将阻止您的网络连接。"
+msgstr "应用的内置终止开关始终处于开启状态。如果点击“断开连接”或“退出”，此设置还将阻止您的网络连接。"
 
 msgctxt "vpn-settings-view"
 msgid "The difference between the Kill Switch and Lockdown Mode is that the Kill Switch will prevent any leaks from happening during automatic tunnel reconnects, software crashes and similar accidents."
-msgstr "安全开关与锁定模式之间的区别在于，安全开关将防止在自动隧道重新连接、软件崩溃和类似事故期间发生任何泄漏。"
+msgstr "终止开关与锁定模式之间的区别在于，终止开关将防止在自动隧道重新连接、软件崩溃和类似事故期间发生任何泄漏。"
 
 msgctxt "vpn-settings-view"
 msgid "The difference between the Kill Switch and Lockdown Mode is that the Kill Switch will prevent any leaks from happening during automatic tunnel reconnects, software crashes and similar accidents. With Lockdown Mode enabled, you must be connected to a Mullvad VPN server to be able to reach the internet. Manually disconnecting or quitting the app will block your connection."
-msgstr "安全开关与锁定模式之间的区别在于，安全开关将防止在自动隧道重新连接、软件崩溃和类似事故期间发生任何泄漏。启用锁定模式后，您必须连接到 Mullvad VPN 服务器才能访问网络。手动断开或退出应用程序将阻止您的连接。"
+msgstr "终止开关与锁定模式之间的区别在于，终止开关将防止在自动隧道重新连接、软件崩溃和类似事故期间发生任何泄漏。启用锁定模式后，您必须连接到 Mullvad VPN 服务器才能访问网络。手动断开或退出应用程序将阻止您的连接。"
 
 msgctxt "vpn-settings-view"
 msgid "The DNS server you want to add is a private IP. You must ensure that your network interfaces are configured to use it."
 msgstr "您要添加的 DNS 服务器是私有 IP。您必须确保将网络接口配置为使用它。"
-
-#. Available placeholders:
-#. %(tunnelProtocol)s - the name of the tunnel protocol setting
-#. %(wireguard)s - will be replaced with "WireGuard"
-msgctxt "vpn-settings-view"
-msgid "The DNS server you want to add is public and will only work with %(wireguard)s. To ensure that it always works, set the \"%(tunnelProtocol)s\" (in Advanced settings) to %(wireguard)s."
-msgstr "您想要添加的 DNS 服务器为公共服务器，仅可以与 %(wireguard)s 搭配使用。为了确保它始终有效，请为 %(wireguard)s 设置“%(tunnelProtocol)s”（在“高级”设置中）。"
 
 msgctxt "vpn-settings-view"
 msgid "This built-in feature prevents your traffic from leaking outside of the VPN tunnel if your network suddenly stops working or if the tunnel fails, it does this by blocking your traffic until your connection is reestablished."
@@ -2024,22 +2525,20 @@ msgctxt "vpn-settings-view"
 msgid "This feature allows access to other devices on the local network, such as for sharing, printing, streaming, etc."
 msgstr "此功能允许访问本地网络中的其他设备，以实现共享、打印、流式传输等"
 
+#. A description for the setting Device IP version,
+#. explaining how the user can configure the setting.
+msgctxt "vpn-settings-view"
+msgid "This feature allows you to choose whether to use only IPv4, only IPv6, or allow the app to automatically decide the best option when connecting to a server."
+msgstr "此功能允许您选择仅使用 IPv4、仅使用 IPv6，还是允许应用在连接到服务器时自动决定最佳选项。"
+
 msgctxt "vpn-settings-view"
 msgid "This might cause issues on certain websites, services, and apps."
 msgstr "这可能会导致某些网站、服务和应用出现问题。"
-
-msgctxt "vpn-settings-view"
-msgid "To select %(openvpn)s, please disable these settings: %(featureList)s."
-msgstr "要选择 %(openvpn)s，请禁用这些设置：%(featureList)s。"
 
 #. Label for settings that enables tracker blocking.
 msgctxt "vpn-settings-view"
 msgid "Trackers"
 msgstr "跟踪器"
-
-msgctxt "vpn-settings-view"
-msgid "Tunnel protocol"
-msgstr "隧道协议"
 
 msgctxt "vpn-settings-view"
 msgid "Use custom DNS server"
@@ -2067,13 +2566,6 @@ msgid "With Lockdown Mode enabled, you must be connected to a Mullvad VPN server
 msgstr "启用锁定模式后，您必须连接到 Mullvad VPN 服务器才能访问网络。手动断开或退出应用将阻止您的连接。"
 
 #. Title label in navigation bar
-#. Available placeholders:
-#. %(wireguard)s - Will be replaced with the string "WireGuard"
-msgctxt "wireguard-settings-nav"
-msgid "%(wireguard)s settings"
-msgstr "%(wireguard)s 设置"
-
-#. Title label in navigation bar
 msgctxt "wireguard-settings-nav"
 msgid "Shadowsocks"
 msgstr "Shadowsocks"
@@ -2091,15 +2583,18 @@ msgctxt "wireguard-settings-view"
 msgid "%(daita)s does this by carefully adding network noise and making all network packets the same size."
 msgstr "%(daita)s 的实现方法是精心添加网络噪声并将所有网络数据包处理为相同的大小。"
 
-#. Available placeholders:
-#. %(wireguard)s - Will be replaced with the string "WireGuard"
 msgctxt "wireguard-settings-view"
-msgid "%(wireguard)s settings"
-msgstr "%(wireguard)s 设置"
+msgid "%(wireguard)s port"
+msgstr "%(wireguard)s 端口"
+
+#. Page title for WireGuard port view
+msgctxt "wireguard-settings-view"
+msgid "%(wireGuard)s port"
+msgstr "%(wireGuard)s 端口"
 
 msgctxt "wireguard-settings-view"
-msgid "Attention: Be cautious if you have a limited data plan as this feature will increase your network traffic. This feature can only be used with %(wireguard)s."
-msgstr "注意：如果您的数据套餐流量有限，请谨慎使用，因为此功能将增加您的网络流量。此功能仅可与 %(wireguard)s 结合使用。"
+msgid "Attention: This increases network traffic and will also negatively affect speed, latency, and battery usage. Use with caution on limited plans."
+msgstr "注意：这会增加网络流量，还会对速度、延迟和电池使用产生负面影响。如果套餐流量有限，请谨慎使用。"
 
 msgctxt "wireguard-settings-view"
 msgid "By enabling “%(directOnly)s” you will have to manually select a server that is %(daita)s-enabled. This can cause you to end up in a blocked state until you have selected a compatible server in the “Select location” view."
@@ -2113,18 +2608,22 @@ msgctxt "wireguard-settings-view"
 msgid "Cancel"
 msgstr "取消"
 
+#. Title for device IP version setting.
+msgctxt "wireguard-settings-view"
+msgid "Device IP version"
+msgstr "设备 IP 版本"
+
 msgctxt "wireguard-settings-view"
 msgid "If an observer monitors these data packets, %(daita)s makes it significantly harder for them to identify which websites you are visiting or with whom you are communicating."
 msgstr "如果某个观察者监视这些数据包，%(daita)s 会大大提高他们识别您所访问的网站或您沟通对象的难度。"
 
 msgctxt "wireguard-settings-view"
-msgid "IP version"
-msgstr "IP 版本"
-
-msgctxt "wireguard-settings-view"
 msgid "It does this by performing an extra key exchange using a quantum safe algorithm and mixing the result into WireGuard’s regular encryption. This extra step uses approximately 500 kiB of traffic every time a new tunnel is established."
 msgstr "实现方法是使用量子安全算法执行额外的密钥交换，并将结果混合到 WireGuard 的常规加密中。每次建立新隧道时，这一额外步骤都会使用约 500 kiB 的流量。"
 
+#. The title for the WireGuard MTU setting. MTU stands for Maximum
+#. Transmission Unit and controls the maximum size of packets sent over
+#. the VPN tunnel.
 msgctxt "wireguard-settings-view"
 msgid "MTU"
 msgstr "MTU"
@@ -2132,6 +2631,10 @@ msgstr "MTU"
 msgctxt "wireguard-settings-view"
 msgid "Multihop"
 msgstr "多跳"
+
+msgctxt "wireguard-settings-view"
+msgid "Multihop is being used to enable DAITA for your selected location"
+msgstr "正在使用多跳为您的所选位置启用 DAITA"
 
 msgctxt "wireguard-settings-view"
 msgid "Multihop routes your traffic into one WireGuard server and out another, making it harder to trace. This results in increased latency but increases anonymity online."
@@ -2146,14 +2649,7 @@ msgctxt "wireguard-settings-view"
 msgid "Not all our servers are %(daita)s-enabled. Therefore, we use multihop automatically to enable %(daita)s with any server."
 msgstr "我们的部分服务器未启用 %(daita)s。因此，我们使用多跳自动为任何服务器启用 %(daita)s。"
 
-msgctxt "wireguard-settings-view"
-msgid "Obfuscation"
-msgstr "混淆"
-
-msgctxt "wireguard-settings-view"
-msgid "Obfuscation hides the WireGuard traffic inside another protocol. It can be used to help circumvent censorship and other types of filtering, where a plain WireGuard connect would be blocked."
-msgstr "混淆将 WireGuard 流量隐藏在另一个协议中。它可用于帮助规避审查和其他类型的过滤，在这些过滤中，普通的 WireGuard 连接将被阻止。"
-
+#. The title for the WireGuard port selector.
 msgctxt "wireguard-settings-view"
 msgid "Port"
 msgstr "端口"
@@ -2186,23 +2682,12 @@ msgid "Shadowsocks"
 msgstr "Shadowsocks"
 
 msgctxt "wireguard-settings-view"
-msgid "Switch to “%(wireguard)s” or “%(automatic)s” in Settings > %(tunnelProtocol)s to make %(setting)s available."
-msgstr "在“设置 > %(tunnelProtocol)s”中切换为“%(wireguard)s”或“%(automatic)s”，以启用%(setting)s。"
-
-msgctxt "wireguard-settings-view"
 msgid "The automatic setting will randomly choose from the valid port ranges shown below."
 msgstr "自动设置将从下方显示的有效端口范围中随机选择。"
 
 msgctxt "wireguard-settings-view"
 msgid "The custom port can be any value inside the valid ranges: %(portRanges)s."
 msgstr "自定义端口可以是有效范围内的任何值：%(portRanges)s。"
-
-#. The hint displayed below the WireGuard IP version selector.
-#. Available placeholders:
-#. %(wireguard)s - Will be replaced with the string "WireGuard"
-msgctxt "wireguard-settings-view"
-msgid "This allows access to %(wireguard)s for devices that only support IPv6."
-msgstr "这可以让仅支持 IPv6 的设备访问 %(wireguard)s。"
 
 msgctxt "wireguard-settings-view"
 msgid "This feature makes the WireGuard tunnel resistant to potential attacks from quantum computers."
@@ -2211,10 +2696,6 @@ msgstr "借助此功能，WireGuard 隧道能够抵抗可能通过量子计算�
 msgctxt "wireguard-settings-view"
 msgid "UDP-over-TCP"
 msgstr "UDP-over-TCP"
-
-msgctxt "wireguard-settings-view"
-msgid "UDP-over-TCP port"
-msgstr "UDP-over-TCP 端口"
 
 #. Text describing the valid port range for a port selector.
 msgctxt "wireguard-settings-view"
@@ -2225,6 +2706,15 @@ msgctxt "wireguard-settings-view"
 msgid "Which TCP port the UDP-over-TCP obfuscation protocol should connect to on the VPN server."
 msgstr "UDP-over-TCP 混淆协议应连接到 VPN 服务器上的哪个 TCP 端口。"
 
+msgid "%1$s more..."
+msgstr "其他 %1$s 个…"
+
+msgid "%1$s was added to \"%2$s\""
+msgstr "%1$s已添加到“%2$s”中"
+
+msgid "%1$s was removed from \"%2$s\""
+msgstr "%1$s已从“%2$s”中移除"
+
 msgid "%s (Entry)"
 msgstr "%s（入口）"
 
@@ -2234,20 +2724,26 @@ msgstr "%s（出口）"
 msgid "%s (added)"
 msgstr "%s（已添加）"
 
-msgid "%s custom port"
-msgstr "%s 自定义端口"
+msgid "%s (removed)"
+msgstr "%s（已移除）"
 
-msgid "%s more..."
-msgstr "其他 %s 个…"
+msgid "%s is already selected as entry relay"
+msgstr "%s 已被选为入口中继"
 
-msgid "%s was added to \"%s\""
-msgstr "%s已添加到“%s”中"
+msgid "%s is already selected as exit relay"
+msgstr "%s 已被选为出口中继"
+
+msgid "%s is unavailable"
+msgstr "%s 不可用"
+
+msgid "%s settings."
+msgstr "%s 设置."
 
 msgid "%s was added to your account."
 msgstr "%s已添加到您的帐户中。"
 
-msgid "%s was removed from \"%s\""
-msgstr "“%s”已从“%s”中移除"
+msgid "(%d)"
+msgstr "(%d)"
 
 msgid "1. After clicking on the \"Go to VPN settings\" button below, click on the cogwheel next to the \"Mullvad VPN\" name."
 msgstr "1. 点击下方的“前往 VPN 设置”按钮后，点击“Mullvad VPN”名称旁边的齿轮。"
@@ -2261,6 +2757,18 @@ msgstr "3. 要启用锁定模式，请点击“屏蔽未使用 VPN 的所有连�
 msgid "30 days was added to your account."
 msgstr "已向您的帐户增加 30 天。"
 
+msgid "90 days was added to your account."
+msgstr "90 天已添加到您的帐户中。"
+
+msgid "<b>Attention:</b> Only some servers support the full port range."
+msgstr "<b>注意</b>：只有部分服务器支持完整的端口范围。"
+
+msgid "<b>Attention:</b> The app will close automatically and needs to be manually opened again after selecting a new icon and title. This will not impact your VPN connection."
+msgstr "<b>注意</b>：应用将自动关闭，在选择新的图标和标题后，需要手动再次打开。这不会影响您的 VPN 连接。"
+
+msgid "<b>Please note that these methods do not improve performance, and may increase system utilization and battery consumption.</b>"
+msgstr "<b>请注意，这些方法并不能提高性能，反而可能会增加系统资源占用率和电量消耗。</b>"
+
 msgid "API reachable, adding method..."
 msgstr "可通过 API 访问，正在添加方法…"
 
@@ -2270,20 +2778,17 @@ msgstr "无法通过 API 访问，是否仍然保存方法？"
 msgid "Account credit expires in a few minutes"
 msgstr "帐户额度将在几分钟后到期"
 
-msgid "Account credit expires soon"
-msgstr "帐户额度即将到期"
+msgid "Account number is too long, please enter a valid number"
+msgstr "帐号过长，请输入有效帐号"
 
 msgid "Account time reminders"
 msgstr "帐户时间提醒"
 
-msgid "Add %s to list"
-msgstr "将%s添加到列表中"
-
-msgid "Add 30 days time"
-msgstr "增加 30 天"
-
 msgid "Add 30 days time (%s)"
 msgstr "增加 30 天 (%s)"
+
+msgid "Add 90 days time (%s)"
+msgstr "添加 90 天 (%s)"
 
 msgid "Add DNS server"
 msgstr "添加 DNS 服务器"
@@ -2291,11 +2796,23 @@ msgstr "添加 DNS 服务器"
 msgid "Add locations"
 msgstr "添加位置"
 
+msgid "Add time"
+msgstr "添加时间"
+
+msgid "Add to list"
+msgstr "添加到列表"
+
 msgid "Adding method..."
 msgstr "正在添加方法…"
 
+msgid "After updating a VPN app on Android 16, devices might end up in a state where VPN apps are no longer able to reach the internet."
+msgstr "在 Android 16 上更新 VPN 应用后，设备可能会出现 VPN 应用无法连接互联网的情况。"
+
 msgid "Agree and continue"
 msgstr "同意并继续"
+
+msgid "All"
+msgstr "所有"
 
 msgid "All applications"
 msgstr "所有应用程序"
@@ -2309,14 +2826,20 @@ msgstr "“始终开启 VPN”已分配给 %s"
 msgid "Always-on VPN assigned to other VPN"
 msgstr "“始终开启 VPN”已分配给其他 VPN"
 
-msgid "App info"
-msgstr "应用信息"
+msgid "Android 16 has a known issue. Please restart your device and try again. To learn more,"
+msgstr "Android 16 存在已知问题。请重启您的设备并重试。如需了解详情，"
+
+msgid "Appearance"
+msgstr "外观"
+
+msgid "Applying changes..."
+msgstr "正在应用更改…"
+
+msgid "Are you sure you want to log <b>%s</b> out?"
+msgstr "确定要退出 <b>%s</b> 吗？"
 
 msgid "At least one method needs to be enabled"
 msgstr "至少需要启用一个方法"
-
-msgid "Attention: Be cautious if you have a limited data plan as this feature will increase your network traffic."
-msgstr "注意：如果您的数据套餐流量有限，请谨慎使用，因为此功能将增加您的网络流量。"
 
 msgid "Attention: If \"Block connections without VPN\" is enabled, \"Local network sharing\" will not work."
 msgstr "注意：如果启用了“屏蔽未使用 VPN 的所有连接”，将无法使用“本地网络共享”功能。"
@@ -2324,8 +2847,8 @@ msgstr "注意：如果启用了“屏蔽未使用 VPN 的所有连接”，将�
 msgid "Attention: If \"Block connections without VPN\" is enabled, split apps will not have Internet. Always keep in mind that split tunneling is a privacy risk."
 msgstr "注意：如果启用了“屏蔽未使用 VPN 的所有连接”，分割应用将无法连接互联网。请牢记，分割隧道存在隐私风险。"
 
-msgid "Attention: Since this increases your total network traffic, be cautious if you have a limited data plan. It can also negatively impact your network speed and battery usage."
-msgstr "注意：这样会增加您的网络总流量，因此，如果您的数据套餐流量有限，请谨慎使用。这种方式还会对网速和电池用量产生负面影响。"
+msgid "Attention: Shadowsocks can increase battery consumption depending on data usage, such as streaming a video."
+msgstr "注意：根据数据使用情况（例如流式传输视频），Shadowsocks 可能会增加电量消耗。"
 
 msgid "Attention: this setting cannot be used in combination with \"Use custom DNS server\"."
 msgstr "注意：此设置不能与“使用自定义 DNS 服务器”结合使用。"
@@ -2333,20 +2856,29 @@ msgstr "注意：此设置不能与“使用自定义 DNS 服务器”结合使�
 msgid "Auto-connect & Lockdown mode"
 msgstr "自动连接和锁定模式"
 
-msgid "Auto-connect (legacy)"
-msgstr "自动连接（旧）"
-
 msgid "Auto-connect is called Always-on VPN in the Android system settings and it makes sure you are constantly connected to the VPN tunnel and auto connects after restart."
 msgstr "自动连接在 Android 系统设置中称为“始终开启 VPN”，此功能可确保您始终连接到 VPN 隧道并在重新启动后自动连接。"
 
-msgid "Automatically connect on device start-up. Only works if the app has been granted the VPN permission."
-msgstr "设备启动时自动连接。仅适用于已为应用授予 VPN 权限的情况。"
+msgid "Automatically connect on device start-up."
+msgstr "设备启动时自动连接。"
 
 msgid "Blocking internet (device offline)"
 msgstr "正在阻止网络（设备离线）"
 
-msgid "Changelog"
-msgstr "变更日志"
+msgid "Blocking..."
+msgstr "正在屏蔽…"
+
+msgid "Browser"
+msgstr "浏览器"
+
+msgid "By attaching your account token it links this report to your account, which helps us resolve your issue quicker. All reports are automatically deleted after a period of time."
+msgstr "通过附加您的帐户令牌，此报告将与您的帐户关联，这有助于我们更快地解决您的问题。所有报告会在一段时间后自动删除。"
+
+msgid "Can't connect?"
+msgstr "无法连接？"
+
+msgid "Change the title and icon of the Mullvad VPN app on your Android device. This will not change the icon for any Mullvad VPN related notifications."
+msgstr "更改 Android 设备上 Mullvad VPN 应用的标题和图标。这不会更改任何 Mullvad VPN 相关通知的图标。"
 
 msgid "Changes to DNS related settings might not go into effect immediately due to cached results."
 msgstr "由于缓存结果，对 DNS 相关设置的更改可能不会立即生效。"
@@ -2359,6 +2891,9 @@ msgstr "收起"
 
 msgid "Connect on device start-up"
 msgstr "设备启动时连接"
+
+msgid "Connect to a different network"
+msgstr "连接到其他网络"
 
 msgid "Connecting..."
 msgstr "正在连接…"
@@ -2375,11 +2910,11 @@ msgstr "复制"
 msgid "Create"
 msgstr "创建"
 
-msgid "Create new account"
-msgstr "创建新帐户"
-
 msgid "Create new list"
 msgstr "创建新列表"
+
+msgid "Creating account failed"
+msgstr "创建帐户失败"
 
 msgid "Critical error (your attention is required)"
 msgstr "严重错误（需要注意）"
@@ -2387,8 +2922,8 @@ msgstr "严重错误（需要注意）"
 msgid "Current: %s"
 msgstr "当前：%s"
 
-msgid "Custom DNS server addresses %s are invalid"
-msgstr "自定义 DNS 服务器地址 %s 无效"
+msgid "Custom DNS server addresses %1$s are invalid"
+msgstr "自定义 DNS 服务器地址 %1$s 无效"
 
 msgid "DNS settings might not go into effect immediately"
 msgstr "DNS 设置可能不会立即生效"
@@ -2402,11 +2937,17 @@ msgstr "删除方法"
 msgid "Delete method?"
 msgstr "是否删除方法？"
 
-msgid "Disable \"%s\" below to activate these settings."
-msgstr "禁用下方的“%s”以激活这些设置。"
+msgid "Direct"
+msgstr "直接"
 
 msgid "Disable all \"%s\" above to activate this setting."
-msgstr "禁用上方的所有“%s”以激活此设置。"
+msgstr "停用上方的所有“%s”以激活此设置。"
+
+msgid "Disable multihop"
+msgstr "停用多跳"
+
+msgid "Disable recents"
+msgstr "停用最近使用"
 
 msgid "Discard"
 msgstr "舍弃"
@@ -2423,8 +2964,8 @@ msgstr "正在断开连接…"
 msgid "Dismiss"
 msgstr "关闭"
 
-msgid "Do you want to create a new account?"
-msgstr "要创建新帐户吗？"
+msgid "Don’t have an account number?"
+msgstr "还没有帐号？"
 
 msgid "Edit custom lists"
 msgstr "编辑自定义列表"
@@ -2441,14 +2982,29 @@ msgstr "编辑位置"
 msgid "Edit name"
 msgstr "编辑名称"
 
-msgid "Enable %s"
-msgstr "启用“%s”"
+msgid "Enable %1$s"
+msgstr "启用“%1$s”"
+
+msgid "Enable all & retry"
+msgstr "全部启用并重试"
+
+msgid "Enable all access methods in the app"
+msgstr "启用应用中的所有访问方法"
 
 msgid "Enable method"
 msgstr "启用方法"
 
+msgid "Enable multihop"
+msgstr "启用多跳"
+
+msgid "Enable recents"
+msgstr "启用最近使用"
+
 msgid "Enter MTU"
 msgstr "输入 MTU"
+
+msgid "Entry relay is the same as exit relay"
+msgstr "入口中继与出口中继相同"
 
 msgid "Excluded applications"
 msgstr "排除的应用程序"
@@ -2456,11 +3012,17 @@ msgstr "排除的应用程序"
 msgid "Expand"
 msgstr "展开"
 
+msgid "External link"
+msgstr "外部链接"
+
 msgid "FAILED TO CONNECT"
 msgstr "无法连接"
 
 msgid "Failed to apply patch"
 msgstr "无法应用补丁"
+
+msgid "Failed to load products, please try again"
+msgstr "无法加载产品，请重试"
 
 msgid "Failed to set to current - API not reachable"
 msgstr "无法设置为当前方法 – 无法通过 API 访问"
@@ -2471,8 +3033,11 @@ msgstr "无法设置为当前方法 – 未知原因"
 msgid "File"
 msgstr "文件"
 
-msgid "Filters:"
-msgstr "筛选器："
+msgid "For details, please see our %s."
+msgstr "有关详情，请参阅我们的%s。"
+
+msgid "For the VPN to connect automatically on device startup, the app must have VPN permissions. You can grant these by clicking “Connect” in the map view and selecting “OK” if prompted. Additionally, ensure the app is installed on the internal storage by checking the storage information in the app details in system settings."
+msgstr "为了让 VPN 在设备启动时自动连接，应用必须拥有 VPN 权限。您可以通过点击地图视图中的“连接”并在弹出提示时选择“确定”来授予这些权限。此外，请通过检查系统设置中应用详细信息内的存储信息，确保该应用已安装在内部存储空间中。"
 
 msgid "Go to VPN settings"
 msgstr "前往“VPN 设置”"
@@ -2483,11 +3048,26 @@ msgstr "前往登录将在此设备上解除阻止互联网。"
 msgid "Google Play payment pending"
 msgstr "Google Play 付款待处理"
 
+msgid "Google Play payment pending, this might take some time"
+msgstr "Google Play 付款待处理，这可能需要一些时间"
+
 msgid "Google Play unavailable"
 msgstr "Google Play 不可用"
 
+msgid "IPv4 is not available, please try changing \"Device IP version\" setting."
+msgstr "IPv4 不可用，请尝试更改“设备 IP 版本”设置。"
+
+msgid "IPv6 is not available, please try changing \"Device IP version\" setting."
+msgstr "IPv6 不可用，请尝试更改“设备 IP 版本”设置。"
+
+msgid "Icon and title"
+msgstr "图标和标题"
+
 msgid "If the split tunneling feature is used, then the app queries your system for a list of all installed applications. This list is only retrieved in the split tunneling view. The list of installed applications is never sent from the device."
 msgstr "如果使用分割隧道功能，应用会向您的系统查询所有已安装应用程序的列表。此列表仅在分割隧道视图中检索。有关已安装应用程序的信息永远不会离开设备。"
+
+msgid "If these steps don’t work, please send an email to support using the button below. It will automatically attach the logs which have been anonymized."
+msgstr "如果上述步骤无效，请使用下方的按钮发送邮件给支持团队。电子邮件将自动附加经过匿名化处理的日志。"
 
 msgid "Import new overrides by"
 msgstr "导入新覆盖设置的方式"
@@ -2498,11 +3078,17 @@ msgstr "导入成功，覆盖设置已激活"
 msgid "Importing new overrides might replace some previously imported overrides."
 msgstr "导入新覆盖设置可能会替换一些先前导入的覆盖设置。"
 
-msgid "Invalid or missing value \"%s\""
-msgstr "值“%s”无效或者缺失"
+msgid "In-app products unavailable, please make sure you have the latest version of Google Play."
+msgstr "应用内商品不可用，请确保您的 Google Play 是最新版本。"
 
-msgid "It looks like you’ve entered an account number instead of a voucher code. If you would like to change the active account, please log out first."
-msgstr "您输入的似乎是帐号，而不是代金券码。如果您想更改有效帐户，请先退出登录。"
+msgid "Include my account token for faster help with payment or account related issues"
+msgstr "包含我的帐户令牌，以便在处理付款或帐户相关问题时获得更快的帮助"
+
+msgid "Invalid or missing value \"%1$s\""
+msgstr "值“%1$s”无效或者缺失"
+
+msgid "Less than a day left on this account"
+msgstr "此帐户还剩不到 1 天"
 
 msgid "Lets you select apps that should access the Internet directly without going through the VPN tunnel."
 msgstr "允许您选择不经过 VPN 隧道而直接访问互联网的应用。"
@@ -2510,35 +3096,71 @@ msgstr "允许您选择不经过 VPN 隧道而直接访问互联网的应用。"
 msgid "List name"
 msgstr "列表名称"
 
+msgid "Loading products"
+msgstr "正在加载商品"
+
 msgid "Locations"
 msgstr "位置"
 
 msgid "Locations were changed for \"%s\""
 msgstr "已更改“%s”的位置"
 
+msgid "Log in"
+msgstr "登录"
+
 msgid "Makes sure the device is always on the VPN tunnel."
 msgstr "确保设备始终位于 VPN 隧道上。"
 
-msgid "Manage account"
-msgstr "管理帐户"
+msgid "More actions"
+msgstr "更多操作"
 
 msgid "Mullvad services unavailable"
 msgstr "Mullvad 服务不可用"
 
+msgid "Multihop is disabled"
+msgstr "多跳已停用"
+
+msgid "Multihop is enabled"
+msgstr "多跳已启用"
+
 msgid "Name was changed to %s"
 msgstr "名称已更改为“%s”"
+
+msgid "Navigate"
+msgstr "导航"
 
 msgid "New list"
 msgstr "新建列表"
 
+msgid "No Android app store installed, could not open link"
+msgstr "未安装 Android 应用商店，无法打开链接"
+
+msgid "No browser app installed, could not open link"
+msgstr "未安装浏览器应用，无法打开链接"
+
+msgid "No changelog was added for this version"
+msgstr "没有为此版本添加更新日志"
+
 msgid "No custom lists available"
 msgstr "有可用的自定义列表"
+
+msgid "No email app available on the device"
+msgstr "设备上没有可用的电子邮件应用"
+
+msgid "No entry server match your settings, try changing server or other settings."
+msgstr "没有与您的设置匹配的入口服务器，请尝试更改服务器或其他设置。"
+
+msgid "No exit server match your settings, try changing server or other settings."
+msgstr "没有与您的设置匹配的出口服务器，请尝试更改服务器或其他设置。"
 
 msgid "No internet connection"
 msgstr "没有互联网连接"
 
-msgid "No locations found"
-msgstr "找不到位置"
+msgid "No matching servers found."
+msgstr "找不到匹配的服务器。"
+
+msgid "No recent selection history"
+msgstr "无最近选择历史记录"
 
 msgid "No result for \"%s\", please try a different search"
 msgstr "“%s”无结果，请尝试其他搜索"
@@ -2546,8 +3168,17 @@ msgstr "“%s”无结果，请尝试其他搜索"
 msgid "Not found"
 msgstr "找不到"
 
-msgid "Open %s settings"
-msgstr "打开 %s 设置"
+msgid "Notes"
+msgstr "备注"
+
+msgid "Obfuscation hides the WireGuard traffic inside another protocol. It can be used to help circumvent censorship and other types of filtering, where a plain WireGuard connection would be blocked."
+msgstr "混淆会将 WireGuard 流量隐藏在其他协议中。这有助于规避审查和其他类型的过滤，在这些过滤中，普通 WireGuard 连接将被阻止。"
+
+msgid "On TV devices you may also need to restart your device."
+msgstr "在电视设备上，您可能还需要重新启动设备。"
+
+msgid "Open app details"
+msgstr "打开应用详细信息"
 
 msgid "Overrides active"
 msgstr "覆盖设置已激活"
@@ -2576,23 +3207,32 @@ msgstr "请输入有效的远程服务器端口"
 msgid "Please press connect to request VPN permission"
 msgstr "请按“连接”以请求 VPN 权限"
 
+msgid "Please restart your device and try connecting again. If this does not work, please write an email to %s in Swedish or English."
+msgstr "请重新启动您的设备，然后再次尝试连接。如果仍然无法连接，请用瑞典语或英语发送电子邮件至 %s。"
+
+msgid "Please try changing your filters."
+msgstr "请更改您的筛选器。"
+
 msgid "Privacy"
 msgstr "隐私"
 
 msgid "Privacy policy"
 msgstr "隐私政策"
 
-msgid "Reconnecting..."
-msgstr "正在重新连接…"
+msgid "Recents"
+msgstr "最近使用"
+
+msgid "Recents disabled and history cleared"
+msgstr "最近使用已停用，历史记录已清除"
 
 msgid "Recursion limit"
 msgstr "递归限制"
 
-msgid "Remove"
-msgstr "移除"
+msgid "Remove %1$s from %2$s"
+msgstr "将%1$s从“%2$s”中移除"
 
-msgid "Remove %s from %s"
-msgstr "将 %s 从 %s 中移除"
+msgid "Remove %s?"
+msgstr "是否移除“%s”？"
 
 msgid "Remove custom port"
 msgstr "移除自定义端口"
@@ -2609,20 +3249,38 @@ msgstr "重置覆盖设置"
 msgid "Reset to default"
 msgstr "重置为默认值"
 
+msgid "Restart your device"
+msgstr "重启您的设备"
+
 msgid "Search"
 msgstr "搜索"
 
-msgid "Search results"
-msgstr "搜索结果"
+msgid "Send email"
+msgstr "发送电子邮件"
 
-msgid "Set WireGuard MTU value. Valid range: %d - %d."
-msgstr "设置 WireGuard MTU 值。有效范围：%d - %d。"
+msgid "Set WireGuard MTU value. Valid range: %1$d - %2$d."
+msgstr "设置 WireGuard MTU 值。有效范围：%1$d - %2$d。"
+
+msgid "Set as multihop entry"
+msgstr "设置为多跳入口"
+
+msgid "Set as multihop entry (incompatible)"
+msgstr "设置为多跳入口（不兼容）"
+
+msgid "Set as multihop exit"
+msgstr "设置为多跳出口"
+
+msgid "Set as multihop exit (incompatible)"
+msgstr "设置为多跳出口（不兼容）"
 
 msgid "Set port"
 msgstr "设置端口"
 
 msgid "Share…"
 msgstr "共享…"
+
+msgid "Show location in notification"
+msgstr "在通知中显示位置"
 
 msgid "Show system apps"
 msgstr "显示系统应用"
@@ -2633,11 +3291,11 @@ msgstr "显示当前的 VPN 隧道状态"
 msgid "Shows reminders when the account time is about to expire"
 msgstr "在帐户时间即将到期时显示提醒"
 
-msgid "Split tunneling"
-msgstr "分割隧道"
-
 msgid "Submit"
 msgstr "提交"
+
+msgid "TCP"
+msgstr "TCP"
 
 msgid "Test method"
 msgstr "测试方法"
@@ -2651,32 +3309,56 @@ msgstr "文本"
 msgid "The Auto-connect and Lockdown mode settings can be found in the Android system settings, follow this guide to enable one or both."
 msgstr "自动连接和锁定模式设置可以在 Android 系统设置中找到，请按照本指南启用其中一项或两项。"
 
+msgid "The IPv6 DNS server will not work unless you enable \"IPv6\" under VPN settings."
+msgstr "除非您在 VPN 设置中启用“IPv6”，否则 IPv6 DNS 服务器将不会运行。"
+
 msgid "The Lockdown mode is called \"Block connections without VPN\" in the Android system settings. It helps minimize leaks, however it has some known limitations which you can read more about"
 msgstr "在 Android 系统设置中，锁定模式被称为“屏蔽未使用 VPN 的所有连接”。该模式可以最大限度地减少泄露，但是也有一些已知的限制，要了解详情，请点击"
 
 msgid "The \"Current\" method represent which method the app is using to reach the API."
 msgstr "“当前”方法表示应用用来访问 API 的方法。"
 
+msgid "The app is blocking internet, please disconnect first"
+msgstr "应用正在阻止互联网，请先断开连接"
+
+msgid "The app was unable to create an account due to not being able to reach the Mullvad API."
+msgstr "由于无法访问 Mullvad API，应用无法创建帐户。"
+
+msgid "The app was unable to login due to not being able to reach the Mullvad API."
+msgstr "由于无法访问 Mullvad API，应用无法登录。"
+
 msgid "The local DNS server will not work unless you enable \"Local Network Sharing\" under VPN settings."
 msgstr "除非您在 VPN 设置下启用“本地网络共享”，否则本地 DNS 服务器将不会运行。"
+
+msgid "The selected %s port is not supported, please change it under"
+msgstr "所选 %s 端口不受支持，请在以下位置更改："
+
+msgid "These methods may be useful in situations where you are blocked from reaching Mullvad. When “Automatic” is selected, the app will attempt all methods until one works."
+msgstr "这些方法在您无法连接到 Mullvad 时可能会有所帮助。选择“自动”时，应用将尝试所有方法，直到其中一种方法生效。"
 
 msgid "This address has already been entered."
 msgstr "此地址已输入过。"
 
-msgid "This feature isn’t available on all servers. You might need to change location after enabling."
-msgstr "此功能并非在所有服务器上都可用。启用后，您可能需要更改位置。"
-
 msgid "This field is required"
 msgstr "此字段为必填项"
+
+msgid "This impacts your anonymity"
+msgstr "这会影响您的匿名性"
 
 msgid "This is already set as current"
 msgstr "它已被设置为当前方法"
 
-msgid "To add locations to a list, press the \"︙\" or long press on a country, city, or server."
-msgstr "要将位置添加到列表中，请按“︙”或长按国家/地区、城市或服务器。"
+msgid "This might be due to censorship or network issues. Please try to:"
+msgstr "这可能由审查或网络问题造成。请尝试："
 
-msgid "To create a custom list press the \"︙\""
-msgstr "要创建自定义列表，请按“︙”"
+msgid "Time added"
+msgstr "时间已添加"
+
+msgid "To add locations to a list, press the pen or long press on a country, city, or server."
+msgstr "要将位置添加到列表中，请按笔形图标或长按国家/地区、城市或服务器。"
+
+msgid "To create a custom list press the \"+\""
+msgstr "要创建自定义列表，请按“+”"
 
 msgid "To make sure that you have the most secure version and to inform you of any issues with the current version that is running, the app performs version checks automatically. This sends the app version and Android system version to Mullvad servers. Mullvad keeps counters on number of used app versions and Android versions. The data is never stored or used in any way that can identify you."
 msgstr "为确保您使用的是最安全的版本并通知您当前运行的版本存在的任何问题，应用会自动执行版本检查。此操作会将应用版本和 Android 系统版本发送到 Mullvad 服务器。Mullvad 会统计使用的应用版本和 Android 版本。数据永远不会通过任何可以识别您身份的方式存储或使用。"
@@ -2684,8 +3366,11 @@ msgstr "为确保您使用的是最安全的版本并通知您当前运行的版
 msgid "Toggle VPN"
 msgstr "切换 VPN"
 
-msgid "Type at least 2 characters to start searching."
-msgstr "至少输入 2 个字符以开始搜索。"
+msgid "Too many attempts, please try again later"
+msgstr "尝试次数过多，请稍后再试"
+
+msgid "UDP"
+msgstr "UDP"
 
 msgid "Unable to apply firewall rules. Please troubleshoot or send a problem report."
 msgstr "无法应用防火墙规则。请排查问题或发送问题报告。"
@@ -2693,17 +3378,26 @@ msgstr "无法应用防火墙规则。请排查问题或发送问题报告。"
 msgid "Unable to parse patch"
 msgstr "无法解析补丁"
 
+msgid "Unable to reach API"
+msgstr "无法访问 API"
+
+msgid "Unable to reach API, %s"
+msgstr "无法访问 API，%s"
+
 msgid "Unable to start tunnel connection. Please disable Always-on VPN before using Mullvad VPN."
-msgstr "无法启动隧道连接。在使用 Mullvad VPN 之前，请禁用“始终开启 VPN”。"
+msgstr "无法启动隧道连接。在使用 Mullvad VPN 之前，请停用“始终开启 VPN”。"
 
 msgid "Unable to start tunnel connection. Please disable Always-on VPN for <b>%s</b> before using Mullvad VPN."
-msgstr "无法启动隧道连接。在使用 Mullvad VPN 之前，请为 <b>%s</b> 禁用“始终开启 VPN”。"
+msgstr "无法启动隧道连接。在使用 Mullvad VPN 之前，请为 <b>%s</b> 停用“始终开启 VPN”。"
+
+msgid "Unavailable"
+msgstr "不可用"
 
 msgid "Undo"
 msgstr "撤消"
 
-msgid "Unknown or prohibited key \"%s\""
-msgstr "未知或禁止的键“%s”"
+msgid "Unknown or prohibited key \"%1$s\""
+msgstr "未知或禁止的密钥“%1$s”"
 
 msgid "Update DNS server"
 msgstr "更新 DNS 服务器"
@@ -2711,23 +3405,38 @@ msgstr "更新 DNS 服务器"
 msgid "Update list name"
 msgstr "更新列表名称"
 
+msgid "Update server list"
+msgstr "更新服务器列表"
+
+msgid "Updating server list in the background..."
+msgstr "正在后台更新服务器列表…"
+
 msgid "Use method"
 msgstr "使用方法"
+
+msgid "VPN Settings not available on device"
+msgstr "设备上 VPN 设置不可用"
 
 msgid "VPN permission error"
 msgstr "VPN 权限错误"
 
-msgid "VPN permission was denied when creating the tunnel. Please try connecting again."
-msgstr "创建隧道时，VPN 权限被拒绝。请尝试重新连接。"
+msgid "VPN permission was denied"
+msgstr "VPN 权限被拒绝"
+
+msgid "VPN permission was denied or another app has \"Always-on VPN\" enabled"
+msgstr "VPN 权限被拒绝，或其他应用已启用“始终开启 VPN”"
 
 msgid "VPN tunnel status"
 msgstr "VPN 隧道状态"
 
-msgid "Valid WireGuard key is missing. Manage keys under Advanced settings."
-msgstr "缺少有效的 WireGuard 密钥。在“高级”设置下管理密钥。"
+msgid "Valid range for all servers: %s"
+msgstr "所有服务器的有效范围：%s"
 
 msgid "Valid ranges: %s"
 msgstr "有效范围：%s"
+
+msgid "Value: %s"
+msgstr "值：%s"
 
 msgid "Verifying API method..."
 msgstr "正在验证 API 方法…"
@@ -2741,11 +3450,11 @@ msgstr "正在验证购买…"
 msgid "Verifying voucher…"
 msgstr "正在验证优惠券…"
 
-msgid "Version"
-msgstr "版本"
+msgid "Warning"
+msgstr "警告"
 
-msgid "We are currently verifying your purchase, this might take some time. Your time will be added if the verification is successful."
-msgstr "我们目前正在验证您的购买，这可能需要一些时间。如果验证成功，您的时间将增加。"
+msgid "We are still verifying your purchase, this might take some time. Your time will be added if the verification is successful."
+msgstr "我们目前仍在验证您的购买，这可能需要一些时间。如果验证成功，您的时间将被添加。"
 
 msgid "We were unable to start the payment process, please make sure you have the latest version of Google Play."
 msgstr "我们无法启动付款流程，请确保拥有最新版本的 Google Play。"
@@ -2753,17 +3462,23 @@ msgstr "我们无法启动付款流程，请确保拥有最新版本的 Google P
 msgid "We were unable to start the payment process, please try again later."
 msgstr "我们无法启动付款流程，请稍后再试。"
 
-msgid "WireGuard MTU"
-msgstr "WireGuard MTU"
+msgid "Weather"
+msgstr "天气"
 
-msgid "WireGuard obfuscation"
-msgstr "WireGuard 混淆"
+msgid "Welcome, this device is now called <b>%s</b>."
+msgstr "欢迎，此设备现已命名为 <b>%s</b>。"
 
 msgid "WireGuard port"
 msgstr "WireGuard 端口"
 
-msgid "You already have a saved account number, by creating a new account the saved account number will be removed from this device. This cannot be undone."
-msgstr "您已经拥有保存的帐号，创建新帐户后，保存的帐号将从此设备中移除。此操作无法撤消。"
+msgid "Yes, log out device"
+msgstr "是，退出登录设备"
+
+msgid "You can add more time via the account view or website to continue using the VPN."
+msgstr "您可以通过帐户视图或网站添加更多时间，以继续使用 VPN。"
+
+msgid "You can add more time via the account view to continue using the VPN."
+msgstr "您可以通过帐户视图添加更多时间，以继续使用 VPN。"
 
 msgid "\"%s\" was created"
 msgstr "“%s”已创建"
@@ -2771,11 +3486,20 @@ msgstr "“%s”已创建"
 msgid "\"%s\" was deleted"
 msgstr "“%s”已被删除"
 
+msgid "click here"
+msgstr "点击此处"
+
 msgid "here"
 msgstr "（点击此处）"
 
 msgid "less than one day"
 msgstr "不足 1 天"
+
+msgid "privacy policy"
+msgstr "隐私政策"
+
+msgid "read more here"
+msgstr "点击此处了解详情"
 
 msgid "%d day"
 msgid_plural "%d days"
@@ -2789,6 +3513,14 @@ msgid "%d month"
 msgid_plural "%d months"
 msgstr[0] "%d 个月"
 
+msgid "1 day left on this account"
+msgid_plural "%d days left on this account"
+msgstr[0] "此帐户还剩 %d 天"
+
+msgid "1 year left on this account"
+msgid_plural "%d years left on this account"
+msgstr[0] "此帐户还剩 %d 年"
+
 msgid "Account credit expires in a day"
 msgid_plural "Account credit expires in %d days"
 msgstr[0] "帐户额度将在 %d 天后到期"
@@ -2796,24 +3528,4 @@ msgstr[0] "帐户额度将在 %d 天后到期"
 msgid "Account credit expires in an hour"
 msgid_plural "Account credit expires in %d hours"
 msgstr[0] "帐户额度将在 %d 小时后到期"
-
-msgid "a day ago"
-msgid_plural "%d days ago"
-msgstr[0] "%d 天前"
-
-msgid "a minute ago"
-msgid_plural "%d minutes ago"
-msgstr[0] "%d 分钟前"
-
-msgid "a month ago"
-msgid_plural "%d months ago"
-msgstr[0] "%d 个月前"
-
-msgid "a year ago"
-msgid_plural "%d years ago"
-msgstr[0] "%d 年前"
-
-msgid "an hour ago"
-msgid_plural "%d hours ago"
-msgstr[0] "%d 小时前"
 

@@ -1,9 +1,8 @@
 # Mullvad VPN Android app
 
 This directory contains the Android project as well as related files and information. Apart from the
-content of this directory, the Android project also relies on building [wireguard-go](../wireguard/)
-and the [mullvad-daemon](../mullvad-daemon/) which are both bundled as shared libraries into the
-assembled APK.
+content of this directory, the Android project also relies on building the [mullvad-daemon](../mullvad-daemon/)
+(which includes the GotaTun WireGuard implementation) as a shared library bundled into the assembled APK.
 
 The app is available for download on
 [our website](https://mullvad.net/download/android/),
@@ -20,12 +19,12 @@ structure and can therefore be opened in Android Studio or any other IDE or edit
 
 ### Building the app
 
-The easiest and recommended way to build the Android project including the `mullvad-daemon` and
-`wireguard-go` is to use the following command (which requires `podman`):
+The easiest and recommended way to build the Android project is to use the containerized build
+(which requires `podman`):
 ```
 ../building/containerized-build.sh android --dev-build
 ```
-See the [build instructions](BuildInstructions.md) for further information.
+See the [build instructions](./docs/BuildInstructions.md) for further information.
 
 ## Linting and formatting
 
@@ -68,7 +67,7 @@ strict. See each `build.gradle.kts`for more information.
 
 See the [locale README][desktop-locales-readme] for how to easily update translations. It also
 includes documentation for which phrases and terms shouldn't be translated (Do Not Translate).
-Also see the [translations converter README](translations-converter-readme) for documentation about
+Also see the [translations converter README][translations-converter-readme] for documentation about
 the tool used to sync translations between the Android and Desktop apps.
 
 [desktop-locales-readme]: ../desktop/packages/mullvad-vpn/locales/README.md

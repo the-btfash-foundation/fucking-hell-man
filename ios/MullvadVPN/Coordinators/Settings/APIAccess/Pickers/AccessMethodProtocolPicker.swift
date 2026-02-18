@@ -3,13 +3,15 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 14/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
+import MullvadTypes
 import UIKit
 
 /// Type implementing the access method protocol picker.
+@MainActor
 struct AccessMethodProtocolPicker {
     /// The navigation controller used for presenting the picker.
     let navigationController: UINavigationController
@@ -25,12 +27,7 @@ struct AccessMethodProtocolPicker {
         let controller = ListItemPickerViewController(dataSource: dataSource, selectedItemID: currentValue)
         controller.view.setAccessibilityIdentifier(.accessMethodProtocolPickerView)
 
-        controller.navigationItem.title = NSLocalizedString(
-            "SELECT_PROTOCOL_NAV_TITLE",
-            tableName: "APIAccess",
-            value: "Type",
-            comment: ""
-        )
+        controller.navigationItem.title = NSLocalizedString("Type", comment: "")
 
         controller.onSelect = { selectedItem in
             navigationController.popViewController(animated: true)

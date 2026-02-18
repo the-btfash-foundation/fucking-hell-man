@@ -3,7 +3,7 @@
 //  HTTP
 //
 //  Created by pronebird on 06/09/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -28,7 +28,7 @@ struct HTTPStatus: RawRepresentable, Equatable {
     static let notFound = HTTPStatus(rawValue: 404)
 
     static func isSuccess(_ code: Int) -> Bool {
-        (200 ..< 300).contains(code)
+        (200..<300).contains(code)
     }
 
     let rawValue: Int

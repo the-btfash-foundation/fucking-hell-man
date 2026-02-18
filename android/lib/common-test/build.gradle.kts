@@ -1,30 +1,7 @@
-plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
-}
+plugins { alias(libs.plugins.mullvad.android.library) }
 
 android {
     namespace = "net.mullvad.mullvadvpn.lib.common.test"
-    compileSdk = Versions.compileSdkVersion
-    buildToolsVersion = Versions.buildToolsVersion
-
-    defaultConfig { minSdk = Versions.minSdkVersion }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = Versions.jvmTarget
-        allWarningsAsErrors = true
-    }
-
-    lint {
-        lintConfig = file("${rootProject.projectDir}/config/lint.xml")
-        abortOnError = true
-        warningsAsErrors = true
-    }
 
     packaging {
         resources {
@@ -41,5 +18,5 @@ android {
 dependencies {
     implementation(libs.kotlin.test)
     implementation(libs.kotlinx.coroutines.test)
-    implementation(Dependencies.junitJupiterApi)
+    implementation(libs.junit.jupiter.api)
 }

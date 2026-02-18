@@ -3,7 +3,7 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-04-08.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -65,7 +65,7 @@ class AddAccessMethodPage: Page {
     @discardableResult func waitForAPIUnreachableLabel() -> Self {
         XCTAssertTrue(
             app.staticTexts[AccessibilityIdentifier.addAccessMethodTestStatusUnreachableLabel]
-                .waitForExistence(timeout: BaseUITestCase.longTimeout)
+                .existsAfterWait(timeout: .long)
         )
         return self
     }

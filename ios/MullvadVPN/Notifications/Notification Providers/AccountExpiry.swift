@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-11-08.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -43,7 +43,7 @@ struct AccountExpiry {
         else { return nil }
 
         let datesByTimeToTrigger = triggerDates.filter { date in
-            now.secondsPrecision <= date.secondsPrecision // Ignore dates that have passed.
+            now.secondsPrecision <= date.secondsPrecision  // Ignore dates that have passed.
         }.sorted { date1, date2 in
             abs(date1.timeIntervalSince(now)) < abs(date2.timeIntervalSince(now))
         }

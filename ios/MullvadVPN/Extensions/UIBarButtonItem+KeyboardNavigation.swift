@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 24/02/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -15,19 +15,9 @@ extension UIBarButtonItem {
         fileprivate var localizedTitle: String {
             switch self {
             case .previous:
-                return NSLocalizedString(
-                    "PREVIOUS_BUTTON_TITLE",
-                    tableName: "KeyboardNavigation",
-                    value: "Previous",
-                    comment: "Previous button"
-                )
+                return NSLocalizedString("Previous", comment: "")
             case .next:
-                return NSLocalizedString(
-                    "NEXT_BUTTON_TITLE",
-                    tableName: "KeyboardNavigation",
-                    value: "Next",
-                    comment: "Next button"
-                )
+                return NSLocalizedString("Next", comment: "")
             }
         }
 
@@ -56,10 +46,12 @@ extension UIBarButtonItem {
         accessibilityLabel = keyboardNavigationItemType.localizedTitle
     }
 
-    static func makeKeyboardNavigationItems(_ configurationBlock: (
-        _ prevItem: UIBarButtonItem,
-        _ nextItem: UIBarButtonItem
-    ) -> Void) -> [UIBarButtonItem] {
+    static func makeKeyboardNavigationItems(
+        _ configurationBlock: (
+            _ prevItem: UIBarButtonItem,
+            _ nextItem: UIBarButtonItem
+        ) -> Void
+    ) -> [UIBarButtonItem] {
         let prevButton = UIBarButtonItem(keyboardNavigationItemType: .previous, target: nil, action: nil)
         let nextButton = UIBarButtonItem(keyboardNavigationItemType: .next, target: nil, action: nil)
 

@@ -2,7 +2,6 @@ import { ISplitTunnelingApplication } from '../../../shared/application-types';
 import {
   AccessMethodSetting,
   ApiAccessMethodSettings,
-  BridgeState,
   CustomLists,
   IDaitaSettings,
   IDnsOptions,
@@ -11,7 +10,7 @@ import {
   RelayOverride,
 } from '../../../shared/daemon-rpc-types';
 import { IGuiSettingsState } from '../../../shared/gui-settings-state';
-import { BridgeSettingsRedux, IRelayLocationCountryRedux, RelaySettingsRedux } from './reducers';
+import { IRelayLocationCountryRedux, RelaySettingsRedux } from './reducers';
 
 export interface IUpdateGuiSettingsAction {
   type: 'UPDATE_GUI_SETTINGS';
@@ -43,29 +42,14 @@ export interface IUpdateEnableIpv6Action {
   enableIpv6: boolean;
 }
 
-export interface IUpdateBlockWhenDisconnectedAction {
-  type: 'UPDATE_BLOCK_WHEN_DISCONNECTED';
-  blockWhenDisconnected: boolean;
+export interface IUpdateLockdownModeAction {
+  type: 'UPDATE_LOCKDOWN_MODE';
+  lockdownMode: boolean;
 }
 
 export interface IUpdateShowBetaReleasesAction {
   type: 'UPDATE_SHOW_BETA_NOTIFICATIONS';
   showBetaReleases: boolean;
-}
-
-export interface IUpdateBridgeSettingsAction {
-  type: 'UPDATE_BRIDGE_SETTINGS';
-  bridgeSettings: BridgeSettingsRedux;
-}
-
-export interface IUpdateBridgeStateAction {
-  type: 'UPDATE_BRIDGE_STATE';
-  bridgeState: BridgeState;
-}
-
-export interface IUpdateOpenVpnMssfixAction {
-  type: 'UPDATE_OPENVPN_MSSFIX';
-  mssfix?: number;
 }
 
 export interface IUpdateWireguardMtuAction {
@@ -75,7 +59,7 @@ export interface IUpdateWireguardMtuAction {
 
 export interface IUpdateWireguardQuantumResistantAction {
   type: 'UPDATE_WIREGUARD_QUANTUM_RESISTANT';
-  quantumResistant?: boolean;
+  quantumResistant: boolean;
 }
 
 export interface IUpdateWireguardDaitaAction {
@@ -101,6 +85,11 @@ export interface IUpdateSplitTunnelingStateAction {
 export interface ISetSplitTunnelingApplicationsAction {
   type: 'SET_SPLIT_TUNNELING_APPLICATIONS';
   applications: ISplitTunnelingApplication[];
+}
+
+export interface ISetSplitTunnelingSupportedAction {
+  type: 'SET_SPLIT_TUNNELING_SUPPORTED';
+  supported: boolean;
 }
 
 export interface ISetObfuscationSettings {
@@ -135,11 +124,8 @@ export type SettingsAction =
   | IUpdateWireguardEndpointData
   | IUpdateAllowLanAction
   | IUpdateEnableIpv6Action
-  | IUpdateBlockWhenDisconnectedAction
+  | IUpdateLockdownModeAction
   | IUpdateShowBetaReleasesAction
-  | IUpdateBridgeSettingsAction
-  | IUpdateBridgeStateAction
-  | IUpdateOpenVpnMssfixAction
   | IUpdateWireguardMtuAction
   | IUpdateWireguardQuantumResistantAction
   | IUpdateWireguardDaitaAction
@@ -147,6 +133,7 @@ export type SettingsAction =
   | IUpdateDnsOptionsAction
   | IUpdateSplitTunnelingStateAction
   | ISetSplitTunnelingApplicationsAction
+  | ISetSplitTunnelingSupportedAction
   | ISetObfuscationSettings
   | ISetCustomLists
   | ISetApiAccessMethods
@@ -199,12 +186,10 @@ function updateEnableIpv6(enableIpv6: boolean): IUpdateEnableIpv6Action {
   };
 }
 
-function updateBlockWhenDisconnected(
-  blockWhenDisconnected: boolean,
-): IUpdateBlockWhenDisconnectedAction {
+function updateLockdownMode(lockdownMode: boolean): IUpdateLockdownModeAction {
   return {
-    type: 'UPDATE_BLOCK_WHEN_DISCONNECTED',
-    blockWhenDisconnected,
+    type: 'UPDATE_LOCKDOWN_MODE',
+    lockdownMode,
   };
 }
 
@@ -212,27 +197,6 @@ function updateShowBetaReleases(showBetaReleases: boolean): IUpdateShowBetaRelea
   return {
     type: 'UPDATE_SHOW_BETA_NOTIFICATIONS',
     showBetaReleases,
-  };
-}
-
-function updateBridgeSettings(bridgeSettings: BridgeSettingsRedux): IUpdateBridgeSettingsAction {
-  return {
-    type: 'UPDATE_BRIDGE_SETTINGS',
-    bridgeSettings,
-  };
-}
-
-function updateBridgeState(bridgeState: BridgeState): IUpdateBridgeStateAction {
-  return {
-    type: 'UPDATE_BRIDGE_STATE',
-    bridgeState,
-  };
-}
-
-function updateOpenVpnMssfix(mssfix?: number): IUpdateOpenVpnMssfixAction {
-  return {
-    type: 'UPDATE_OPENVPN_MSSFIX',
-    mssfix,
   };
 }
 
@@ -244,7 +208,7 @@ function updateWireguardMtu(mtu?: number): IUpdateWireguardMtuAction {
 }
 
 function updateWireguardQuantumResistant(
-  quantumResistant?: boolean,
+  quantumResistant: boolean,
 ): IUpdateWireguardQuantumResistantAction {
   return {
     type: 'UPDATE_WIREGUARD_QUANTUM_RESISTANT',
@@ -286,6 +250,13 @@ function setSplitTunnelingApplications(
   return {
     type: 'SET_SPLIT_TUNNELING_APPLICATIONS',
     applications,
+  };
+}
+
+function setSplitTunnelingSupported(supported: boolean): ISetSplitTunnelingSupportedAction {
+  return {
+    type: 'SET_SPLIT_TUNNELING_SUPPORTED',
+    supported,
   };
 }
 
@@ -333,11 +304,8 @@ export default {
   updateWireguardEndpointData,
   updateAllowLan,
   updateEnableIpv6,
-  updateBlockWhenDisconnected,
+  updateLockdownMode,
   updateShowBetaReleases,
-  updateBridgeSettings,
-  updateBridgeState,
-  updateOpenVpnMssfix,
   updateWireguardMtu,
   updateWireguardQuantumResistant,
   updateWireguardDaita,
@@ -345,6 +313,7 @@ export default {
   updateDnsOptions,
   updateSplitTunnelingState,
   setSplitTunnelingApplications,
+  setSplitTunnelingSupported,
   updateObfuscationSettings,
   updateCustomLists,
   updateApiAccessMethods,

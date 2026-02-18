@@ -14,7 +14,7 @@ pub enum Error {
 }
 
 pub async fn initialize_firewall() -> Result<(), Error> {
-    let mut firewall = Firewall::new(mullvad_types::TUNNEL_FWMARK)?;
+    let mut firewall = Firewall::new(mullvad_types::TUNNEL_FWMARK, None, None)?;
     let allow_lan = get_allow_lan().await.unwrap_or_else(|err| {
         log::info!(
             "Not allowing LAN traffic due to failing to read settings: {}",
@@ -33,6 +33,9 @@ pub async fn initialize_firewall() -> Result<(), Error> {
 
 async fn get_allow_lan() -> Result<bool, Error> {
     let path = mullvad_paths::settings_dir()?;
-    let settings = SettingsPersister::load(&path).await;
+    // NOTE: This may fail if the daemon has not been restarted after an upgrade.
+    //       This will cause `allow_lan` to be disabled during early boot. This
+    //       is probably acceptable.
+    let settings = SettingsPersister::read_only(&path).await;
     Ok(settings.allow_lan)
 }

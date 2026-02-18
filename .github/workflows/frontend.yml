@@ -14,29 +14,20 @@ jobs:
   check-frontend:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
     steps:
+      # By default, the longest path a filename can have in git on Windows is 260 character.
+      - name: Set git config for long paths
+        if: runner.os == 'Windows'
+        run: |
+          git config --system core.longpaths true
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Checkout wireguard-go submodule
-        run: git submodule update --init --depth=1 wireguard-go-rs
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1.0.6
-        with:
-          toolchain: stable
-          default: true
-          profile: minimal
-
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: desktop/package.json
-          cache: 'npm'
-          cache-dependency-path: desktop/package-lock.json
+      - uses: ./.github/actions/mullvad-build-env
 
       - name: Install dependencies
         working-directory: desktop
@@ -54,12 +45,17 @@ jobs:
         shell: bash
         run: npm run build -w mullvad-vpn
 
+      - name: Build test
+        working-directory: desktop
+        shell: bash
+        run: npm run build:test -w mullvad-vpn
+
       - name: Run headless test Linux
         if: runner.os == 'Linux'
         working-directory: desktop
         run: xvfb-run -a npm test
 
-      - name: Run headless test Windows
+      - name: Run headless test Windows/macOS
         if: runner.os != 'Linux'
         working-directory: desktop
         shell: bash
@@ -70,10 +66,10 @@ jobs:
         working-directory: desktop
         # The sandbox is disabled as a workaround for lacking userns permisisons which is required
         # since Ubuntu 24.04.
-        run: NO_SANDBOX=1 npm run e2e:no-build -w mullvad-vpn
+        run: NO_SANDBOX=1 npm run e2e:no-build -w mullvad-vpn -- --reporter=line
 
-      - name: Run Playwright tests on Windows
+      - name: Run Playwright tests on Windows/macOS
         if: runner.os != 'Linux'
         working-directory: desktop
         shell: bash
-        run: npm run e2e:no-build --w mullvad-vpn
+        run: npm run e2e:no-build --w mullvad-vpn -- --reporter=line

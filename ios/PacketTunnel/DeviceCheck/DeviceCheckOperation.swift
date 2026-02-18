@@ -3,7 +3,7 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 20/04/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -20,14 +20,14 @@ import WireGuardKitTypes
  tunnel process.
 
  Packet tunnel runs this operation immediately as it starts, with `rotateImmediatelyOnKeyMismatch` flag set to
- `true` which forces key rotation to happpen immediately given that the key stored on server does not match the key
+ `true` which forces key rotation to happen immediately given that the key stored on server does not match the key
  stored on device. Unless the last rotation attempt took place less than 15 seconds ago in which case the key rotation
  is not performed.
 
  Other times, packet tunnel runs this operation with `rotateImmediatelyOnKeyMismatch` set to `false`, in which
  case it respects the 24 hour interval between key rotation retry attempts.
  */
-final class DeviceCheckOperation: ResultOperation<DeviceCheck> {
+final class DeviceCheckOperation: ResultOperation<DeviceCheck>, @unchecked Sendable {
     private let logger = Logger(label: "DeviceCheckOperation")
 
     private let remoteService: DeviceCheckRemoteServiceProtocol
@@ -66,7 +66,7 @@ final class DeviceCheckOperation: ResultOperation<DeviceCheck> {
      Begins the flow by fetching device state and then fetching account and device data. Calls `didReceiveData()` with
      the received data when done.
      */
-    private func startFlow(completion: @escaping (Result<DeviceCheck, Error>) -> Void) {
+    private func startFlow(completion: @escaping @Sendable (Result<DeviceCheck, Error>) -> Void) {
         do {
             guard case let .loggedIn(accountData, deviceData) = try deviceStateAccessor.read() else {
                 throw DeviceCheckError.invalidDeviceState
@@ -90,7 +90,7 @@ final class DeviceCheckOperation: ResultOperation<DeviceCheck> {
     private func didReceiveData(
         accountResult: Result<Account, Error>,
         deviceResult: Result<Device, Error>,
-        completion: @escaping (Result<DeviceCheck, Error>) -> Void
+        completion: @escaping @Sendable (Result<DeviceCheck, Error>) -> Void
     ) {
         do {
             let accountVerdict = try accountVerdict(from: accountResult)
@@ -99,20 +99,23 @@ final class DeviceCheckOperation: ResultOperation<DeviceCheck> {
             // Do not rotate the key if account is invalid even if the API successfully returns a device.
             if accountVerdict != .invalid, deviceVerdict == .keyMismatch {
                 rotateKeyIfNeeded { rotationResult in
-                    completion(rotationResult.map { rotationStatus in
-                        DeviceCheck(
-                            accountVerdict: accountVerdict,
-                            deviceVerdict: rotationStatus.isSucceeded ? .active : .keyMismatch,
-                            keyRotationStatus: rotationStatus
-                        )
-                    })
+                    completion(
+                        rotationResult.map { rotationStatus in
+                            DeviceCheck(
+                                accountVerdict: accountVerdict,
+                                deviceVerdict: rotationStatus.isSucceeded ? .active : .keyMismatch,
+                                keyRotationStatus: rotationStatus
+                            )
+                        })
                 }
             } else {
-                completion(.success(DeviceCheck(
-                    accountVerdict: accountVerdict,
-                    deviceVerdict: deviceVerdict,
-                    keyRotationStatus: .noAction
-                )))
+                completion(
+                    .success(
+                        DeviceCheck(
+                            accountVerdict: accountVerdict,
+                            deviceVerdict: deviceVerdict,
+                            keyRotationStatus: .noAction
+                        )))
             }
         } catch {
             completion(.failure(error))
@@ -127,8 +130,8 @@ final class DeviceCheckOperation: ResultOperation<DeviceCheck> {
         accountNumber: String, deviceIdentifier: String,
         completion: @escaping (Result<Account, Error>, Result<Device, Error>) -> Void
     ) {
-        var accountResult: Result<Account, Error> = .failure(OperationError.cancelled)
-        var deviceResult: Result<Device, Error> = .failure(OperationError.cancelled)
+        nonisolated(unsafe) var accountResult: Result<Account, Error> = .failure(OperationError.cancelled)
+        nonisolated(unsafe) var deviceResult: Result<Device, Error> = .failure(OperationError.cancelled)
 
         let dispatchGroup = DispatchGroup()
 
@@ -158,7 +161,7 @@ final class DeviceCheckOperation: ResultOperation<DeviceCheck> {
      then it rotate device key by marking the beginning of key rotation, updating device state and persisting before
      proceeding to rotate the key.
      */
-    private func rotateKeyIfNeeded(completion: @escaping (Result<KeyRotationStatus, Error>) -> Void) {
+    private func rotateKeyIfNeeded(completion: @escaping @Sendable (Result<KeyRotationStatus, Error>) -> Void) {
         let deviceState: DeviceState
         do {
             deviceState = try deviceStateAccessor.read()

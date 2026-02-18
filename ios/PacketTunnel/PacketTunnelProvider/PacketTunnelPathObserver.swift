@@ -3,52 +3,69 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 10/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
+import MullvadLogging
+import MullvadTypes
+import Network
 import NetworkExtension
 import PacketTunnelCore
 
-final class PacketTunnelPathObserver: DefaultPathObserverProtocol {
-    private weak var packetTunnelProvider: NEPacketTunnelProvider?
-    private let stateLock = NSLock()
-    private var pathUpdatePublisher: AnyCancellable?
+final class PacketTunnelPathObserver: DefaultPathObserverProtocol, Sendable {
     private let eventQueue: DispatchQueue
+    private let pathMonitor = NWPathMonitor()
+    nonisolated(unsafe) let logger = Logger(label: "PacketTunnelPathObserver")
+    private let stateLock = NSLock()
 
-    init(packetTunnelProvider: NEPacketTunnelProvider, eventQueue: DispatchQueue) {
-        self.packetTunnelProvider = packetTunnelProvider
+    nonisolated(unsafe) private var started = false
+    nonisolated(unsafe) private var pendingPathUpdate: DispatchWorkItem?
+    private static let pathUpdateDebounceDelay: DispatchTimeInterval = .seconds(2)
+
+    public var currentPathStatus: Network.NWPath.Status {
+        stateLock.withLock {
+            pathMonitor.currentPath.status
+        }
+    }
+
+    init(eventQueue: DispatchQueue) {
         self.eventQueue = eventQueue
     }
 
-    var defaultPath: NetworkPath? {
-        return packetTunnelProvider?.defaultPath
-    }
-
-    func start(_ body: @escaping (NetworkPath) -> Void) {
+    func start(_ body: @escaping @Sendable (Network.NWPath.Status) -> Void) {
         stateLock.withLock {
-            pathUpdatePublisher?.cancel()
+            guard started == false else { return }
+            defer { started = true }
+            pathMonitor.pathUpdateHandler = { [weak self] updatedPath in
+                guard let self else { return }
+                self.stateLock.withLock {
+                    self.pendingPathUpdate?.cancel()
 
-            // Normally packet tunnel provider should exist throughout the network extension lifetime.
-            pathUpdatePublisher = packetTunnelProvider?.publisher(for: \.defaultPath)
-                .removeDuplicates(by: { oldPath, newPath in
-                    oldPath?.status == newPath?.status
-                })
-                .throttle(for: .seconds(2), scheduler: eventQueue, latest: true)
-                .sink { change in
-                    if let change {
-                        body(change)
+                    let workItem = DispatchWorkItem {
+                        body(updatedPath.status)
                     }
+                    self.pendingPathUpdate = workItem
+
+                    self.eventQueue.asyncAfter(
+                        deadline: .now() + Self.pathUpdateDebounceDelay,
+                        execute: workItem
+                    )
                 }
+            }
+
+            pathMonitor.start(queue: eventQueue)
         }
     }
 
     func stop() {
         stateLock.withLock {
-            pathUpdatePublisher?.cancel()
-            pathUpdatePublisher = nil
+            guard started == true else { return }
+            defer { started = false }
+            pendingPathUpdate?.cancel()
+            pendingPathUpdate = nil
+            pathMonitor.pathUpdateHandler = nil
+            pathMonitor.cancel()
         }
     }
 }
-
-extension NetworkExtension.NWPath: NetworkPath {}

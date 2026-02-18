@@ -1,9 +1,9 @@
 //
-//  RelayFilter.swift
+//  AccessibilityIdentifier.swift
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-12-20.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -12,6 +12,8 @@ public enum AccessibilityIdentifier: Equatable {
     // Buttons
     case addAccessMethodButton
     case accessMethodAddButton
+    case accessMethodTestButton
+    case accessMethodConfirmDeleteButton
     case accountButton
     case accessMethodUnreachableBackButton
     case accessMethodUnreachableSaveButton
@@ -25,12 +27,18 @@ public enum AccessibilityIdentifier: Equatable {
     case collapseButton
     case expandButton
     case createAccountButton
+    case createAccountConfirmationButton
+    case createAccountCancelButton
+    case removeLastUsedAccountButton
+    case cancelRemoveLastUsedAccountButton
     case deleteButton
     case deviceCellRemoveButton
     case disconnectButton
     case revokedDeviceLoginButton
     case dnsSettingsEditButton
     case infoButton
+    case deviceManagementButton
+    case copyButton
     case learnAboutPrivacyButton
     case logOutDeviceConfirmButton
     case logOutDeviceCancelButton
@@ -38,6 +46,7 @@ public enum AccessibilityIdentifier: Equatable {
     case loginTextFieldButton
     case logoutButton
     case purchaseButton
+    case debugOptionsButton
     case redeemVoucherButton
     case restorePurchasesButton
     case connectButton
@@ -49,7 +58,6 @@ public enum AccessibilityIdentifier: Equatable {
     case problemReportSendButton
     case relayStatusCollapseButton
     case settingsDoneButton
-    case openCustomListsMenuButton
     case addNewCustomListButton
     case editCustomListButton
     case saveCreateCustomListButton
@@ -60,9 +68,21 @@ public enum AccessibilityIdentifier: Equatable {
     case selectLocationFilterButton
     case relayFilterChipCloseButton
     case openPortSelectorMenuButton
+    case cancelPurchaseListButton
+    case selectLocationToolbarMenu
+    case locationListItem(String)
+    case toggleMultihopButton
+    case entryLocationButton
+    case exitLocationButton
+    case recentConnectionsToggleButton
+    case disableRecentConnectionsButton
+    case recentListItem(String)
 
     // Cells
     case deviceCell
+    case accessMethodDirectCell
+    case accessMethodBridgesCell
+    case accessMethodEncryptedDNSCell
     case accessMethodProtocolSelectionCell
     case vpnSettingsCell
     case dnsSettingsAddServerCell
@@ -91,8 +111,17 @@ public enum AccessibilityIdentifier: Equatable {
     case customListLocationCell
     case daitaConfirmAlertBackButton
     case daitaConfirmAlertEnableButton
+    case includeAllNetworksNotificationsAlertEnableButton
+    case includeAllNetworksNotificationsAlertDismissButton
+    case includeAllNetworksNotificationsAlertSystemSettingsButton
+    case includeAllNetworksFeatureAlertEnableButton
+    case includeAllNetworksCell
     case multihopCell
     case daitaCell
+    case daitaFilterPill
+    case obfuscationFilterPill
+    case languageCell
+    case notificationSettingsCell
 
     // Labels
     case accountPageDeviceNameLabel
@@ -117,6 +146,7 @@ public enum AccessibilityIdentifier: Equatable {
     case addLocationsView
     case addAccessMethodTableView
     case apiAccessView
+    case apiAccessListView
     case alertContainerView
     case alertTitle
     case appLogsView
@@ -128,7 +158,6 @@ public enum AccessibilityIdentifier: Equatable {
     case outOfTimeView
     case termsOfServiceView
     case selectLocationView
-    case selectLocationViewWrapper
     case selectLocationTableView
     case settingsTableView
     case vpnSettingsTableView
@@ -137,6 +166,7 @@ public enum AccessibilityIdentifier: Equatable {
     case problemReportSubmittedView
     case revokedDeviceView
     case welcomeView
+    case setUpAccountCompletedView
     case deleteAccountView
     case settingsContainerView
     case newCustomListView
@@ -149,6 +179,11 @@ public enum AccessibilityIdentifier: Equatable {
     case dnsSettingsTableView
     case multihopView
     case daitaView
+    case notificationSettingsView
+    case notificationPromptView
+    case notificationPromptSkipButton
+    case notificationPromptEnableButton
+    case includeAllNetworksView
 
     // Other UI elements
     case accessMethodEnableSwitch
@@ -157,6 +192,7 @@ public enum AccessibilityIdentifier: Equatable {
     case connectionPanelInAddressRow
     case connectionPanelOutAddressRow
     case connectionPanelOutIpv6AddressRow
+    case connectionPanelServerLabel
     case customSwitch
     case customWireGuardPortTextField
     case dnsContentBlockersHeaderView
@@ -172,8 +208,13 @@ public enum AccessibilityIdentifier: Equatable {
     case deleteAccountTextField
     case socks5AuthenticationSwitch
     case statusImageView
+    case deviceRemovalProgressView
+    case settingsInfoView
+    case actionBox
 
     // DNS settings
+    case includeAllNetworks
+    case localNetworkSharing
     case dnsSettings
     case ipOverrides
     case wireGuardCustomPort
@@ -182,6 +223,7 @@ public enum AccessibilityIdentifier: Equatable {
     case wireGuardObfuscationOff
     case wireGuardObfuscationUdpOverTcp
     case wireGuardObfuscationShadowsocks
+    case wireGuardObfuscationQuic
     case wireGuardObfuscationUdpOverTcpPort
     case wireGuardObfuscationShadowsocksPort
     case wireGuardPort(UInt16?)
@@ -205,6 +247,11 @@ public enum AccessibilityIdentifier: Equatable {
     case daitaPromptAlert
     case daitaDirectOnlySwitch
 
+    // IAN
+    case includeAllNetworksSwitch
+    case includeAllNetworksPromptAlert
+    case localNetworkSharingSwitch
+
     // Quantum resistance
     case quantumResistanceAutomatic
     case quantumResistanceOff
@@ -219,6 +266,11 @@ public enum AccessibilityIdentifier: Equatable {
 
     // Error
     case unknown
+
+    // Notification settings
+    case allNotificationSwitch
+    case accountNotificationSwitch
+    case connectionStatusNotificationSwitch
 }
 
 extension AccessibilityIdentifier {
@@ -228,6 +280,7 @@ extension AccessibilityIdentifier {
 }
 
 extension UIAccessibilityIdentification {
+    @MainActor
     func setAccessibilityIdentifier(_ value: AccessibilityIdentifier?) {
         accessibilityIdentifier = value.map(\.asString)
     }

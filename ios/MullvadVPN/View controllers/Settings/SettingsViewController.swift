@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 20/03/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -23,15 +23,13 @@ class SettingsViewController: UITableViewController {
     weak var delegate: SettingsViewControllerDelegate?
     private var dataSource: SettingsDataSource?
     private let interactor: SettingsInteractor
-    private let alertPresenter: AlertPresenter
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
         .lightContent
     }
 
-    init(interactor: SettingsInteractor, alertPresenter: AlertPresenter) {
+    init(interactor: SettingsInteractor) {
         self.interactor = interactor
-        self.alertPresenter = alertPresenter
 
         super.init(style: .grouped)
     }
@@ -43,12 +41,7 @@ class SettingsViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        navigationItem.title = NSLocalizedString(
-            "NAVIGATION_TITLE",
-            tableName: "Settings",
-            value: "Settings",
-            comment: ""
-        )
+        navigationItem.title = NSLocalizedString("Settings", comment: "")
 
         let doneButton = UIBarButtonItem(
             systemItem: .done,
@@ -67,40 +60,24 @@ class SettingsViewController: UITableViewController {
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 60
 
+        interactor.didUpdateSettings = { [weak self] in
+            self?.dataSource?.reload()
+        }
+
         dataSource = SettingsDataSource(tableView: tableView, interactor: interactor)
         dataSource?.delegate = self
+    }
 
-        interactor.didUpdateTunnelSettings = { [weak self] newSettings in
-            self?.dataSource?.reload(from: newSettings)
-        }
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        dataSource?.reload()
     }
 }
 
-extension SettingsViewController: SettingsDataSourceDelegate {
+extension SettingsViewController: @preconcurrency SettingsDataSourceDelegate {
     func didSelectItem(item: SettingsDataSource.Item) {
         guard let route = item.navigationRoute else { return }
         delegate?.settingsViewController(self, didRequestRoutePresentation: route)
-    }
-
-    func showInfo(for item: SettingsInfoButtonItem) {
-        let presentation = AlertPresentation(
-            id: "settings-info-alert",
-            icon: .info,
-            message: item.description,
-            buttons: [
-                AlertAction(
-                    title: NSLocalizedString(
-                        "SETTINGS_INFO_ALERT_OK_ACTION",
-                        tableName: "Settings",
-                        value: "Got it!",
-                        comment: ""
-                    ),
-                    style: .default
-                ),
-            ]
-        )
-
-        alertPresenter.showAlert(presentation: presentation, animated: true)
     }
 }
 
@@ -108,19 +85,25 @@ extension SettingsDataSource.Item {
     var navigationRoute: SettingsNavigationRoute? {
         switch self {
         case .vpnSettings:
-            return .vpnSettings
-        case .version:
-            return nil
+            .vpnSettings
+        case .changelog:
+            .changelog
         case .problemReport:
-            return .problemReport
+            .problemReport
         case .faq:
-            return .faq
+            .faq
         case .apiAccess:
-            return .apiAccess
+            .apiAccess
         case .daita:
-            return .daita
+            .daita
         case .multihop:
-            return .multihop
+            .multihop
+        case .language:
+            .language
+        case .notificationSettings:
+            .notificationSettings
+        case .includeAllNetworks:
+            .includeAllNetworks
         }
     }
 }

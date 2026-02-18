@@ -3,11 +3,12 @@
 //  PacketTunnelCore
 //
 //  Created by pronebird on 27/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadTypes
+import Network
 import WireGuardKitTypes
 
 /**
@@ -20,7 +21,7 @@ import WireGuardKitTypes
 extension PacketTunnelActor {
     /**
      Tell actor to start the tunnel.
-
+    
      - Parameter options: start options.
      */
     nonisolated public func start(options: StartOptions) {
@@ -35,8 +36,15 @@ extension PacketTunnelActor {
     }
 
     /**
-     Tell actor to reconnect the tunnel.
+     Tell actor to update its network reachability.
+     */
+    nonisolated public func updateNetworkReachability(networkPathStatus: NWPath.Status) {
+        eventChannel.send(.networkReachability(networkPathStatus))
+    }
 
+    /**
+     Tell actor to reconnect the tunnel.
+    
      - Parameter nextRelays: next relays to connect to.
      */
     public nonisolated func reconnect(to nextRelays: NextRelays, reconnectReason: ActorReconnectReason) {
@@ -45,7 +53,7 @@ extension PacketTunnelActor {
 
     /**
      Tell actor that key rotation took place.
-
+    
      - Parameter date: date when last key rotation took place.
      */
     nonisolated public func notifyKeyRotation(date: Date?) {

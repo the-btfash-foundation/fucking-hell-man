@@ -3,13 +3,14 @@
 //  PacketTunnelCoreTests
 //
 //  Created by Marco Nikic on 2023-11-21.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
+import Network
+
 @testable import MullvadRustRuntime
 @testable import MullvadTypes
-import Network
 
 struct TunnelObfuscationStub: TunnelObfuscation {
     var transportLayer: TransportLayer { .udp }

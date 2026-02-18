@@ -3,14 +3,15 @@
 //  PacketTunnelCoreTests
 //
 //  Created by pronebird on 05/09/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
-@testable import MullvadSettings
 import MullvadTypes
 import PacketTunnelCore
 import WireGuardKitTypes
+
+@testable import MullvadSettings
 
 /// Settings reader stub that can be configured with a block to provide the desired behavior when testing.
 struct SettingsReaderStub: SettingsReaderProtocol {
@@ -42,7 +43,7 @@ extension SettingsReaderStub {
         }
     }
 
-    static func postQuantumConfiguration() -> SettingsReaderStub {
+    static func noPostQuantumConfiguration() -> SettingsReaderStub {
         let staticSettings = Settings(
             privateKey: PrivateKey(),
             interfaceAddresses: [IPAddressRange(from: "127.0.0.1/32")!],
@@ -50,7 +51,7 @@ extension SettingsReaderStub {
                 relayConstraints: RelayConstraints(),
                 dnsSettings: DNSSettings(),
                 wireGuardObfuscation: WireGuardObfuscationSettings(state: .off),
-                tunnelQuantumResistance: .on,
+                tunnelQuantumResistance: .off,
                 tunnelMultihopState: .off,
                 daita: DAITASettings()
             )

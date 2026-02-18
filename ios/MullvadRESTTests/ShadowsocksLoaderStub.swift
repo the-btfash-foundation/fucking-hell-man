@@ -3,15 +3,20 @@
 //  MullvadRESTTests
 //
 //  Created by Mojgan on 2024-01-08.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
-@testable import MullvadREST
 import MullvadSettings
 import MullvadTypes
 
-struct ShadowsocksLoaderStub: ShadowsocksLoaderProtocol {
+@testable import MullvadREST
+
+struct ShadowsocksLoaderStub: ShadowsocksLoaderProtocol, SwiftShadowsocksBridgeProviding {
+    func bridge() -> ShadowsocksConfiguration? {
+        try? load()
+    }
+
     var configuration: ShadowsocksConfiguration
     var error: Error?
 

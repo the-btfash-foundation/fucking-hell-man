@@ -1,9 +1,8 @@
+#[cfg(target_os = "android")]
+use crate::tun_provider::imp::VpnServiceConfig;
 use cfg_if::cfg_if;
-use ipnetwork::IpNetwork;
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::LazyLock,
-};
+use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 cfg_if! {
     if #[cfg(target_os = "android")] {
@@ -22,6 +21,14 @@ cfg_if! {
 
         pub type Tun = UnixTun;
         pub type TunProvider = UnixTunProvider;
+    } else if #[cfg(all(windows, not(feature = "wireguard-go")))] {
+        #[path = "windows.rs"]
+        mod imp;
+        use self::imp::{WindowsTun, WindowsTunProvider};
+        pub use self::imp::Error;
+
+        pub type Tun = WindowsTun;
+        pub type TunProvider = WindowsTunProvider;
     } else {
         mod stub;
         use self::stub::StubTunProvider;
@@ -37,6 +44,10 @@ pub struct TunConfig {
     /// Interface name to use.
     #[cfg(target_os = "linux")]
     pub name: Option<String>,
+
+    /// Whether to enable the packet_information option on the tun device.
+    #[cfg(target_os = "linux")]
+    pub packet_information: bool,
 
     /// IP addresses for the tunnel interface.
     pub addresses: Vec<IpAddr>,
@@ -62,6 +73,10 @@ pub struct TunConfig {
 
     /// Applications to exclude from the tunnel.
     pub excluded_packages: Vec<String>,
+
+    /// Path to resource directory
+    #[cfg(target_os = "windows")]
+    pub resource_dir: std::path::PathBuf,
 }
 
 impl TunConfig {
@@ -73,34 +88,49 @@ impl TunConfig {
         }
         servers
     }
+
+    /// Routes to configure for the tunnel.
+    #[cfg(target_os = "android")]
+    pub fn real_routes(&self) -> Vec<IpNetwork> {
+        VpnServiceConfig::new(self.clone())
+            .routes
+            .iter()
+            .map(IpNetwork::from)
+            .collect()
+    }
 }
 
 /// Return a tunnel configuration that routes all traffic inside the tunnel.
 ///
 /// Most values except the routes are nonsensical. This is mostly used as a reasonable default on
 /// Android to route all traffic inside the tunnel.
-pub fn blocking_config() -> TunConfig {
+pub fn blocking_config(
+    #[cfg(target_os = "windows")] resource_dir: std::path::PathBuf,
+) -> TunConfig {
     TunConfig {
         #[cfg(target_os = "linux")]
         name: None,
-        addresses: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))],
+        #[cfg(target_os = "linux")]
+        packet_information: false,
+        addresses: vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)),
+        ],
         mtu: 1380,
         ipv4_gateway: Ipv4Addr::new(10, 64, 0, 1),
         ipv6_gateway: None,
-        routes: DEFAULT_ROUTES.clone(),
+        routes: DEFAULT_ROUTES.to_vec(),
         allow_lan: false,
         dns_servers: None,
         excluded_packages: vec![],
+        #[cfg(target_os = "windows")]
+        resource_dir,
     }
 }
 
-static DEFAULT_ROUTES: LazyLock<Vec<IpNetwork>> =
-    LazyLock::new(|| vec![*IPV4_DEFAULT_ROUTE, *IPV6_DEFAULT_ROUTE]);
-static IPV4_DEFAULT_ROUTE: LazyLock<IpNetwork> = LazyLock::new(|| {
-    IpNetwork::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
-        .expect("Invalid IP network prefix for IPv4 address")
-});
-static IPV6_DEFAULT_ROUTE: LazyLock<IpNetwork> = LazyLock::new(|| {
-    IpNetwork::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
-        .expect("Invalid IP network prefix for IPv6 address")
-});
+const DEFAULT_ROUTES: [IpNetwork; 2] = [
+    IpNetwork::V4(IPV4_DEFAULT_ROUTE),
+    IpNetwork::V6(IPV6_DEFAULT_ROUTE),
+];
+const IPV4_DEFAULT_ROUTE: Ipv4Network = Ipv4Network::new_checked(Ipv4Addr::UNSPECIFIED, 0).unwrap();
+const IPV6_DEFAULT_ROUTE: Ipv6Network = Ipv6Network::new_checked(Ipv6Addr::UNSPECIFIED, 0).unwrap();

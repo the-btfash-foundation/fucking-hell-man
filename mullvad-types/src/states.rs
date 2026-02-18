@@ -3,7 +3,7 @@ use either::Either;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use talpid_types::{
-    net::{TunnelEndpoint, TunnelType},
+    net::TunnelEndpoint,
     tunnel::{ActionAfterDisconnect, ErrorState},
 };
 
@@ -116,12 +116,13 @@ impl TunnelState {
         }
     }
 
-    /// Returns the tunnel type for an active connection.
-    /// This value exists in the connecting and connected states.
-    pub const fn get_tunnel_type(&self) -> Option<TunnelType> {
-        match self.endpoint() {
-            Some(endpoint) => Some(endpoint.tunnel_type),
-            None => None,
+    /// Returns the geolocation of the tunnel if it exists.
+    pub fn get_location(&self) -> Option<&GeoIpLocation> {
+        match self {
+            TunnelState::Connected { location, .. }
+            | TunnelState::Connecting { location, .. }
+            | TunnelState::Disconnected { location, .. } => location.as_ref(),
+            _ => None,
         }
     }
 }

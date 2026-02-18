@@ -1,8 +1,7 @@
 import { TunnelState } from '../../../shared/daemon-rpc-types';
 import { Flex, HeaderProps, Logo, LogoProps, MainHeader } from '../../lib/components';
-import { Spacings } from '../../lib/foundations';
 import { useSelector } from '../../redux/store';
-import { FocusFallback } from '../Focus';
+import { InitialFocus } from '../initial-focus';
 import {
   AppMainHeaderBarAccountButton,
   AppMainHeaderDeviceInfo,
@@ -35,16 +34,16 @@ const AppMainHeader = ({
 
   return (
     <MainHeader variant={variant} size={size} {...props}>
-      <Flex $justifyContent="space-between">
-        <FocusFallback>
+      <Flex justifyContent="space-between">
+        <InitialFocus>
           {logoVariant !== 'none' ? <Logo variant={logoVariant} /> : <div />}
-        </FocusFallback>
-        <Flex $gap={Spacings.spacing5} $alignItems="center">
+        </InitialFocus>
+        <Flex gap="medium" alignItems="center">
           {children}
         </Flex>
       </Flex>
       {size == '2' && (
-        <Flex $alignItems="flex-end">
+        <Flex alignItems="flex-end">
           <AppMainHeaderDeviceInfo />
         </Flex>
       )}

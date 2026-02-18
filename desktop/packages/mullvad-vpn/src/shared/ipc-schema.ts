@@ -1,16 +1,18 @@
 import { GetTextTranslations } from 'gettext-parser';
 
+import { MapData } from '../renderer/lib/3dmap';
+import { AppUpgradeError, AppUpgradeEvent } from './app-upgrade';
 import { ILinuxSplitTunnelingApplication, ISplitTunnelingApplication } from './application-types';
 import {
+  AccessMethodExistsError,
   AccessMethodSetting,
   AccountDataError,
   AccountNumber,
-  BridgeSettings,
-  BridgeState,
   CustomListError,
   CustomProxy,
   DeviceEvent,
   DeviceState,
+  DisconnectSource,
   IAccountData,
   IAppVersionInfo,
   ICustomList,
@@ -19,27 +21,30 @@ import {
   IDnsOptions,
   IRelayListWithEndpointData,
   ISettings,
+  LogoutSource,
   NewAccessMethodSetting,
+  NewCustomList,
   ObfuscationSettings,
   RelaySettings,
   TunnelState,
   VoucherResponse,
 } from './daemon-rpc-types';
 import { IGuiSettingsState } from './gui-settings-state';
-import { LogLevel } from './logging-types';
-
-interface ILogEntry {
-  level: LogLevel;
-  message: string;
-}
-import { MapData } from '../renderer/lib/3dmap';
 import { invoke, invokeSync, notifyRenderer, send } from './ipc-helpers';
 import {
+  DaemonStatus,
   IChangelog,
   ICurrentAppVersionInfo,
   IHistoryObject,
   IWindowShapeParameters,
 } from './ipc-types';
+import { LogLevel } from './logging-types';
+import { RoutePath } from './routes';
+
+interface ILogEntry {
+  level: LogLevel;
+  message: string;
+}
 
 export interface ITranslations {
   locale: string;
@@ -77,6 +82,8 @@ export interface IAppStateSnapshot {
   currentApiAccessMethod?: AccessMethodSetting;
   isMacOs13OrNewer: boolean;
 }
+
+export type IpcSchema = typeof ipcSchema;
 
 // The different types of requests are:
 // * send<ArgumentType>(), which is used for one-way communication from the renderer process to the
@@ -140,12 +147,14 @@ export const ipcSchema = {
     connected: notifyRenderer<void>(),
     disconnected: notifyRenderer<void>(),
     prepareRestart: send<boolean>(),
+    tryStart: send<void>(),
+    tryStartEvent: notifyRenderer<DaemonStatus>(),
   },
   relays: {
     '': notifyRenderer<IRelayListWithEndpointData>(),
   },
   customLists: {
-    createCustomList: invoke<string, void | CustomListError>(),
+    createCustomList: invoke<NewCustomList, void | CustomListError>(),
     deleteCustomList: invoke<string, void>(),
     updateCustomList: invoke<ICustomList, void | CustomListError>(),
   },
@@ -155,19 +164,27 @@ export const ipcSchema = {
   },
   upgradeVersion: {
     '': notifyRenderer<IAppVersionInfo>(),
+    dismissedUpgrade: send<string>(),
   },
   app: {
-    quit: send<void>(),
+    quit: send<DisconnectSource>(),
     openUrl: invoke<string, void>(),
+    openRoute: notifyRenderer<RoutePath>(),
     showOpenDialog: invoke<Electron.OpenDialogOptions, Electron.OpenDialogReturnValue>(),
     showLaunchDaemonSettings: invoke<void, void>(),
     showFullDiskAccessSettings: invoke<void, void>(),
     getPathBaseName: invoke<string, string>(),
+    upgrade: send<void>(),
+    upgradeAbort: send<void>(),
+    upgradeEvent: notifyRenderer<AppUpgradeEvent>(),
+    upgradeError: notifyRenderer<AppUpgradeError>(),
+    upgradeInstallerStart: send<string>(),
+    getUpgradeCacheDir: invoke<void, string>(),
   },
   tunnel: {
     '': notifyRenderer<TunnelState>(),
     connect: invoke<void, void>(),
-    disconnect: invoke<void, void>(),
+    disconnect: invoke<DisconnectSource, void>(),
     reconnect: invoke<void, void>(),
   },
   settings: {
@@ -178,17 +195,14 @@ export const ipcSchema = {
     setAllowLan: invoke<boolean, void>(),
     setShowBetaReleases: invoke<boolean, void>(),
     setEnableIpv6: invoke<boolean, void>(),
-    setBlockWhenDisconnected: invoke<boolean, void>(),
-    setBridgeState: invoke<BridgeState, void>(),
-    setOpenVpnMssfix: invoke<number | undefined, void>(),
+    setLockdownMode: invoke<boolean, void>(),
     setWireguardMtu: invoke<number | undefined, void>(),
-    setWireguardQuantumResistant: invoke<boolean | undefined, void>(),
+    setWireguardQuantumResistant: invoke<boolean, void>(),
     setRelaySettings: invoke<RelaySettings, void>(),
-    updateBridgeSettings: invoke<BridgeSettings, void>(),
     setDnsOptions: invoke<IDnsOptions, void>(),
     setObfuscationSettings: invoke<ObfuscationSettings, void>(),
-    addApiAccessMethod: invoke<NewAccessMethodSetting, string>(),
-    updateApiAccessMethod: invoke<AccessMethodSetting, void>(),
+    addApiAccessMethod: invoke<NewAccessMethodSetting, string | AccessMethodExistsError>(),
+    updateApiAccessMethod: invoke<AccessMethodSetting, void | AccessMethodExistsError>(),
     removeApiAccessMethod: invoke<string, void>(),
     setApiAccessMethod: invoke<string, void>(),
     testApiAccessMethodById: invoke<string, boolean>(),
@@ -213,7 +227,7 @@ export const ipcSchema = {
     devices: notifyRenderer<Array<IDevice>>(),
     create: invoke<void, string>(),
     login: invoke<AccountNumber, AccountDataError | undefined>(),
-    logout: invoke<void, void>(),
+    logout: invoke<LogoutSource, void>(),
     getWwwAuthToken: invoke<void, string>(),
     submitVoucher: invoke<string, VoucherResponse>(),
     updateData: send<void>(),
@@ -253,5 +267,7 @@ export const ipcSchema = {
     addApplication: invoke<ISplitTunnelingApplication | string, void>(),
     removeApplication: invoke<ISplitTunnelingApplication, void>(),
     forgetManuallyAddedApplication: invoke<ISplitTunnelingApplication, void>(),
+    getSupported: invoke<void, boolean>(),
+    isSupported: notifyRenderer<boolean>(),
   },
 };

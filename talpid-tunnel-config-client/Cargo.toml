@@ -1,47 +1,44 @@
 [package]
 name = "talpid-tunnel-config-client"
-description = "Uses the relay RPC service to set up PQ-safe peers, etc."
-authors.workspace = true
-repository.workspace = true
-license.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Uses the relay RPC service to set up PQ-safe peers, etc."
+repository.workspace = true
+license.workspace = true
 
-[lints]
-workspace = true
+[lib]
+crate-type = ["rlib", "staticlib"]
 
 [dependencies]
+# TODO: When upstream fix to gotatun for enabling the daita feature without
+# requiring the device feature as well has been released, remove the `device` feature.
+# https://github.com/mullvad/gotatun/pull/73
+gotatun = { workspace = true, features = ["daita", "device"] }
+hyper-util = { workspace = true }
 log = { workspace = true }
+ml-kem = { version = "0.2.1", features = ["zeroize"] }
+# This is a wrapper to the C implementation of HQC in PQClean.
+# Keep eyes open for alternatives, preferably pure Rust implementations.
+pqcrypto-hqc = { version = "0.2.1", default-features = false }
+pqcrypto-traits = "0.3.5"
+prost = { workspace = true }
+# Upgrading to rand 0.9 is blocked on ml-kem dropping their dependency on rand_core 0.6 (as of ml-kem 0.21)
 rand = "0.8"
+sha2 = { workspace = true }
 talpid-types = { path = "../talpid-types" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tonic = { workspace = true }
 tower = { workspace = true }
-prost = { workspace = true }
-hyper-util = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-classic-mceliece-rust = { version = "2.0.0", features = [
-    "mceliece460896f",
-    "zeroize",
-] }
-
-ml-kem = { version = "0.2.1", features = ["zeroize"] }
-zeroize = "1.5.7"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies.windows-sys]
-workspace = true
-features = ["Win32_Networking_WinSock"]
+zeroize = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true, default-features = false, features = [
-    "transport",
-    "prost",
+  "prost",
+  "transport",
 ] }
 
-[target.'cfg(target_os = "ios")'.dependencies]
-oslog = "0.2"
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["socket"] }
 
-[lib]
-crate-type = ["staticlib", "rlib"]
+[lints]
+workspace = true

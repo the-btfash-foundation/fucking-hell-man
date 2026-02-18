@@ -4,16 +4,25 @@
             "AccountTests",
             "ConnectivityTests",
             "CustomListsTests",
+            "LeakTests",
             "RelayTests",
-            "SettingsTests"
+            "SettingsTests",
+            "PaymentTests"
         ],
         "pr-merge-to-main": [
             "AccountTests/testLogin",
-            "AccountTests/testCreateAccount"
+            "AccountTests/testCreateAccount",
+            "RelayTests",
+            "PaymentTests"
         ],
         "api-tests": [
             "AccountTests"
+        ],
+        "pr-opened": [
+            "AccountTests/testLogin",
+            "AccountTests/testCreateAccount",
+            "RelayTests",
+            "PaymentTests"
         ]
     }
 }
-

@@ -3,23 +3,24 @@
 //  MullvadVPNTests
 //
 //  Created by pronebird on 30/05/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadMockData
 import MullvadREST
 import MullvadSettings
 import MullvadTypes
 import Operations
 import PacketTunnelCore
-import WireGuardKitTypes
+@preconcurrency import WireGuardKitTypes
 import XCTest
+
+@testable import MullvadMockData
 
 class DeviceCheckOperationTests: XCTestCase {
     private let operationQueue = AsyncOperationQueue()
     private let dispatchQueue = DispatchQueue(label: "TestQueue")
 
-    func testShouldReportExpiredAccount() {
+    func testShouldReportExpiredAccount() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -45,10 +46,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldNotRotateKeyForInvalidAccount() {
+    func testShouldNotRotateKeyForInvalidAccount() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -76,10 +77,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldNotRotateKeyForRevokedDevice() {
+    func testShouldNotRotateKeyForRevokedDevice() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -107,10 +108,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldRotateKeyOnMismatchImmediately() {
+    func testShouldRotateKeyOnMismatchImmediately() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -136,10 +137,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldRespectCooldownWhenAttemptingToRotateImmediately() {
+    func testShouldRespectCooldownWhenAttemptingToRotateImmediately() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -165,10 +166,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldNotRotateDeviceKeyWhenServerKeyIsIdentical() {
+    func testShouldNotRotateDeviceKeyWhenServerKeyIsIdentical() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -188,10 +189,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldNotRotateKeyBeforeRetryIntervalPassed() {
+    func testShouldNotRotateKeyBeforeRetryIntervalPassed() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -213,10 +214,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldRotateKeyOnceInTwentyFourHours() {
+    func testShouldRotateKeyOnceInTwentyFourHours() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -238,10 +239,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldReportFailedKeyRotationAttempt() {
+    func testShouldReportFailedKeyRotationAttempt() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -268,10 +269,10 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
-    func testShouldFailOnKeyRotationRace() {
+    func testShouldFailOnKeyRotationRace() async {
         let expect = expectation(description: "Wait for operation to complete")
 
         let currentKey = PrivateKey()
@@ -305,7 +306,7 @@ class DeviceCheckOperationTests: XCTestCase {
             expect.fulfill()
         }
 
-        waitForExpectations(timeout: .UnitTest.timeout)
+        await fulfillment(of: [expect], timeout: .UnitTest.timeout)
     }
 
     private func startDeviceCheck(
@@ -327,7 +328,7 @@ class DeviceCheckOperationTests: XCTestCase {
 }
 
 /// Mock implementation of a remote service used by `DeviceCheckOperation` to reach the API.
-private class MockRemoteService: DeviceCheckRemoteServiceProtocol {
+private class MockRemoteService: DeviceCheckRemoteServiceProtocol, @unchecked Sendable {
     typealias AccountDataHandler = (_ accountNumber: String) throws -> Account
     typealias DeviceDataHandler = (_ accountNumber: String, _ deviceIdentifier: String) throws -> Device
     typealias RotateDeviceKeyHandler = (
@@ -356,7 +357,7 @@ private class MockRemoteService: DeviceCheckRemoteServiceProtocol {
 
     func getAccountData(
         accountNumber: String,
-        completion: @escaping (Result<Account, Error>) -> Void
+        completion: @escaping @Sendable (Result<Account, Error>) -> Void
     ) -> Cancellable {
         DispatchQueue.main.async { [self] in
             let result: Result<Account, Error> = Result {
@@ -374,7 +375,7 @@ private class MockRemoteService: DeviceCheckRemoteServiceProtocol {
     func getDevice(
         accountNumber: String,
         identifier: String,
-        completion: @escaping (Result<Device, Error>) -> Void
+        completion: @escaping @Sendable (Result<Device, Error>) -> Void
     ) -> Cancellable {
         DispatchQueue.main.async { [self] in
             let result: Result<Device, Error> = Result {
@@ -395,7 +396,7 @@ private class MockRemoteService: DeviceCheckRemoteServiceProtocol {
         accountNumber: String,
         identifier: String,
         publicKey: PublicKey,
-        completion: @escaping (Result<Device, Error>) -> Void
+        completion: @escaping @Sendable (Result<Device, Error>) -> Void
     ) -> Cancellable {
         DispatchQueue.main.async { [self] in
             let result: Result<Device, Error> = Result {
@@ -473,10 +474,12 @@ private enum LastKeyRotationState {
 
 extension MockDeviceStateAccessor {
     static func mockLoggedIn(currentKey: PrivateKey, rotationState: LastKeyRotationState) -> MockDeviceStateAccessor {
-        MockDeviceStateAccessor(initialState: .loggedIn(
-            StoredAccountData.mock(),
-            StoredDeviceData.mock(wgKeyData: StoredWgKeyData.mock(currentKey: currentKey, rotationState: rotationState))
-        ))
+        MockDeviceStateAccessor(
+            initialState: .loggedIn(
+                StoredAccountData.mock(),
+                StoredDeviceData.mock(
+                    wgKeyData: StoredWgKeyData.mock(currentKey: currentKey, rotationState: rotationState))
+            ))
     }
 }
 
@@ -546,5 +549,4 @@ private extension AccountVerdict {
         return false
     }
 
-    // swiftlint:disable:next file_length
 }

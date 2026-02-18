@@ -3,57 +3,47 @@
 //! Note: It is important not to connect to the shadowsocks endpoint right away. The remote socket
 //! must be protected in `VpnService` so that the socket is not routed through the tunnel.
 
+use crate::socket::create_remote_socket;
+
 use super::Obfuscator;
 use async_trait::async_trait;
-#[cfg(target_os = "linux")]
-use nix::sys::socket::{setsockopt, sockopt};
 use shadowsocks::{
-    config::{ServerConfig, ServerType},
+    ProxySocket,
+    config::{ServerConfig, ServerConfigError, ServerType},
     context::Context,
     crypto::CipherKind,
     relay::{
-        udprelay::proxy_socket::{ProxySocketError, UdpSocketType},
         Address,
+        udprelay::proxy_socket::{ProxySocketError, UdpSocketType},
     },
-    ProxySocket,
 };
-#[cfg(any(target_os = "android", target_os = "linux"))]
-use std::os::fd::AsRawFd;
 use std::{io, net::SocketAddr, sync::Arc};
 use tokio::{net::UdpSocket, sync::oneshot};
+
+#[cfg(target_os = "android")]
+use std::os::fd::AsRawFd;
 
 const SHADOWSOCKS_CIPHER: CipherKind = CipherKind::AES_256_GCM;
 const SHADOWSOCKS_PASSWORD: &str = "mullvad";
 
 type Result<T> = std::result::Result<T, Error>;
 
+type ShadowSocket = ProxySocket<shadowsocks::net::UdpSocket>;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Failed to bind local UDP socket
     #[error("Failed to bind UDP socket")]
     BindUdp(#[source] io::Error),
-    /// Failed to bind remote UDP socket
-    #[error("Failed to bind remote UDP socket")]
-    BindRemoteUdp(#[source] io::Error),
-    /// Failed to set fwmark
-    #[cfg(target_os = "linux")]
-    #[error("Failed to set fwmark")]
-    SetFwmark(#[source] nix::Error),
     /// Missing UDP listener address
     #[error("Failed to retrieve UDP socket bind address")]
     GetUdpLocalAddress(#[source] io::Error),
     /// Failed to wait for UDP client
     #[error("Failed to wait for UDP client")]
     WaitForUdpClient(#[source] io::Error),
-    /// Failed to create UDP stream
-    #[error("Failed to create UDP stream")]
-    CreateUdpStream(#[source] io::Error),
-    /// Failed to connect to Shadowsocks endpoint
-    #[error("Failed to connect to Shadowsocks endpoint")]
-    ConnectShadowsocks(#[from] io::Error),
-    /// Failed to receive remote socket descriptor
-    #[error("Failed to receive remote socket descriptor")]
-    ReceiveRemoteFd,
+    /// Server config error
+    #[error("Server config error")]
+    ServerConfig(#[from] ServerConfigError),
 }
 
 pub struct Shadowsocks {
@@ -66,7 +56,7 @@ pub struct Shadowsocks {
     outbound_fd: i32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Settings {
     /// Remote Shadowsocks endpoint
     pub shadowsocks_endpoint: SocketAddr,
@@ -77,13 +67,15 @@ pub struct Settings {
 }
 
 impl Shadowsocks {
-    pub(crate) async fn new(settings: &Settings) -> Result<Self> {
+    pub(crate) async fn new(settings: &Settings) -> crate::Result<Self> {
         let (local_udp_socket, udp_client_addr) =
-            create_local_udp_socket(settings.shadowsocks_endpoint.is_ipv4()).await?;
+            create_local_udp_socket(settings.shadowsocks_endpoint.is_ipv4())
+                .await
+                .map_err(crate::Error::CreateShadowsocksObfuscator)?;
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-        let remote_socket = create_shadowsocks_socket(
+        let remote_socket = create_remote_socket(
             settings.shadowsocks_endpoint.is_ipv4(),
             #[cfg(target_os = "linux")]
             settings.fwmark,
@@ -123,7 +115,7 @@ async fn run_forwarding(
         .await
         .map_err(Error::WaitForUdpClient)?;
 
-    let shadowsocks = connect_shadowsocks(remote_socket, shadowsocks_endpoint);
+    let shadowsocks = connect_shadowsocks(remote_socket, shadowsocks_endpoint)?;
     let shadowsocks = Arc::new(shadowsocks);
 
     let local_udp = Arc::new(local_udp_socket);
@@ -157,33 +149,23 @@ async fn run_forwarding(
     Ok(())
 }
 
-fn connect_shadowsocks(remote_socket: UdpSocket, shadowsocks_endpoint: SocketAddr) -> ProxySocket {
+fn connect_shadowsocks(
+    remote_socket: UdpSocket,
+    shadowsocks_endpoint: SocketAddr,
+) -> Result<ShadowSocket> {
     let ss_context = Context::new_shared(ServerType::Local);
-    let ss_config: ServerConfig = ServerConfig::new(
+    let ss_config = ServerConfig::new(
         shadowsocks_endpoint,
         SHADOWSOCKS_PASSWORD,
         SHADOWSOCKS_CIPHER,
+    )?;
+    let socket = ProxySocket::from_socket(
+        UdpSocketType::Client,
+        ss_context,
+        &ss_config,
+        // wrap the tokio socket
+        shadowsocks::net::UdpSocket::from(remote_socket),
     );
-    ProxySocket::from_socket(UdpSocketType::Client, ss_context, &ss_config, remote_socket)
-}
-
-async fn create_shadowsocks_socket(
-    ipv4: bool,
-    #[cfg(target_os = "linux")] fwmark: Option<u32>,
-) -> std::result::Result<UdpSocket, Error> {
-    let random_bind_addr = if ipv4 {
-        SocketAddr::new("0.0.0.0".parse().unwrap(), 0)
-    } else {
-        SocketAddr::new("::".parse().unwrap(), 0)
-    };
-    let socket = UdpSocket::bind(random_bind_addr)
-        .await
-        .map_err(Error::BindRemoteUdp)?;
-    #[cfg(target_os = "linux")]
-    if let Some(fwmark) = fwmark {
-        setsockopt(socket.as_raw_fd(), sockopt::Mark, &fwmark).map_err(Error::SetFwmark)?;
-    }
-
     Ok(socket)
 }
 
@@ -213,7 +195,7 @@ async fn wait_for_local_udp_client(udp_listener: &UdpSocket) -> io::Result<()> {
 }
 
 async fn handle_outgoing(
-    ss_write: Arc<ProxySocket>,
+    ss_write: Arc<ShadowSocket>,
     local_udp_read: Arc<UdpSocket>,
     ss_addr: SocketAddr,
     wg_addr: Address,
@@ -243,7 +225,7 @@ async fn handle_outgoing(
 }
 
 async fn handle_incoming(
-    ss_read: Arc<ProxySocket>,
+    ss_read: Arc<ShadowSocket>,
     local_udp_write: Arc<UdpSocket>,
     ss_addr: SocketAddr,
     wg_addr: Address,

@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-11-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
@@ -19,12 +19,7 @@ struct SettingsMultihopView<ViewModel>: View where ViewModel: TunnelSettingsObse
 
                 SwitchRowView(
                     isOn: $tunnelViewModel.value.isEnabled,
-                    text: NSLocalizedString(
-                        "SETTINGS_SWITCH_MULTIHOP",
-                        tableName: "Settings",
-                        value: "Enable",
-                        comment: ""
-                    ),
+                    text: NSLocalizedString("Enable", comment: ""),
                     accessibilityId: .multihopSwitch
                 )
                 .padding(.leading, UIMetrics.contentInsets.left)
@@ -44,16 +39,14 @@ extension SettingsMultihopView {
             pages: [
                 SettingsInfoViewModelPage(
                     body: NSLocalizedString(
-                        "SETTINGS_INFO_MULTIHOP",
-                        tableName: "Settings",
-                        value: """
+                        """
                         Multihop routes your traffic into one WireGuard server and out another, making it \
                         harder to trace. This results in increased latency but increases anonymity online.
                         """,
                         comment: ""
                     ),
                     image: .multihopIllustration
-                ),
+                )
             ]
         )
     }

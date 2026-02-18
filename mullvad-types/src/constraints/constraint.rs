@@ -51,6 +51,7 @@ impl<T: Default> Constraint<T> {
 }
 
 impl<T> Constraint<T> {
+    #[track_caller]
     pub fn unwrap(self) -> T {
         match self {
             Constraint::Any => panic!("called `Constraint::unwrap()` on an `Any` value"),
@@ -134,7 +135,7 @@ impl<T: PartialEq> Constraint<T> {
 }
 
 // Using the default attribute fails on Android
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl<T> Default for Constraint<T> {
     fn default() -> Self {
         Constraint::Any

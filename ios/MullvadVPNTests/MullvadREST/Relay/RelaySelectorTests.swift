@@ -3,29 +3,31 @@
 //  RelaySelectorTests
 //
 //  Created by pronebird on 07/11/2019.
-//  Copyright © 2019 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
+
+import CoreLocation
+import MullvadMockData
+import MullvadTypes
+import Network
+import XCTest
 
 @testable import MullvadREST
 @testable import MullvadSettings
-import MullvadTypes
-import Network
 @testable import WireGuardKitTypes
-import XCTest
 
 private let portRanges: [[UInt16]] = [[4000, 4001], [5000, 5001]]
-private let defaultPort: UInt16 = 443
 
 class RelaySelectorTests: XCTestCase {
     let sampleRelays = ServerRelaysResponseStubs.sampleRelays
 
     func testCountryConstraint() throws {
         let constraints = RelayConstraints(
-            exitLocations: .only(UserSelectedRelays(locations: [.country("es")]))
+            exitLocations: .only(UserSelectedRelays(locations: [.country("jp")]))
         )
 
         let result = try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 0)
-        XCTAssertEqual(result.relay.hostname, "es1-wireguard")
+        XCTAssertEqual(result.relay.hostname, "jp1-wireguard")
     }
 
     func testCityConstraint() throws {
@@ -48,23 +50,23 @@ class RelaySelectorTests: XCTestCase {
 
     func testMultipleLocationsConstraint() throws {
         let constraints = RelayConstraints(
-            exitLocations: .only(UserSelectedRelays(locations: [
-                .city("se", "got"),
-                .hostname("se", "sto", "se6-wireguard"),
-            ]))
+            exitLocations: .only(
+                UserSelectedRelays(locations: [
+                    .city("se", "got"),
+                    .hostname("se", "sto", "se6-wireguard"),
+                ]))
         )
 
         let relayWithLocations = sampleRelays.wireguard.relays.map {
-            let location = sampleRelays.locations[$0.location]!
-            let locationComponents = $0.location.split(separator: "-")
+            let location = sampleRelays.locations[$0.location.rawValue]!
 
             return RelayWithLocation(
                 relay: $0,
                 serverLocation: Location(
                     country: location.country,
-                    countryCode: String(locationComponents[0]),
+                    countryCode: String($0.location.country),
                     city: location.city,
-                    cityCode: String(locationComponents[1]),
+                    cityCode: String($0.location.city),
                     latitude: location.latitude,
                     longitude: location.longitude
                 )
@@ -114,31 +116,19 @@ class RelaySelectorTests: XCTestCase {
         XCTAssertEqual(result.endpoint.ipv4Relay.port, 1)
     }
 
-    func testRandomPortSelectionWithFailedAttempts() throws {
+    func testRandomPortSelection() throws {
         let constraints = RelayConstraints(
             exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "sto", "se6-wireguard")]))
         )
         let allPorts = portRanges.flatMap { $0 }
 
-        var result = try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 0)
-        XCTAssertTrue(allPorts.contains(result.endpoint.ipv4Relay.port))
-
-        result = try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 1)
-        XCTAssertEqual(result.endpoint.ipv4Relay.port, defaultPort)
-
-        result = try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 2)
-        XCTAssertTrue(allPorts.contains(result.endpoint.ipv4Relay.port))
-
-        result = try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 3)
-        XCTAssertEqual(result.endpoint.ipv4Relay.port, defaultPort)
-
-        result = try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 4)
+        let result = try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 0)
         XCTAssertTrue(allPorts.contains(result.endpoint.ipv4Relay.port))
     }
 
     func testClosestRelay() throws {
         let relayWithLocations = try sampleRelays.wireguard.relays.map {
-            let serverLocation = try XCTUnwrap(sampleRelays.locations[$0.location])
+            let serverLocation = try XCTUnwrap(sampleRelays.locations[$0.location.rawValue])
             let location = Location(
                 country: serverLocation.country,
                 countryCode: serverLocation.country,
@@ -151,22 +141,14 @@ class RelaySelectorTests: XCTestCase {
             return RelayWithLocation(relay: $0, serverLocation: location)
         }
 
-        let sampleLocation = try XCTUnwrap(sampleRelays.locations["se-got"])
-        let location = Location(
-            country: "Sweden",
-            countryCode: sampleLocation.country,
-            city: "Gothenburg",
-            cityCode: sampleLocation.city,
-            latitude: sampleLocation.latitude,
-            longitude: sampleLocation.longitude
-        )
-
-        let selectedRelay = RelaySelector.WireGuard.closestRelay(
-            to: location,
+        let sampleLocation = try XCTUnwrap(sampleRelays.locations["es-mad"])
+        let selectedRelay = RelaySelector.randomCloseRelay(
+            to: CLLocationCoordinate2D(latitude: sampleLocation.latitude, longitude: sampleLocation.longitude),
             using: relayWithLocations
         )
 
-        XCTAssertEqual(selectedRelay?.hostname, "se10-wireguard")
+        // One of the five relays in Madrid is the closest.
+        XCTAssertEqual(selectedRelay?.location, "es-mad")
     }
 
     func testClosestShadowsocksRelay() throws {
@@ -174,29 +156,13 @@ class RelaySelectorTests: XCTestCase {
             exitLocations: .only(UserSelectedRelays(locations: [.city("se", "sto")]))
         )
 
-        let selectedRelay = RelaySelector.Shadowsocks.closestRelay(
+        let selectedRelay = RelaySelector.Shadowsocks.closestBridge(
             location: constraints.exitLocations,
-            port: constraints.port,
-            filter: constraints.filter,
             in: sampleRelays
         )
 
-        XCTAssertEqual(selectedRelay?.hostname, "se-sto-br-001")
-    }
-
-    func testClosestShadowsocksRelayIsRandomWhenNoContraintsAreSatisfied() throws {
-        let constraints = RelayConstraints(
-            exitLocations: .only(UserSelectedRelays(locations: [.country("INVALID COUNTRY")]))
-        )
-
-        let selectedRelay = try XCTUnwrap(RelaySelector.Shadowsocks.closestRelay(
-            location: constraints.exitLocations,
-            port: constraints.port,
-            filter: constraints.filter,
-            in: sampleRelays
-        ))
-
-        XCTAssertTrue(sampleRelays.bridge.relays.contains(selectedRelay))
+        // One of the five relays in Stockholm is the closest.
+        XCTAssertEqual(selectedRelay?.location, "se-sto")
     }
 
     func testRelayFilterConstraintWithOwnedOwnership() throws {
@@ -215,14 +181,12 @@ class RelaySelectorTests: XCTestCase {
         let filter = RelayFilter(ownership: .rented, providers: .any)
 
         let constraints = RelayConstraints(
-            exitLocations: .only(UserSelectedRelays(locations: [.hostname("se", "sto", "se6-wireguard")])),
+            exitLocations: .only(UserSelectedRelays(locations: [.hostname("es", "mad", "es1-wireguard")])),
             filter: .only(filter)
         )
 
-        XCTAssertThrowsError(try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 0)) { error in
-            let error = error as? NoRelaysSatisfyingConstraintsError
-            XCTAssertEqual(error?.reason, .filterConstraintNotMatching)
-        }
+        let result = try pickRelay(by: constraints, in: sampleRelays, failedAttemptCount: 0)
+        XCTAssertNotEqual(result.relay.owned, true)
     }
 
     func testRelayFilterConstraintWithCorrectProvider() throws {
@@ -239,7 +203,7 @@ class RelaySelectorTests: XCTestCase {
     }
 
     func testRelayFilterConstraintWithIncorrectProvider() throws {
-        let provider = "DataPacket"
+        let provider = ""
         let filter = RelayFilter(ownership: .any, providers: .only([provider]))
 
         let constraints = RelayConstraints(
@@ -286,6 +250,43 @@ class RelaySelectorTests: XCTestCase {
             XCTAssertEqual(error?.reason, .noActiveRelaysFound)
         }
     }
+
+    func testInactiveRelaysExcludedByDefault() throws {
+        let candidates = try RelaySelector.WireGuard.findCandidates(
+            by: .any,
+            in: sampleRelays,
+            filterConstraint: .any,
+            daitaEnabled: false
+        )
+
+        XCTAssertFalse(candidates.contains { $0.relay.hostname == "us-nyc-wg-302" })
+    }
+
+    func testInactiveRelaysIncludedWhenRequested() throws {
+        let candidates = try RelaySelector.WireGuard.findCandidates(
+            by: .any,
+            in: sampleRelays,
+            filterConstraint: .any,
+            daitaEnabled: false,
+            includeInactive: true
+        )
+
+        XCTAssertTrue(candidates.contains { $0.relay.hostname == "us-nyc-wg-302" })
+        XCTAssertFalse(candidates.first { $0.relay.hostname == "us-nyc-wg-302" }!.relay.active)
+    }
+
+    func testInactiveRelaysIncludedInAllInactiveSet() throws {
+        let candidates = try RelaySelector.WireGuard.findCandidates(
+            by: .any,
+            in: sampleRelaysNoActive,
+            filterConstraint: .any,
+            daitaEnabled: false,
+            includeInactive: true
+        )
+
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertFalse(candidates[0].relay.active)
+    }
 }
 
 extension RelaySelectorTests {
@@ -320,7 +321,7 @@ extension RelaySelectorTests {
                     city: "Madrid",
                     latitude: 40.408566,
                     longitude: -3.69222
-                ),
+                )
             ],
             wireguard: REST.ServerWireguardTunnels(
                 ipv4Gateway: .loopback,
@@ -339,8 +340,9 @@ extension RelaySelectorTests {
                         publicKey: PrivateKey().publicKey.rawValue,
                         includeInCountry: true,
                         daita: true,
-                        shadowsocksExtraAddrIn: nil
-                    ),
+                        shadowsocksExtraAddrIn: nil,
+                        features: nil
+                    )
                 ],
                 shadowsocksPortRanges: []
             ),

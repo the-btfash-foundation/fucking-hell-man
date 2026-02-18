@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 09/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -11,7 +11,7 @@ import UIKit
 /// Content configuration presenting a label and switch control.
 struct SwitchCellContentConfiguration: UIContentConfiguration, Equatable {
     struct TextProperties: Equatable {
-        var font = UIFont.systemFont(ofSize: 17)
+        var font = UIFont.mullvadSmall
         var color = UIColor.Cell.titleTextColor
     }
 
@@ -30,7 +30,10 @@ struct SwitchCellContentConfiguration: UIContentConfiguration, Equatable {
     var textProperties = TextProperties()
 
     /// Content view layout margins.
-    var directionalLayoutMargins: NSDirectionalEdgeInsets = UIMetrics.SettingsCell.apiAccessInsetLayoutMargins
+    var directionalLayoutMargins: NSDirectionalEdgeInsets = UIMetrics.SettingsCell.defaultLayoutMargins
+
+    /// Whether the toggle is enabled or disabled
+    var isEnabled = true
 
     func makeContentView() -> UIView & UIContentView {
         return SwitchCellContentView(configuration: self)

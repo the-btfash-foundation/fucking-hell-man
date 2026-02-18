@@ -1,9 +1,11 @@
+import XCTest
+
 //
 //  EphemeralPeerExchangingPipelineTests.swift
 //  MullvadPostQuantumTests
 //
 //  Created by Mojgan on 2024-07-19.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 @testable import MullvadMockData
 @testable import MullvadREST
@@ -11,7 +13,6 @@
 @testable import MullvadTypes
 @testable import PacketTunnelCore
 @testable import WireGuardKitTypes
-import XCTest
 
 final class EphemeralPeerExchangingPipelineTests: XCTestCase {
     var entryRelay: SelectedRelay!
@@ -49,14 +50,28 @@ final class EphemeralPeerExchangingPipelineTests: XCTestCase {
         )
 
         entryRelay = SelectedRelay(
-            endpoint: entryMatch.endpoint,
+            endpoint: SelectedEndpoint(
+                socketAddress: .ipv4(entryMatch.endpoint.ipv4Relay),
+                ipv4Gateway: entryMatch.endpoint.ipv4Gateway,
+                ipv6Gateway: entryMatch.endpoint.ipv6Gateway,
+                publicKey: entryMatch.endpoint.publicKey,
+                obfuscation: .off
+            ),
             hostname: entryMatch.relay.hostname,
-            location: entryMatch.location
+            location: entryMatch.location,
+            features: nil
         )
         exitRelay = SelectedRelay(
-            endpoint: exitMatch.endpoint,
+            endpoint: SelectedEndpoint(
+                socketAddress: .ipv4(exitMatch.endpoint.ipv4Relay),
+                ipv4Gateway: exitMatch.endpoint.ipv4Gateway,
+                ipv6Gateway: exitMatch.endpoint.ipv6Gateway,
+                publicKey: exitMatch.endpoint.publicKey,
+                obfuscation: .off
+            ),
             hostname: exitMatch.relay.hostname,
-            location: exitMatch.location
+            location: exitMatch.location,
+            features: nil
         )
     }
 
@@ -89,10 +104,7 @@ final class EphemeralPeerExchangingPipelineTests: XCTestCase {
         let connectionState = stubConnectionState(enableMultiHop: false, enablePostQuantum: true, enableDaita: false)
         await postQuantumKeyExchangingPipeline.startNegotiation(connectionState, privateKey: PrivateKey())
 
-        wait(
-            for: [reconfigurationExpectation, negotiationSuccessful],
-            timeout: .UnitTest.invertedTimeout
-        )
+        await fulfillment(of: [reconfigurationExpectation, negotiationSuccessful], timeout: .UnitTest.invertedTimeout)
     }
 
     func testSingleHopDaitaPeerExchange() async throws {
@@ -123,10 +135,7 @@ final class EphemeralPeerExchangingPipelineTests: XCTestCase {
         let connectionState = stubConnectionState(enableMultiHop: false, enablePostQuantum: false, enableDaita: true)
         await postQuantumKeyExchangingPipeline.startNegotiation(connectionState, privateKey: PrivateKey())
 
-        wait(
-            for: [reconfigurationExpectation, negotiationSuccessful],
-            timeout: .UnitTest.invertedTimeout
-        )
+        await fulfillment(of: [reconfigurationExpectation, negotiationSuccessful], timeout: .UnitTest.invertedTimeout)
     }
 
     func testMultiHopPostQuantumKeyExchange() async throws {
@@ -158,10 +167,7 @@ final class EphemeralPeerExchangingPipelineTests: XCTestCase {
         let connectionState = stubConnectionState(enableMultiHop: true, enablePostQuantum: true, enableDaita: false)
         await postQuantumKeyExchangingPipeline.startNegotiation(connectionState, privateKey: PrivateKey())
 
-        wait(
-            for: [reconfigurationExpectation, negotiationSuccessful],
-            timeout: .UnitTest.invertedTimeout
-        )
+        await fulfillment(of: [reconfigurationExpectation, negotiationSuccessful], timeout: .UnitTest.invertedTimeout)
     }
 
     func testMultiHopDaitaExchange() async throws {
@@ -188,10 +194,7 @@ final class EphemeralPeerExchangingPipelineTests: XCTestCase {
         let connectionState = stubConnectionState(enableMultiHop: true, enablePostQuantum: false, enableDaita: true)
         await postQuantumKeyExchangingPipeline.startNegotiation(connectionState, privateKey: PrivateKey())
 
-        wait(
-            for: [reconfigurationExpectation, negotiationSuccessful],
-            timeout: .UnitTest.invertedTimeout
-        )
+        await fulfillment(of: [reconfigurationExpectation, negotiationSuccessful], timeout: .UnitTest.invertedTimeout)
     }
 
     func stubConnectionState(
@@ -200,7 +203,11 @@ final class EphemeralPeerExchangingPipelineTests: XCTestCase {
         enableDaita: Bool
     ) -> ObservedConnectionState {
         ObservedConnectionState(
-            selectedRelays: SelectedRelays(entry: enableMultiHop ? entryRelay : nil, exit: exitRelay, retryAttempt: 0),
+            selectedRelays: SelectedRelays(
+                entry: enableMultiHop ? entryRelay : nil,
+                exit: exitRelay,
+                retryAttempt: 0
+            ),
             relayConstraints: relayConstraints,
             networkReachability: NetworkReachability.reachable,
             connectionAttemptCount: 0,

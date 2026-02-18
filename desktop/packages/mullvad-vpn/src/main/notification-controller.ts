@@ -10,13 +10,14 @@ import {
   DaemonDisconnectedNotificationProvider,
   DisconnectedNotificationProvider,
   ErrorNotificationProvider,
-  NotificationAction,
   ReconnectingNotificationProvider,
   SystemNotification,
+  SystemNotificationAction,
   SystemNotificationCategory,
   SystemNotificationProvider,
   SystemNotificationSeverityType,
 } from '../shared/notifications';
+import { RoutePath } from '../shared/routes';
 import { Scheduler } from '../shared/scheduler';
 
 const THROTTLE_DELAY = 500;
@@ -34,6 +35,7 @@ export interface NotificationSender {
 export interface NotificationControllerDelegate {
   openApp(): void;
   openLink(url: string, withAuth?: boolean): Promise<void>;
+  openRoute(url: RoutePath): void;
   /**
    * We have experienced issues where the
    * notification dot wasn't removed and logging the reason for it to be showing we can narrow the
@@ -74,11 +76,9 @@ export default class NotificationController {
     }
 
     if (usePngIcon) {
-      const basePath = path.resolve(path.join(__dirname, '../../assets/images'));
+      const imagePath = path.join(import.meta.dirname, 'assets/images/icon-notification.png');
       // `nativeImage` is undefined when running tests
-      this.notificationIcon = nativeImage?.createFromPath(
-        path.join(basePath, 'icon-notification.png'),
-      );
+      this.notificationIcon = nativeImage?.createFromPath(imagePath);
     }
   }
 
@@ -91,17 +91,17 @@ export default class NotificationController {
 
   public notifyTunnelState(
     tunnelState: TunnelState,
-    blockWhenDisconnected: boolean,
     hasExcludedApps: boolean,
     isWindowVisible: boolean,
     areSystemNotificationsEnabled: boolean,
+    splitTunnelingSupported: boolean,
   ): boolean {
     const notificationProviders: SystemNotificationProvider[] = [
       new ConnectingNotificationProvider({ tunnelState, reconnecting: this.reconnecting }),
       new ConnectedNotificationProvider(tunnelState),
       new ReconnectingNotificationProvider(tunnelState),
-      new DisconnectedNotificationProvider({ tunnelState, blockWhenDisconnected }),
-      new ErrorNotificationProvider({ tunnelState, hasExcludedApps }),
+      new DisconnectedNotificationProvider({ tunnelState }),
+      new ErrorNotificationProvider({ tunnelState, hasExcludedApps, splitTunnelingSupported }),
     ];
 
     const notificationProvider = notificationProviders.find((notification) =>
@@ -237,7 +237,7 @@ export default class NotificationController {
     // Action buttons are only available on macOS.
     if (process.platform === 'darwin') {
       if (systemNotification.action) {
-        notification.actions = [{ type: 'button', text: systemNotification.action.text }];
+        notification.actions = [{ type: 'button', text: systemNotification.action.link.text }];
         notification.on('action', () => this.performAction(systemNotification.action));
       }
       notification.on('click', () => this.notificationControllerDelegate.openApp());
@@ -268,9 +268,16 @@ export default class NotificationController {
     });
   }
 
-  private performAction(action?: NotificationAction) {
-    if (action && action.type === 'open-url') {
-      void this.notificationControllerDelegate.openLink(action.url, action.withAuth);
+  private performAction(action?: SystemNotificationAction) {
+    if (action) {
+      if (action.type === 'navigate-external') {
+        void this.notificationControllerDelegate.openLink(action.link.to, action.link.withAuth);
+      }
+
+      if (action.type === 'navigate-internal') {
+        void this.notificationControllerDelegate.openRoute(action.link.to);
+        this.notificationControllerDelegate.openApp();
+      }
     }
   }
 

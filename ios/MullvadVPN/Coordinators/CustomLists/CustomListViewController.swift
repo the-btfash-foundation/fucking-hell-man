@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-02-15.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -47,12 +47,7 @@ class CustomListViewController: UIViewController {
 
     lazy var saveBarButton: UIBarButtonItem = {
         let barButtonItem = UIBarButtonItem(
-            title: NSLocalizedString(
-                "CUSTOM_LIST_NAVIGATION_SAVE_BUTTON",
-                tableName: "CustomLists",
-                value: "Save",
-                comment: ""
-            ),
+            title: NSLocalizedString("Save", comment: ""),
             primaryAction: UIAction { [weak self] _ in
                 self?.onSave()
             }
@@ -151,7 +146,7 @@ class CustomListViewController: UIViewController {
 
     private func onSave() {
         do {
-            try interactor.save(viewModel: subject.value)
+            try interactor.save(list: subject.value.customList)
             delegate?.customListDidSave(subject.value.customList)
         } catch {
             if let error = error as? CustomRelayListError {
@@ -163,11 +158,9 @@ class CustomListViewController: UIViewController {
 
     private func onDelete() {
         let message = NSMutableAttributedString(
-            markdownString: NSLocalizedString(
-                "CUSTOM_LISTS_DELETE_PROMPT",
-                tableName: "CustomLists",
-                value: "Do you want to delete the list **\(subject.value.name)**?",
-                comment: ""
+            markdownString: String(
+                format: NSLocalizedString("Do you want to delete the list **%@**?", comment: ""),
+                subject.value.name
             ),
             options: MarkdownStylingOptions(font: .preferredFont(forTextStyle: .body))
         )
@@ -178,26 +171,17 @@ class CustomListViewController: UIViewController {
             attributedMessage: message,
             buttons: [
                 AlertAction(
-                    title: NSLocalizedString(
-                        "CUSTOM_LISTS_DELETE_BUTTON",
-                        tableName: "CustomLists",
-                        value: "Delete list",
-                        comment: ""
-                    ),
+                    title: NSLocalizedString("Delete list", comment: ""),
                     style: .destructive,
                     accessibilityId: .confirmDeleteCustomListButton,
                     handler: {
-                        self.interactor.delete(id: self.subject.value.id)
+                        self.interactor
+                            .delete(customList: self.subject.value.customList)
                         self.delegate?.customListDidDelete(self.subject.value.customList)
                     }
                 ),
                 AlertAction(
-                    title: NSLocalizedString(
-                        "CUSTOM_LISTS_CANCEL_BUTTON",
-                        tableName: "CustomLists",
-                        value: "Cancel",
-                        comment: ""
-                    ),
+                    title: NSLocalizedString("Cancel", comment: ""),
                     style: .default,
                     accessibilityId: .cancelDeleteCustomListButton
                 ),

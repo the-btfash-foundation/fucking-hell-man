@@ -3,40 +3,43 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2024-06-10.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
+
+import MullvadMockData
+import XCTest
 
 @testable import MullvadREST
 @testable import MullvadSettings
 @testable import MullvadTypes
-import XCTest
 
 class RelaySelectorWrapperTests: XCTestCase {
     let multihopWithDaitaConstraints = RelayConstraints(
-        entryLocations: .only(UserSelectedRelays(locations: [.country("es")])), // Relay with DAITA.
+        entryLocations: .only(UserSelectedRelays(locations: [.country("es")])),  // Relay with DAITA.
         exitLocations: .only(UserSelectedRelays(locations: [.country("us")]))
     )
 
     let multihopWithoutDaitaConstraints = RelayConstraints(
-        entryLocations: .only(UserSelectedRelays(locations: [.country("se")])), // Relay without DAITA.
+        entryLocations: .only(UserSelectedRelays(locations: [.country("se")])),  // Relay without DAITA.
         exitLocations: .only(UserSelectedRelays(locations: [.country("us")]))
     )
 
     let singlehopWithoutDaitaConstraints = RelayConstraints(
-        exitLocations: .only(UserSelectedRelays(locations: [.country("se")])) // Relay without DAITA.
+        exitLocations: .only(UserSelectedRelays(locations: [.country("se")]))  // Relay without DAITA.
     )
 
     let singlehopWithDaitaConstraints = RelayConstraints(
-        exitLocations: .only(UserSelectedRelays(locations: [.country("es")])) // Relay with DAITA.
+        exitLocations: .only(UserSelectedRelays(locations: [.country("es")]))  // Relay with DAITA.
     )
 
     var relayCache: RelayCache!
     override func setUpWithError() throws {
         let fileCache = MockFileCache(
-            initialState: .exists(try StoredRelays(
-                rawData: try REST.Coding.makeJSONEncoder().encode(ServerRelaysResponseStubs.sampleRelays),
-                updatedAt: .distantPast
-            ))
+            initialState: .exists(
+                try StoredRelays(
+                    rawData: try REST.Coding.makeJSONEncoder().encode(ServerRelaysResponseStubs.sampleRelays),
+                    updatedAt: .distantPast
+                ))
         )
 
         relayCache = RelayCache(fileCache: fileCache)
@@ -118,5 +121,81 @@ class RelaySelectorWrapperTests: XCTestCase {
 
         let selectedRelays = try wrapper.selectRelays(tunnelSettings: settings, connectionAttemptCount: 0)
         XCTAssertNotNil(selectedRelays.entry)
+    }
+
+    func testValidWireguardPortDoesNotThrow() throws {
+        let wrapper = RelaySelectorWrapper(relayCache: relayCache)
+
+        let settings = LatestTunnelSettings(
+            relayConstraints: .init(
+                port:
+                    .only(
+                        ServerRelaysResponseStubs.sampleRelays.wireguard.portRanges.first!.first!
+                    )
+            )
+        )
+
+        XCTAssertNoThrow(
+            try wrapper
+                .selectRelays(tunnelSettings: settings, connectionAttemptCount: 0)
+        )
+    }
+
+    func testInvalidWireguardPortThrows() throws {
+        let wrapper = RelaySelectorWrapper(relayCache: relayCache)
+
+        var settings = LatestTunnelSettings(
+            relayConstraints: .init(port: .only(1)),
+            wireGuardObfuscation: .init(state: .automatic)
+        )
+
+        XCTAssertThrowsError(
+            try wrapper
+                .selectRelays(tunnelSettings: settings, connectionAttemptCount: 0)
+        )
+
+        settings = LatestTunnelSettings(
+            relayConstraints: .init(port: .only(1)),
+            wireGuardObfuscation: .init(state: .off)
+        )
+
+        XCTAssertThrowsError(
+            try wrapper
+                .selectRelays(tunnelSettings: settings, connectionAttemptCount: 0)
+        )
+    }
+
+    func testInvalidWireguardPortDoesNotThrowWhenObfuscated() throws {
+        let wrapper = RelaySelectorWrapper(relayCache: relayCache)
+
+        var settings = LatestTunnelSettings(
+            relayConstraints: .init(port: .only(1)),
+            wireGuardObfuscation: .init(state: .quic)
+        )
+
+        XCTAssertNoThrow(
+            try wrapper
+                .selectRelays(tunnelSettings: settings, connectionAttemptCount: 0)
+        )
+
+        settings = LatestTunnelSettings(
+            relayConstraints: .init(port: .only(1)),
+            wireGuardObfuscation: .init(state: .udpOverTcp)
+        )
+
+        XCTAssertNoThrow(
+            try wrapper
+                .selectRelays(tunnelSettings: settings, connectionAttemptCount: 0)
+        )
+
+        settings = LatestTunnelSettings(
+            relayConstraints: .init(port: .only(1)),
+            wireGuardObfuscation: .init(state: .shadowsocks)
+        )
+
+        XCTAssertNoThrow(
+            try wrapper
+                .selectRelays(tunnelSettings: settings, connectionAttemptCount: 0)
+        )
     }
 }

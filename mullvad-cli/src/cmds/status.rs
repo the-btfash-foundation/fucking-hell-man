@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use futures::StreamExt;
-use mullvad_management_interface::{client::DaemonEvent, MullvadProxyClient};
+use mullvad_management_interface::{MullvadProxyClient, client::DaemonEvent};
 use mullvad_types::{device::DeviceState, states::TunnelState};
 use serde::Serialize;
 use std::fmt::Debug;
@@ -39,13 +39,7 @@ impl Status {
         while let Some(event) = event_stream.next().await {
             match event? {
                 DaemonEvent::TunnelState(new_state) => {
-                    if args.debug {
-                        println!("New tunnel state: {new_state:#?}");
-                    } else if args.json {
-                        let json = serde_json::to_string(&new_state)
-                            .context("Failed to format output as JSON")?;
-                        println!("{json}");
-                    } else {
+                    if !print_debug_or_json(&args, "New tunnel state", &new_state)? {
                         format::print_state(&new_state, Some(&previous_tunnel_state), args.verbose);
                         previous_tunnel_state = new_state;
                     }
@@ -68,6 +62,18 @@ impl Status {
                 DaemonEvent::NewAccessMethod(access_method) => {
                     print_debug_or_json(&args, "New access method", &access_method)?;
                 }
+                DaemonEvent::LeakDetected(leak) => {
+                    #[derive(Debug, Serialize)]
+                    struct Leak {
+                        interface: String,
+                        reachable: Vec<std::net::IpAddr>,
+                    }
+                    let leak = Leak {
+                        interface: leak.interface,
+                        reachable: leak.reachable_nodes,
+                    };
+                    print_debug_or_json(&args, "Leak detected", &leak)?;
+                }
             }
         }
         Ok(())
@@ -81,12 +87,7 @@ pub async fn handle(cmd: Option<Status>, args: StatusArgs) -> Result<()> {
 
     print_account_logged_out(&state, &device);
 
-    if args.debug {
-        println!("Tunnel state: {state:#?}");
-    } else if args.json {
-        let json = serde_json::to_string(&state).context("Failed to format output as JSON")?;
-        println!("{json}");
-    } else {
+    if !print_debug_or_json(&args, "New tunnel state", &state)? {
         format::print_state(&state, None, args.verbose);
     }
 
@@ -111,17 +112,23 @@ fn print_account_logged_out(state: &TunnelState, device: &DeviceState) {
     }
 }
 
+/// Print the given value as debug or JSON output based on the provided arguments.
+///
+/// Returns `true` if the value was printed. Returns `false` otherwise, i.e. if
+/// both `args.debug` and `args.json` are `false`.
 fn print_debug_or_json<T: Debug + Serialize>(
     args: &StatusArgs,
     debug_message: &str,
     t: &T,
-) -> Result<()> {
+) -> Result<bool> {
     if args.debug {
         println!("{debug_message}: {t:#?}");
+        Ok(true)
     } else if args.json {
         let json = serde_json::to_string(&t).context("Failed to format output as JSON")?;
         println!("{json}");
+        Ok(true)
+    } else {
+        Ok(false)
     }
-
-    Ok(())
 }

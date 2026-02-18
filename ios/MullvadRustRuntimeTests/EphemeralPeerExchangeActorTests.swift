@@ -3,24 +3,24 @@
 //  MullvadRustRuntimeTests
 //
 //  Created by Marco Nikic on 2024-06-12.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
+
+import NetworkExtension
+import XCTest
 
 @testable import MullvadMockData
 @testable import MullvadRustRuntime
 @testable import MullvadTypes
-import NetworkExtension
 @testable import PacketTunnelCore
 @testable import WireGuardKitTypes
-import XCTest
 
 class EphemeralPeerExchangeActorTests: XCTestCase {
-    var tcpConnection: NWTCPConnectionStub!
     var tunnelProvider: TunnelProviderStub!
 
     override func setUpWithError() throws {
-        tcpConnection = NWTCPConnectionStub()
-        tunnelProvider = TunnelProviderStub(tcpConnection: tcpConnection)
+        RustLogging.initialize()
+        tunnelProvider = TunnelProviderStub()
     }
 
     func testKeyExchangeFailsWhenNegotiationCannotStart() {
@@ -37,7 +37,6 @@ class EphemeralPeerExchangeActorTests: XCTestCase {
 
         let privateKey = PrivateKey()
         keyExchangeActor.startNegotiation(with: privateKey, enablePostQuantum: true, enableDaita: false)
-        tcpConnection.becomeViable()
 
         wait(for: [negotiationFailure])
     }

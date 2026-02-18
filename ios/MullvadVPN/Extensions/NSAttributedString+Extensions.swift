@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 19/11/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -27,7 +27,7 @@ extension NSAttributedString {
             if stringIndex % 2 == 0 {
                 attributes[.font] = options.font
             } else {
-                attributes[.font] = options.boldFont
+                attributes[.font] = options.font.withWeight(.bold)
                 attributes.merge(applyEffect?(.bold, string) ?? [:], uniquingKeysWith: { $1 })
             }
 

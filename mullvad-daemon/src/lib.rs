@@ -13,6 +13,7 @@ pub mod device;
 mod dns;
 pub mod exception_logging;
 mod geoip;
+mod leak_checker;
 pub mod logging;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -27,23 +28,28 @@ pub mod shutdown;
 mod target_state;
 mod tunnel;
 pub mod version;
-mod version_check;
 
-use crate::target_state::PersistentTargetState;
-use api::AccessMethodEvent;
+use crate::{
+    relay_list::parsed_relays::parse_relays_from_file, target_state::PersistentTargetState,
+};
+use api::DaemonAccessMethodResolver;
 use device::{AccountEvent, PrivateAccountAndDevice, PrivateDeviceEvent};
 use futures::{
-    channel::{mpsc, oneshot},
-    future::{abortable, AbortHandle, Future},
     StreamExt,
+    channel::{mpsc, oneshot},
+    future::{AbortHandle, Future, abortable},
 };
 use geoip::GeoIpHandler;
+use leak_checker::{LeakChecker, LeakInfo};
 use management_interface::ManagementInterfaceServer;
-use mullvad_api::ApiEndpoint;
+use mullvad_api::{
+    ApiEndpoint, CachedRelayList, access_mode::AccessMethodEvent, proxy::ApiConnectionMode,
+};
+use mullvad_encrypted_dns_proxy::state::EncryptedDnsProxyState;
 use mullvad_relay_selector::{RelaySelector, SelectorConfig};
 #[cfg(target_os = "android")]
 use mullvad_types::account::{PlayPurchase, PlayPurchasePaymentToken};
-#[cfg(any(windows, target_os = "android", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
 use mullvad_types::settings::SplitApp;
 #[cfg(daita)]
 use mullvad_types::wireguard::DaitaSettings;
@@ -51,22 +57,32 @@ use mullvad_types::{
     access_method::{AccessMethod, AccessMethodSetting},
     account::{AccountData, AccountNumber, VoucherSubmission},
     auth_failed::AuthFailed,
+    constraints::Constraint,
     custom_list::CustomList,
     device::{Device, DeviceEvent, DeviceEventCause, DeviceId, DeviceState, RemoveDeviceEvent},
-    features::{compute_feature_indicators, FeatureIndicator, FeatureIndicators},
+    features::{FeatureIndicator, FeatureIndicators, compute_feature_indicators},
     location::{GeoIpLocation, LocationEventData},
     relay_constraints::{
-        BridgeSettings, BridgeState, BridgeType, ObfuscationSettings, RelayOverride, RelaySettings,
+        ObfuscationSettings, RelayOverride, RelaySettings, allowed_ip::AllowedIps,
     },
     relay_list::RelayList,
     settings::{DnsOptions, Settings},
     states::{Secured, TargetState, TargetStateStrict, TunnelState},
-    version::{AppVersion, AppVersionInfo},
+    version::AppVersionInfo,
     wireguard::{PublicKey, QuantumResistantState, RotationInterval},
 };
-use relay_list::{RelayListUpdater, RelayListUpdaterHandle, RELAYS_FILENAME};
+use mullvad_types::{
+    relay_constraints::{
+        GeographicLocationConstraint, LocationConstraint, RelayConstraints, WireguardConstraints,
+    },
+    relay_list::BridgeList,
+};
+#[cfg(not(target_os = "android"))]
+use mullvad_update::version::rollout::Rollout;
+use relay_list::{RelayListUpdater, RelayListUpdaterHandle};
 use settings::SettingsPersister;
-#[cfg(any(windows, target_os = "android", target_os = "macos"))]
+use std::collections::BTreeSet;
+#[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
 use std::collections::HashSet;
 #[cfg(target_os = "android")]
 use std::os::unix::io::RawFd;
@@ -77,27 +93,35 @@ use std::{
     sync::{Arc, Weak},
     time::Duration,
 };
+#[cfg(target_os = "android")]
+use talpid_core::connectivity_listener::ConnectivityListener;
+#[cfg(not(target_os = "android"))]
+use talpid_core::tunnel_state_machine::LockdownMode;
 use talpid_core::{
     mpsc::Sender,
     split_tunnel,
     tunnel_state_machine::{self, TunnelCommand, TunnelStateMachineHandle},
 };
+use talpid_routing::RouteManagerHandle;
 #[cfg(target_os = "android")]
 use talpid_types::android::AndroidContext;
 #[cfg(target_os = "windows")]
 use talpid_types::split_tunnel::ExcludedProcess;
 use talpid_types::{
-    net::{IpVersion, TunnelType},
-    tunnel::{ErrorStateCause, TunnelStateTransition},
     ErrorExt,
+    net::IpVersion,
+    tunnel::{ErrorStateCause, TunnelStateTransition},
 };
 use tokio::io;
 
-#[cfg(target_os = "android")]
-use talpid_core::connectivity_listener::ConnectivityListener;
+#[cfg(target_os = "windows")]
+pub mod service {
+    pub const SERVICE_NAME: &str = "MullvadVPN";
+    pub const SERVICE_DISPLAY_NAME: &str = "Mullvad VPN Service";
+}
 
 /// Delay between generating a new WireGuard key and reconnecting
-const WG_RECONNECT_DELAY: Duration = Duration::from_secs(4 * 60);
+const WG_RECONNECT_DELAY: Duration = Duration::from_mins(4);
 
 pub type ResponseTx<T, E> = oneshot::Sender<Result<T, E>>;
 
@@ -122,7 +146,7 @@ pub enum Error {
     ApiCheckError(#[source] mullvad_api::availability::Error),
 
     #[error("Version check failed")]
-    VersionCheckError(#[source] version_check::Error),
+    VersionCheckError(#[source] version::Error),
 
     #[error("Unable to load account history")]
     LoadAccountHistory(#[source] account_history::Error),
@@ -155,7 +179,7 @@ pub enum Error {
     #[error("Unable to initialize split tunneling")]
     InitSplitTunneling(#[source] split_tunnel::Error),
 
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     #[error("Split tunneling error")]
     SplitTunnelError(#[source] split_tunnel::Error),
 
@@ -181,6 +205,10 @@ pub enum Error {
     #[error("Tunnel state machine error")]
     TunnelError(#[source] tunnel_state_machine::Error),
 
+    /// Errors from [talpid_routing::RouteManagerHandle].
+    #[error("Route manager error")]
+    RouteManager(#[source] talpid_routing::Error),
+
     /// Custom list already exists
     #[error("Custom list error: {0}")]
     CustomListError(#[source] mullvad_types::custom_list::Error),
@@ -189,7 +217,7 @@ pub enum Error {
     AccessMethodError(#[source] access_method::Error),
 
     #[error("API connection mode error")]
-    ApiConnectionModeError(#[source] api::Error),
+    ApiConnectionModeError(#[source] mullvad_api::access_mode::Error),
     #[error("No custom bridge has been specified")]
     NoCustomProxySaved,
 
@@ -233,6 +261,8 @@ pub enum DaemonCommand {
     /// Trigger an asynchronous relay list update. This returns before the relay list is actually
     /// updated.
     UpdateRelayLocations,
+    /// Get the list of bridges.
+    GetBridges(oneshot::Sender<BridgeList>),
     /// Log in with a given account and create a new device.
     LoginAccount(ResponseTx<(), Error>, AccountNumber),
     /// Log out of the current account and remove the device, if they exist.
@@ -251,19 +281,15 @@ pub enum DaemonCommand {
     SetAllowLan(ResponseTx<(), settings::Error>, bool),
     /// Set the beta program setting.
     SetShowBetaReleases(ResponseTx<(), settings::Error>, bool),
-    /// Set the block_when_disconnected setting.
+    /// Set the lockdown_mode setting.
     #[cfg(not(target_os = "android"))]
-    SetBlockWhenDisconnected(ResponseTx<(), settings::Error>, bool),
+    SetLockdownMode(ResponseTx<(), settings::Error>, bool),
     /// Set the auto-connect setting.
     SetAutoConnect(ResponseTx<(), settings::Error>, bool),
-    /// Set the mssfix argument for OpenVPN
-    SetOpenVpnMssfix(ResponseTx<(), settings::Error>, Option<u16>),
-    /// Set proxy details for OpenVPN
-    SetBridgeSettings(ResponseTx<(), Error>, BridgeSettings),
-    /// Set proxy state
-    SetBridgeState(ResponseTx<(), settings::Error>, BridgeState),
     /// Set if IPv6 should be enabled in the tunnel
     SetEnableIpv6(ResponseTx<(), settings::Error>, bool),
+    /// Set if recents should be enabled
+    SetEnableRecents(ResponseTx<(), settings::Error>, bool),
     /// Set whether to enable PQ PSK exchange in the tunnel
     SetQuantumResistantTunnel(ResponseTx<(), settings::Error>, QuantumResistantState),
     /// Set DAITA settings for the tunnel
@@ -282,6 +308,8 @@ pub enum DaemonCommand {
     /// Toggle macOS network check leak
     /// Set MTU for wireguard tunnels
     SetWireguardMtu(ResponseTx<(), settings::Error>, Option<u16>),
+    /// Set allowed IPs for wireguard tunnels
+    SetWireguardAllowedIps(ResponseTx<(), settings::Error>, Constraint<AllowedIps>),
     /// Set automatic key rotation interval for wireguard tunnels
     SetWireguardRotationInterval(ResponseTx<(), settings::Error>, Option<RotationInterval>),
     /// Get the daemon settings
@@ -293,7 +321,11 @@ pub enum DaemonCommand {
     /// Return a public key of the currently set wireguard private key, if there is one
     GetWireguardKey(ResponseTx<Option<PublicKey>, Error>),
     /// Create custom list
-    CreateCustomList(ResponseTx<mullvad_types::custom_list::Id, Error>, String),
+    CreateCustomList(
+        ResponseTx<mullvad_types::custom_list::Id, Error>,
+        String,
+        BTreeSet<GeographicLocationConstraint>,
+    ),
     /// Delete custom list
     DeleteCustomList(ResponseTx<(), Error>, mullvad_types::custom_list::Id),
     /// Update a custom list with a given id
@@ -329,10 +361,13 @@ pub enum DaemonCommand {
     /// Return whether the daemon is performing post-upgrade tasks
     IsPerformingPostUpgrade(oneshot::Sender<bool>),
     /// Get current version of the app
-    GetCurrentVersion(oneshot::Sender<AppVersion>),
+    GetCurrentVersion(oneshot::Sender<mullvad_version::Version>),
     /// Remove settings and clear the cache
     #[cfg(not(target_os = "android"))]
     FactoryReset(ResponseTx<(), Error>),
+    /// Return whether split tunneling is available
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    SplitTunnelIsSupported(oneshot::Sender<bool>),
     /// Request list of processes excluded from the tunnel
     #[cfg(target_os = "linux")]
     GetSplitTunnelProcesses(ResponseTx<Vec<i32>, split_tunnel::Error>),
@@ -346,19 +381,19 @@ pub enum DaemonCommand {
     #[cfg(target_os = "linux")]
     ClearSplitTunnelProcesses(ResponseTx<(), split_tunnel::Error>),
     /// Exclude traffic of an application from the tunnel
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     AddSplitTunnelApp(ResponseTx<(), Error>, SplitApp),
     /// Remove application from list of apps to exclude from the tunnel
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     RemoveSplitTunnelApp(ResponseTx<(), Error>, SplitApp),
     /// Clear list of apps to exclude from the tunnel
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     ClearSplitTunnelApps(ResponseTx<(), Error>),
     /// Enable or disable split tunneling
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     SetSplitTunnelState(ResponseTx<(), Error>, bool),
     /// Returns all processes currently being excluded from the tunnel
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     GetSplitTunnelProcesses(ResponseTx<Vec<ExcludedProcess>, split_tunnel::Error>),
     /// Notify the split tunnel monitor that a volume was mounted or dismounted
     #[cfg(target_os = "windows")]
@@ -384,6 +419,42 @@ pub enum DaemonCommand {
     ExportJsonSettings(ResponseTx<String, settings::patch::Error>),
     /// Request the current feature indicators.
     GetFeatureIndicators(oneshot::Sender<FeatureIndicators>),
+    // Updates the default (initial) country selection that the user will see when starting the
+    // app for the first time based on their current geolocation.
+    UpdateDefaultLocationCountry(ResponseTx<(), settings::Error>),
+
+    // Debug features
+    DisableRelay {
+        relay: String,
+        tx: oneshot::Sender<()>,
+    },
+    EnableRelay {
+        relay: String,
+        tx: oneshot::Sender<()>,
+    },
+    /// Calculate and return the rollout threshold for this client.
+    #[cfg(not(target_os = "android"))]
+    GetRolloutThreshold(oneshot::Sender<f32>),
+    /// Generate a new rollout threshold seed and update settings. Returns the new rollout
+    /// threshold.
+    #[cfg(not(target_os = "android"))]
+    GenerateNewRolloutSeed(oneshot::Sender<f32>),
+    /// Set the rollout threshold seed to the provided value and update settings.
+    #[cfg(not(target_os = "android"))]
+    SetRolloutThresholdSeed {
+        seed: u32,
+        tx: oneshot::Sender<()>,
+    },
+
+    // App upgrade
+    /// Prompt the daemon to start an app version upgrade.
+    ///
+    /// If an upgrade had previously been started but not completed the daemon should continue the upgrade process at the appropriate step. The client need not be notified about this detail.
+    AppUpgrade(ResponseTx<(), version::Error>),
+    /// Prompt the daemon to abort the current upgrade.
+    AppUpgradeAbort(ResponseTx<(), version::Error>),
+    /// Return the storage path for the installers during in-app upgrades.
+    GetAppUpgradeCacheDir(ResponseTx<PathBuf, version::Error>),
 }
 
 /// All events that can happen in the daemon. Sent from various threads and exposed interfaces.
@@ -411,11 +482,13 @@ pub(crate) enum InternalDaemonEvent {
     /// A generic event for when any settings change.
     SettingsChanged,
     /// The split tunnel paths or state were updated.
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     ExcludedPathsEvent(ExcludedPathsUpdate, oneshot::Sender<Result<(), Error>>),
+    /// A network leak was detected.
+    LeakDetected(LeakInfo),
 }
 
-#[cfg(any(windows, target_os = "android", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
 pub(crate) enum ExcludedPathsUpdate {
     SetState(bool),
     SetPaths(HashSet<SplitApp>),
@@ -534,7 +607,6 @@ impl DaemonEventSender {
             _event: PhantomData,
         }
     }
-
     pub fn to_specialized_sender<E>(&self) -> DaemonEventSender<E>
     where
         InternalDaemonEvent: From<E>,
@@ -551,13 +623,37 @@ where
     InternalDaemonEvent: From<E>,
 {
     fn send(&self, event: E) -> Result<(), talpid_core::mpsc::Error> {
-        if let Some(sender) = self.sender.upgrade() {
-            sender
+        match self.sender.upgrade() {
+            Some(sender) => sender
                 .unbounded_send(InternalDaemonEvent::from(event))
-                .map_err(|_| talpid_core::mpsc::Error::ChannelClosed)
-        } else {
-            Err(talpid_core::mpsc::Error::ChannelClosed)
+                .map_err(|_| talpid_core::mpsc::Error::ChannelClosed),
+            _ => Err(talpid_core::mpsc::Error::ChannelClosed),
         }
+    }
+}
+
+impl<E> DaemonEventSender<E>
+where
+    InternalDaemonEvent: From<E>,
+{
+    pub fn to_unbounded_sender<T>(&self) -> mpsc::UnboundedSender<T>
+    where
+        T: Send + 'static,
+        E: From<T>,
+    {
+        let (tx, mut rx) = mpsc::unbounded::<T>();
+        let sender = self.sender.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = rx.next().await {
+                let Some(tx) = sender.upgrade() else {
+                    return;
+                };
+                if tx.send(InternalDaemonEvent::from(E::from(msg))).is_err() {
+                    return;
+                };
+            }
+        });
+        tx
     }
 }
 
@@ -575,10 +671,10 @@ pub struct Daemon {
     account_history: account_history::AccountHistory,
     device_checker: device::TunnelStateChangeHandler,
     account_manager: device::AccountManagerHandle,
-    access_mode_handler: api::AccessModeSelectorHandle,
+    access_mode_handler: mullvad_api::access_mode::AccessModeSelectorHandle,
     api_runtime: mullvad_api::Runtime,
     api_handle: mullvad_api::rest::MullvadRestHandle,
-    version_updater_handle: version_check::VersionUpdaterHandle,
+    version_handle: version::router::VersionRouterHandle,
     relay_selector: RelaySelector,
     relay_list_updater: RelayListUpdaterHandle,
     parameters_generator: tunnel::ParametersGenerator,
@@ -587,6 +683,8 @@ pub struct Daemon {
     #[cfg(target_os = "windows")]
     volume_update_tx: mpsc::UnboundedSender<()>,
     location_handler: GeoIpHandler,
+    leak_checker: LeakChecker,
+    cache_dir: PathBuf,
 }
 pub struct DaemonConfig {
     pub log_dir: Option<PathBuf>,
@@ -597,6 +695,7 @@ pub struct DaemonConfig {
     pub endpoint: ApiEndpoint,
     #[cfg(target_os = "android")]
     pub android_context: AndroidContext,
+    pub log_handle: logging::LogHandle,
 }
 
 impl Daemon {
@@ -605,12 +704,19 @@ impl Daemon {
         daemon_command_channel: DaemonCommandChannel,
     ) -> Result<Self, Error> {
         #[cfg(target_os = "macos")]
+        tokio::spawn(macos::allow_incoming_connections());
+        #[cfg(target_os = "macos")]
         macos::bump_filehandle_limit();
 
         let command_sender = daemon_command_channel.sender();
-        let management_interface =
-            ManagementInterfaceServer::start(command_sender, config.rpc_socket_path)
-                .map_err(Error::ManagementInterfaceError)?;
+        let app_upgrade_broadcast = tokio::sync::broadcast::channel(32).0;
+        let management_interface = ManagementInterfaceServer::start(
+            command_sender,
+            config.rpc_socket_path,
+            app_upgrade_broadcast.clone(),
+            config.log_handle,
+        )
+        .map_err(Error::ManagementInterfaceError)?;
 
         let (internal_event_tx, internal_event_rx) = daemon_command_channel.destructure();
 
@@ -650,37 +756,48 @@ impl Daemon {
 
         let settings_event_listener = management_interface.notifier().clone();
         let mut settings = SettingsPersister::load(&config.settings_dir).await;
+
         settings.register_change_listener(move |settings| {
             // Notify management interface server of changes to the settings
             settings_event_listener.notify_settings(settings.to_owned());
         });
 
-        let initial_selector_config = SelectorConfig::from_settings(&settings);
-        let relay_selector = RelaySelector::new(
-            initial_selector_config,
-            config.resource_dir.join(RELAYS_FILENAME),
-            config.cache_dir.join(RELAYS_FILENAME),
+        let initial_relay_list = parse_relays_from_file(&config.cache_dir, &config.resource_dir)
+            .inspect_err(|err| log::error!("{err}"))
+            .ok();
+        let relay_selector = {
+            let (initial_relay_list, initial_bridge_list) = initial_relay_list
+                .clone()
+                .map(CachedRelayList::into_internal_repr)
+                .unwrap_or_default();
+            // TODO: This should preferably be done once, by the relay list updater.
+            let initial_relay_list =
+                initial_relay_list.apply_overrides(settings.relay_overrides.clone());
+            let initial_selector_config = SelectorConfig::from_settings(&settings);
+            RelaySelector::new(
+                initial_selector_config,
+                initial_relay_list.clone(),
+                initial_bridge_list.clone(),
+            )
+        };
+
+        let encrypted_dns_proxy_cache = EncryptedDnsProxyState::default();
+        let method_resolver = DaemonAccessMethodResolver::new(
+            relay_selector.clone(),
+            encrypted_dns_proxy_cache,
+            api_runtime.address_cache().clone(),
         );
 
-        let settings_relay_selector = relay_selector.clone();
-        settings.register_change_listener(move |settings| {
-            // Notify relay selector of changes to the settings/selector config
-            settings_relay_selector
-                .clone()
-                .set_config(SelectorConfig::from_settings(settings));
-        });
-
-        let (access_mode_handler, access_mode_provider) = api::AccessModeSelector::spawn(
-            config.cache_dir.clone(),
-            relay_selector.clone(),
-            settings.api_access_methods.clone(),
-            #[cfg(feature = "api-override")]
-            config.endpoint.clone(),
-            internal_event_tx.to_specialized_sender(),
-            api_runtime.address_cache().clone(),
-        )
-        .await
-        .map_err(Error::ApiConnectionModeError)?;
+        let (access_mode_handler, access_mode_provider) =
+            mullvad_api::access_mode::AccessModeSelector::spawn(
+                method_resolver,
+                settings.api_access_methods.clone(),
+                #[cfg(feature = "api-override")]
+                config.endpoint.clone(),
+                internal_event_tx.to_unbounded_sender(),
+            )
+            .await
+            .map_err(Error::ApiConnectionModeError)?;
 
         let api_handle = api_runtime.mullvad_rest_handle(access_mode_provider);
 
@@ -738,7 +855,7 @@ impl Daemon {
             PersistentTargetState::new(&config.cache_dir).await
         };
 
-        #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+        #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
         let exclude_paths = if settings.split_tunnel.enable_exclusions {
             settings
                 .split_tunnel
@@ -750,6 +867,9 @@ impl Daemon {
         } else {
             vec![]
         };
+
+        #[cfg(target_os = "linux")]
+        let split_tunneling_pid_manager = split_tunnel::PidManager::default();
 
         let parameters_generator = tunnel::ParametersGenerator::new(
             account_manager.clone(),
@@ -765,7 +885,7 @@ impl Daemon {
             }
         });
         settings.register_change_listener(move |settings| {
-            let _ = param_gen_tx.unbounded_send(settings.tunnel_options.to_owned());
+            let _ = param_gen_tx.unbounded_send(settings.tunnel_options.clone());
         });
 
         // Register a listener for generic settings changes.
@@ -775,6 +895,17 @@ impl Daemon {
             let _ = settings_changed_event_sender.send(InternalDaemonEvent::SettingsChanged);
         });
 
+        let route_manager = RouteManagerHandle::spawn(
+            #[cfg(target_os = "linux")]
+            mullvad_types::TUNNEL_FWMARK,
+            #[cfg(target_os = "linux")]
+            mullvad_types::TUNNEL_TABLE_ID,
+            #[cfg(target_os = "android")]
+            config.android_context.clone(),
+        )
+        .await
+        .map_err(Error::RouteManager)?;
+
         let (offline_state_tx, offline_state_rx) = mpsc::unbounded();
         #[cfg(target_os = "windows")]
         let (volume_update_tx, volume_update_rx) = mpsc::unbounded();
@@ -782,7 +913,7 @@ impl Daemon {
             tunnel_state_machine::InitialTunnelState {
                 allow_lan: settings.allow_lan,
                 #[cfg(not(target_os = "android"))]
-                block_when_disconnected: settings.block_when_disconnected,
+                lockdown_mode: LockdownMode::from(settings.lockdown_mode),
                 dns_config: dns::addresses_from_options(&settings.tunnel_options.dns_options),
                 allowed_endpoint: access_mode_handler
                     .get_current()
@@ -790,7 +921,7 @@ impl Daemon {
                     .map_err(Error::ApiConnectionModeError)?
                     .endpoint,
                 reset_firewall: *target_state != TargetState::Secured,
-                #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+                #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
                 exclude_paths,
             },
             parameters_generator.clone(),
@@ -798,6 +929,7 @@ impl Daemon {
             config.resource_dir.clone(),
             internal_event_tx.to_specialized_sender(),
             offline_state_tx,
+            route_manager.clone(),
             #[cfg(target_os = "windows")]
             volume_update_rx,
             #[cfg(target_os = "android")]
@@ -808,6 +940,8 @@ impl Daemon {
             tunnel_state_machine::LinuxNetworkingIdentifiers {
                 fwmark: mullvad_types::TUNNEL_FWMARK,
                 table_id: mullvad_types::TUNNEL_TABLE_ID,
+                excluded_cgroup2: split_tunneling_pid_manager.excluded_cgroup(),
+                net_cls: split_tunneling_pid_manager.net_cls_classid(),
             },
         )
         .await
@@ -816,25 +950,69 @@ impl Daemon {
         api::forward_offline_state(api_availability.clone(), offline_state_rx);
 
         let relay_list_listener = management_interface.notifier().clone();
+        let internal_event_tx_clone = internal_event_tx.clone();
         let on_relay_list_update = move |relay_list: &RelayList| {
             relay_list_listener.notify_relay_list(relay_list.clone());
+            let (tx, _) = oneshot::channel();
+            let _ = internal_event_tx_clone.send(InternalDaemonEvent::Command(
+                DaemonCommand::UpdateDefaultLocationCountry(tx),
+            ));
         };
 
         let mut relay_list_updater = RelayListUpdater::spawn(
             relay_selector.clone(),
             api_handle.clone(),
             &config.cache_dir,
+            settings.relay_overrides.clone(),
             on_relay_list_update,
+            initial_relay_list,
         );
 
-        let version_updater_handle = version_check::VersionUpdater::spawn(
+        // Notify the relay list updater when new relay IP overrides are available.
+        let relay_list_updater_handle = relay_list_updater.clone();
+        settings.register_change_listener(move |settings| {
+            // Notify relay selector of changes to the settings/selector config
+            let mut relay_list_updater = relay_list_updater_handle.clone();
+            let overrides = settings.relay_overrides.clone();
+            tokio::spawn(async move {
+                relay_list_updater.update_overrides(overrides).await;
+            });
+        });
+
+        let settings_relay_selector = relay_selector.clone();
+        settings.register_change_listener(move |settings| {
+            // Notify relay selector of changes to the settings/selector config
+            settings_relay_selector.set_config(SelectorConfig::from_settings(settings));
+        });
+
+        #[cfg(not(target_os = "android"))]
+        let rollout = {
+            settings
+                .update(|settings| {
+                    settings
+                        .rollout_threshold_seed
+                        .get_or_insert_with(Rollout::seed);
+                })
+                .await
+                .map_err(Error::SettingsError)?;
+            let seed = settings
+                .rollout_threshold_seed
+                .expect("Rollout seed must have been initialized");
+            let version = mullvad_version::VERSION
+                .parse()
+                .expect("App version to be parsable");
+            Rollout::threshold(seed, version)
+        };
+        let version_handle = version::router::spawn_version_router(
             api_handle.clone(),
-            api_availability.clone(),
+            api_handle.availability.clone(),
             config.cache_dir.clone(),
             internal_event_tx.to_specialized_sender(),
             settings.show_beta_releases,
-        )
-        .await;
+            #[cfg(not(target_os = "android"))]
+            rollout,
+            app_upgrade_broadcast,
+        );
 
         // Attempt to download a fresh relay list
         relay_list_updater.update().await;
@@ -849,15 +1027,26 @@ impl Daemon {
             internal_event_tx.clone().to_specialized_sender(),
         );
 
+        let leak_checker = {
+            let mut leak_checker = LeakChecker::new(route_manager);
+            let internal_event_tx = internal_event_tx.clone();
+            leak_checker.add_leak_callback(move |info| {
+                internal_event_tx
+                    .send(InternalDaemonEvent::LeakDetected(info))
+                    .is_ok()
+            });
+            leak_checker
+        };
+
         let daemon = Daemon {
             tunnel_state: TunnelState::Disconnected {
                 location: None,
                 #[cfg(not(target_os = "android"))]
-                locked_down: settings.block_when_disconnected,
+                locked_down: settings.lockdown_mode,
             },
             target_state,
             #[cfg(target_os = "linux")]
-            exclude_pids: split_tunnel::PidManager::new().map_err(Error::InitSplitTunneling)?,
+            exclude_pids: split_tunneling_pid_manager,
             rx: internal_event_rx,
             tx: internal_event_tx,
             reconnection_job: None,
@@ -870,7 +1059,7 @@ impl Daemon {
             access_mode_handler,
             api_runtime,
             api_handle,
-            version_updater_handle,
+            version_handle,
             relay_selector,
             relay_list_updater,
             parameters_generator,
@@ -879,9 +1068,21 @@ impl Daemon {
             #[cfg(target_os = "windows")]
             volume_update_tx,
             location_handler,
+            leak_checker,
+            cache_dir: config.cache_dir,
         };
 
         api_availability.unsuspend();
+
+        #[cfg(target_os = "macos")]
+        {
+            let account_manager = daemon.account_manager.clone();
+            tokio::task::spawn(async {
+                if let Err(error) = macos::handle_app_bundle_removal(account_manager).await {
+                    log::error!("Failed to handle app removal: {error}");
+                }
+            });
+        }
 
         Ok(daemon)
     }
@@ -924,10 +1125,13 @@ impl Daemon {
         self.disconnect_tunnel();
 
         while let Some(event) = self.rx.next().await {
-            if let InternalDaemonEvent::TunnelStateTransition(transition) = event {
-                self.handle_tunnel_state_transition(transition).await;
-            } else {
-                log::trace!("Ignoring event because the daemon is shutting down");
+            match event {
+                InternalDaemonEvent::TunnelStateTransition(transition) => {
+                    self.handle_tunnel_state_transition(transition).await;
+                }
+                _ => {
+                    log::trace!("Ignoring event because the daemon is shutting down");
+                }
             }
 
             if self.tunnel_state.is_disconnected() {
@@ -977,7 +1181,7 @@ impl Daemon {
         let mut should_stop = false;
         match event {
             TunnelStateTransition(transition) => {
-                self.handle_tunnel_state_transition(transition).await
+                self.handle_tunnel_state_transition(transition).await;
             }
             Command(command) => self.handle_command(command).await,
             TriggerShutdown(user_init_shutdown) => {
@@ -997,8 +1201,13 @@ impl Daemon {
             SettingsChanged => {
                 self.update_feature_indicators_on_settings_changed();
             }
-            #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
             ExcludedPathsEvent(update, tx) => self.handle_new_excluded_paths(update, tx).await,
+            LeakDetected(leak_info) => {
+                log::warn!("Network leak detected! Please contact Mullvad support.");
+                log::warn!("{leak_info:?}");
+                self.handle_leak_event(leak_info)
+            }
         }
         should_stop
     }
@@ -1007,6 +1216,9 @@ impl Daemon {
         &mut self,
         tunnel_state_transition: TunnelStateTransition,
     ) {
+        self.leak_checker
+            .on_tunnel_state_transition(tunnel_state_transition.clone());
+
         self.reset_rpc_sockets_on_tunnel_state_transition(&tunnel_state_transition);
         self.device_checker
             .handle_state_transition(&tunnel_state_transition);
@@ -1018,10 +1230,10 @@ impl Daemon {
                 locked_down,
             },
             #[cfg(target_os = "android")]
-            TunnelStateTransition::Disconnected => TunnelState::Disconnected { location: None },
+            TunnelStateTransition::Disconnected {} => TunnelState::Disconnected { location: None },
             TunnelStateTransition::Connecting(endpoint) => {
                 let feature_indicators = compute_feature_indicators(
-                    &self.settings.to_settings(),
+                    self.settings.settings(),
                     &endpoint,
                     self.parameters_generator.last_relay_was_overridden().await,
                 );
@@ -1033,7 +1245,7 @@ impl Daemon {
             }
             TunnelStateTransition::Connected(endpoint) => {
                 let feature_indicators = compute_feature_indicators(
-                    &self.settings.to_settings(),
+                    self.settings.settings(),
                     &endpoint,
                     self.parameters_generator.last_relay_was_overridden().await,
                 );
@@ -1121,14 +1333,15 @@ impl Daemon {
             // If not connected, we have to guess whether the users local connection supports IPv6.
             // The only thing we have to go on is the wireguard setting.
             TunnelState::Disconnected { .. } => {
-                if let RelaySettings::Normal(relay_constraints) = &self.settings.relay_settings {
-                    // Note that `Constraint::Any` corresponds to just IPv4
-                    matches!(
-                        relay_constraints.wireguard_constraints.ip_version,
-                        mullvad_types::constraints::Constraint::Only(IpVersion::V6)
-                    )
-                } else {
-                    false
+                match &self.settings.relay_settings {
+                    RelaySettings::Normal(relay_constraints) => {
+                        // Note that `Constraint::Any` corresponds to just IPv4
+                        matches!(
+                            relay_constraints.wireguard_constraints.ip_version,
+                            mullvad_types::constraints::Constraint::Only(IpVersion::V6)
+                        )
+                    }
+                    _ => false,
                 }
             }
             // Fetching IP from am.i.mullvad.net should only be done from a tunnel state where a
@@ -1170,6 +1383,13 @@ impl Daemon {
             _ => return,
         };
 
+        if self.settings.update_default_location {
+            let (tx, _) = oneshot::channel();
+            let _ = self.tx.send(InternalDaemonEvent::Command(
+                DaemonCommand::UpdateDefaultLocationCountry(tx),
+            ));
+        }
+
         self.management_interface
             .notifier()
             .notify_new_state(self.tunnel_state.clone());
@@ -1199,7 +1419,7 @@ impl Daemon {
                     .active_features()
                     .any(|f| matches!(&f, FeatureIndicator::ServerIpOverride));
                 let new_feature_indicators =
-                    compute_feature_indicators(&self.settings.to_settings(), endpoint, ip_override);
+                    compute_feature_indicators(self.settings.settings(), endpoint, ip_override);
                 // Update and broadcast the new feature indicators if they have changed
                 if *feature_indicators != new_feature_indicators {
                     // Make sure to update the daemon's actual tunnel state. Otherwise, feature
@@ -1267,6 +1487,7 @@ impl Daemon {
             SubmitVoucher(tx, voucher) => self.on_submit_voucher(tx, voucher),
             GetRelayLocations(tx) => self.on_get_relay_locations(tx),
             UpdateRelayLocations => self.on_update_relay_locations().await,
+            UpdateDefaultLocationCountry(tx) => self.on_update_default_location(tx).await,
             LoginAccount(tx, account_number) => self.on_login_account(tx, account_number),
             LogoutAccount(tx) => self.on_logout_account(tx),
             GetDevice(tx) => self.on_get_device(tx),
@@ -1281,17 +1502,14 @@ impl Daemon {
             SetAllowLan(tx, allow_lan) => self.on_set_allow_lan(tx, allow_lan).await,
             SetShowBetaReleases(tx, enabled) => self.on_set_show_beta_releases(tx, enabled).await,
             #[cfg(not(target_os = "android"))]
-            SetBlockWhenDisconnected(tx, block_when_disconnected) => {
-                self.on_set_block_when_disconnected(tx, block_when_disconnected)
-                    .await
+            SetLockdownMode(tx, lockdown_mode) => {
+                self.on_set_lockdown_mode(tx, lockdown_mode).await
             }
             SetAutoConnect(tx, auto_connect) => self.on_set_auto_connect(tx, auto_connect).await,
-            SetOpenVpnMssfix(tx, mssfix_arg) => self.on_set_openvpn_mssfix(tx, mssfix_arg).await,
-            SetBridgeSettings(tx, bridge_settings) => {
-                self.on_set_bridge_settings(tx, bridge_settings).await
-            }
-            SetBridgeState(tx, bridge_state) => self.on_set_bridge_state(tx, bridge_state).await,
             SetEnableIpv6(tx, enable_ipv6) => self.on_set_enable_ipv6(tx, enable_ipv6).await,
+            SetEnableRecents(tx, enable_recents) => {
+                self.on_set_enable_recents(tx, enable_recents).await
+            }
             SetQuantumResistantTunnel(tx, quantum_resistant_state) => {
                 self.on_set_quantum_resistant_tunnel(tx, quantum_resistant_state)
                     .await
@@ -1312,6 +1530,9 @@ impl Daemon {
             }
             ClearAllRelayOverrides(tx) => self.on_clear_all_relay_overrides(tx).await,
             SetWireguardMtu(tx, mtu) => self.on_set_wireguard_mtu(tx, mtu).await,
+            SetWireguardAllowedIps(tx, allowed_ips) => {
+                self.on_set_wireguard_allowed_ips(tx, allowed_ips).await
+            }
             SetWireguardRotationInterval(tx, interval) => {
                 self.on_set_wireguard_rotation_interval(tx, interval).await
             }
@@ -1319,7 +1540,9 @@ impl Daemon {
             ResetSettings(tx) => self.on_reset_settings(tx).await,
             RotateWireguardKey(tx) => self.on_rotate_wireguard_key(tx),
             GetWireguardKey(tx) => self.on_get_wireguard_key(tx).await,
-            CreateCustomList(tx, name) => self.on_create_custom_list(tx, name).await,
+            CreateCustomList(tx, name, locations) => {
+                self.on_create_custom_list(tx, name, locations).await
+            }
             DeleteCustomList(tx, id) => self.on_delete_custom_list(tx, id).await,
             UpdateCustomList(tx, update) => self.on_update_custom_list(tx, update).await,
             ClearCustomLists(tx) => self.on_clear_custom_lists(tx).await,
@@ -1339,6 +1562,8 @@ impl Daemon {
             GetCurrentVersion(tx) => self.on_get_current_version(tx),
             #[cfg(not(target_os = "android"))]
             FactoryReset(tx) => self.on_factory_reset(tx).await,
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            SplitTunnelIsSupported(tx) => self.on_split_tunnel_is_supported(tx),
             #[cfg(target_os = "linux")]
             GetSplitTunnelProcesses(tx) => self.on_get_split_tunnel_processes(tx),
             #[cfg(target_os = "linux")]
@@ -1347,15 +1572,15 @@ impl Daemon {
             RemoveSplitTunnelProcess(tx, pid) => self.on_remove_split_tunnel_process(tx, pid),
             #[cfg(target_os = "linux")]
             ClearSplitTunnelProcesses(tx) => self.on_clear_split_tunnel_processes(tx),
-            #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
             AddSplitTunnelApp(tx, app) => self.on_add_split_tunnel_app(tx, app),
-            #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
             RemoveSplitTunnelApp(tx, path) => self.on_remove_split_tunnel_app(tx, path),
-            #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
             ClearSplitTunnelApps(tx) => self.on_clear_split_tunnel_apps(tx),
-            #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
             SetSplitTunnelState(tx, enabled) => self.on_set_split_tunnel_state(tx, enabled),
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             GetSplitTunnelProcesses(tx) => self.on_get_split_tunnel_processes(tx),
             #[cfg(target_os = "windows")]
             CheckVolumes(tx) => self.on_check_volumes(tx),
@@ -1374,6 +1599,25 @@ impl Daemon {
             ApplyJsonSettings(tx, blob) => self.on_apply_json_settings(tx, blob).await,
             ExportJsonSettings(tx) => self.on_export_json_settings(tx),
             GetFeatureIndicators(tx) => self.on_get_feature_indicators(tx),
+            DisableRelay { relay, tx } => self.on_toggle_relay(relay, false, tx),
+            EnableRelay { relay, tx } => self.on_toggle_relay(relay, true, tx),
+            #[cfg(not(target_os = "android"))]
+            GetRolloutThreshold(tx) => self.on_get_rollout_threshold(tx).await,
+            #[cfg(not(target_os = "android"))]
+            GenerateNewRolloutSeed(tx) => {
+                let seed = self.generate_and_set().await;
+                let threshold = Self::calculate_rollout_threshold(seed);
+                let _ = tx.send(threshold);
+            }
+            #[cfg(not(target_os = "android"))]
+            SetRolloutThresholdSeed { seed, tx } => {
+                self.set_rollout_threshold_seed(seed).await;
+                let _ = tx.send(());
+            }
+            AppUpgrade(tx) => self.on_app_upgrade(tx).await,
+            AppUpgradeAbort(tx) => self.on_app_upgrade_abort(tx).await,
+            GetAppUpgradeCacheDir(tx) => self.on_get_app_upgrade_cache_dir(tx).await,
+            GetBridges(tx) => self.on_get_bridges(tx),
         }
     }
 
@@ -1381,6 +1625,10 @@ impl Daemon {
         self.management_interface
             .notifier()
             .notify_app_version(app_version_info);
+    }
+
+    fn handle_leak_event(&mut self, leak: LeakInfo) {
+        self.management_interface.notifier().notify_leak(leak);
     }
 
     async fn handle_device_event(&mut self, event: AccountEvent) {
@@ -1396,10 +1644,23 @@ impl Daemon {
                         error.display_chain_with_msg("Failed to update account history")
                     );
                 }
+                if self.settings.update_default_location
+                    && let Err(e) = self
+                        .settings
+                        .update(move |settings| settings.update_default_location = false)
+                        .await
+                        .map_err(Error::SettingsError)
+                {
+                    log::error!(
+                        "{}",
+                        e.display_chain_with_msg("Unable to save has_updated_default_country")
+                    );
+                }
                 if *self.target_state == TargetState::Secured {
                     log::debug!("Initiating tunnel restart because the account number changed");
                     self.reconnect_tunnel();
                 }
+                self.update_recents().await;
             }
             AccountEvent::Device(PrivateDeviceEvent::Logout) => {
                 log::info!("Disconnecting because account number was cleared");
@@ -1413,19 +1674,17 @@ impl Daemon {
                 }
             }
             AccountEvent::Device(PrivateDeviceEvent::RotatedKey(_)) => {
-                if self.get_target_tunnel_type() == Some(TunnelType::Wireguard) {
-                    self.schedule_reconnect(WG_RECONNECT_DELAY);
-                }
+                self.schedule_reconnect(WG_RECONNECT_DELAY);
             }
             AccountEvent::Expiry(expiry) if *self.target_state == TargetState::Secured => {
                 if expiry >= &chrono::Utc::now() {
-                    if let TunnelState::Error(ref state) = self.tunnel_state {
-                        if matches!(state.cause(), ErrorStateCause::AuthFailed(_)) {
-                            log::debug!("Reconnecting since the account has time on it");
-                            self.connect_tunnel();
-                        }
+                    if let TunnelState::Error(ref state) = self.tunnel_state
+                        && matches!(state.cause(), ErrorStateCause::AuthFailed(_))
+                    {
+                        log::debug!("Reconnecting since the account has time on it");
+                        self.connect_tunnel();
                     }
-                } else if self.get_target_tunnel_type() == Some(TunnelType::Wireguard) {
+                } else {
                     log::debug!("Entering blocking state since the account is out of time");
                     self.send_tunnel_command(TunnelCommand::Block(ErrorStateCause::AuthFailed(
                         Some(AuthFailed::ExpiredAccount.as_str().to_string()),
@@ -1441,6 +1700,16 @@ impl Daemon {
         }
     }
 
+    fn save_connection_mode_to_cache(&self, connection_mode: ApiConnectionMode) {
+        // Save the new connection mode to cache!
+        let cache_dir = self.cache_dir.clone();
+        tokio::spawn(async move {
+            if connection_mode.save(&cache_dir).await.is_err() {
+                log::warn!("Failed to save {connection_mode:#?} to cache")
+            }
+        });
+    }
+
     fn handle_access_method_event(
         &mut self,
         event: AccessMethodEvent,
@@ -1448,7 +1717,12 @@ impl Daemon {
     ) {
         #[cfg(target_os = "android")]
         match event {
-            AccessMethodEvent::New { setting, .. } => {
+            AccessMethodEvent::New {
+                setting,
+                connection_mode,
+                ..
+            } => {
+                self.save_connection_mode_to_cache(connection_mode.clone());
                 // On android mullvad-api invokes protect on a socket to send requests
                 // outside the tunnel
                 let notifier = self.management_interface.notifier().clone();
@@ -1472,7 +1746,12 @@ impl Daemon {
                     let _ = endpoint_active_tx.send(());
                 });
             }
-            AccessMethodEvent::New { setting, endpoint } => {
+            AccessMethodEvent::New {
+                setting,
+                connection_mode,
+                endpoint,
+            } => {
+                self.save_connection_mode_to_cache(connection_mode.clone());
                 // Update the firewall to exempt a new API endpoint.
                 let (completion_tx, completion_rx) = oneshot::channel();
                 self.send_tunnel_command(TunnelCommand::AllowEndpoint(endpoint, completion_tx));
@@ -1532,18 +1811,43 @@ impl Daemon {
         });
     }
 
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     async fn handle_new_excluded_paths(
         &mut self,
         update: ExcludedPathsUpdate,
         tx: ResponseTx<(), Error>,
     ) {
         let save_result = match update {
-            ExcludedPathsUpdate::SetState(state) => self
-                .settings
-                .update(move |settings| settings.split_tunnel.enable_exclusions = state)
-                .await
-                .map_err(Error::SettingsError),
+            ExcludedPathsUpdate::SetState(state) => {
+                let split_tunnel_was_enabled =
+                    self.settings.settings().split_tunnel.enable_exclusions;
+                let save_result = self
+                    .settings
+                    .update(move |settings| settings.split_tunnel.enable_exclusions = state)
+                    .await
+                    .map_err(Error::SettingsError);
+                // If the user enables split tunneling without also enabling Full Disk Access
+                // (FDA), the daemon will enter the error state. This is unlikely, since it should
+                // only be possible via the CLI or if the user manages to disable FDA after having
+                // successfully enabled split tunneling. In any case, We have observed users
+                // getting confused over being blocked in this case, and this we may want to
+                // reconnect after disabling split tunneling.
+                //
+                // Since FDA is an implementation detail of split tunneling, we don't actually have
+                // a way of getting this information at this point, so we fallback to issuing a
+                // reconnect if the user disables split tunneling while in the error state. This
+                // code can be removed if we ever remove our dependency on FDA.
+                if cfg!(target_os = "macos") {
+                    let split_tunnel_will_be_disabled = !state;
+                    if self.tunnel_state.is_in_error_state()
+                        && split_tunnel_was_enabled
+                        && split_tunnel_will_be_disabled
+                    {
+                        self.reconnect_tunnel();
+                    }
+                }
+                save_result
+            }
             ExcludedPathsUpdate::SetPaths(paths) => self
                 .settings
                 .update(move |settings| settings.split_tunnel.apps = paths)
@@ -1585,10 +1889,10 @@ impl Daemon {
         let account_manager = self.account_manager.clone();
         tokio::spawn(async move {
             let result = async {
-                if let Ok(data) = account_manager.data().await {
-                    if data.logged_in() {
-                        return Err(Error::AlreadyLoggedIn);
-                    }
+                if let Ok(data) = account_manager.data().await
+                    && data.logged_in()
+                {
+                    return Err(Error::AlreadyLoggedIn);
                 }
                 let token = account_manager
                     .account_service
@@ -1624,24 +1928,27 @@ impl Daemon {
     }
 
     async fn on_get_www_auth_token(&mut self, tx: ResponseTx<String, Error>) {
-        if let Ok(Some(device)) = self.account_manager.data().await.map(|s| s.into_device()) {
-            let future = self
-                .account_manager
-                .account_service
-                .get_www_auth_token(device.account_number);
-            tokio::spawn(async {
+        match self.account_manager.data().await.map(|s| s.into_device()) {
+            Ok(Some(device)) => {
+                let future = self
+                    .account_manager
+                    .account_service
+                    .get_www_auth_token(device.account_number);
+                tokio::spawn(async {
+                    Self::oneshot_send(
+                        tx,
+                        future.await.map_err(Error::RestError),
+                        "get_www_auth_token response",
+                    );
+                });
+            }
+            _ => {
                 Self::oneshot_send(
                     tx,
-                    future.await.map_err(Error::RestError),
+                    Err(Error::NoAccountNumber),
                     "get_www_auth_token response",
                 );
-            });
-        } else {
-            Self::oneshot_send(
-                tx,
-                Err(Error::NoAccountNumber),
-                "get_www_auth_token response",
-            );
+            }
         }
     }
 
@@ -1663,13 +1970,52 @@ impl Daemon {
         Self::oneshot_send(tx, self.relay_selector.get_relays(), "relay locations");
     }
 
+    fn on_get_bridges(&mut self, tx: oneshot::Sender<BridgeList>) {
+        Self::oneshot_send(tx, self.relay_selector.get_bridges(), "bridges");
+    }
+
     async fn on_update_relay_locations(&mut self) {
         self.relay_list_updater.update().await;
+    }
+
+    async fn on_update_default_location(&mut self, tx: ResponseTx<(), settings::Error>) {
+        log::debug!(
+            "should_update_default_country: {}",
+            &self.settings.update_default_location
+        );
+
+        if self.settings.update_default_location
+            && let Some(location) = self.tunnel_state.get_location()
+            && let Some(country_code) = self.relay_selector.relay_list(|relays| {
+                relays
+                    .lookup_country_code_by_name(&location.country)
+                    .or_else(|| relays.get_nearest_country_with_relay(location))
+            })
+        {
+            log::info!("Updating location setting to '{country_code}'");
+            let relay_settings = RelaySettings::Normal(RelayConstraints {
+                location: Constraint::Only(LocationConstraint::Location(
+                    GeographicLocationConstraint::Country(country_code.clone()),
+                )),
+                wireguard_constraints: WireguardConstraints {
+                    entry_location: Constraint::Only(LocationConstraint::Location(
+                        GeographicLocationConstraint::Country(country_code),
+                    )),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+
+            self.on_set_relay_settings(tx, relay_settings).await;
+        } else {
+            let _ = tx.send(Ok(()));
+        }
     }
 
     fn on_login_account(&mut self, tx: ResponseTx<(), Error>, account_number: String) {
         let account_manager = self.account_manager.clone();
         let availability = self.api_runtime.availability_handle();
+
         tokio::spawn(async move {
             let result = async {
                 account_manager
@@ -1792,12 +2138,12 @@ impl Daemon {
     }
 
     fn on_get_version_info(&mut self, tx: oneshot::Sender<Result<AppVersionInfo, Error>>) {
-        let mut handle = self.version_updater_handle.clone();
+        let handle = self.version_handle.clone();
         tokio::spawn(async move {
             Self::oneshot_send(
                 tx,
                 handle
-                    .get_version_info()
+                    .get_latest_version()
                     .await
                     .inspect_err(|error| {
                         log::error!(
@@ -1811,10 +2157,12 @@ impl Daemon {
         });
     }
 
-    fn on_get_current_version(&mut self, tx: oneshot::Sender<AppVersion>) {
+    fn on_get_current_version(&mut self, tx: oneshot::Sender<mullvad_version::Version>) {
         Self::oneshot_send(
             tx,
-            mullvad_version::VERSION.to_owned(),
+            mullvad_version::VERSION
+                .parse::<mullvad_version::Version>()
+                .expect("Failed to parse version"),
             "get_current_version response",
         );
     }
@@ -1861,6 +2209,21 @@ impl Daemon {
         }));
     }
 
+    #[cfg(target_os = "windows")]
+    fn on_split_tunnel_is_supported(&mut self, tx: oneshot::Sender<bool>) {
+        Self::oneshot_send(
+            tx,
+            self.tunnel_state_machine_handle.split_tunnel().is_loaded(),
+            "split_tunnel_is_supported response",
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn on_split_tunnel_is_supported(&mut self, tx: oneshot::Sender<bool>) {
+        let supported = self.exclude_pids.is_supported();
+        Self::oneshot_send(tx, supported, "split_tunnel_is_supported response");
+    }
+
     #[cfg(target_os = "linux")]
     fn on_get_split_tunnel_processes(&mut self, tx: ResponseTx<Vec<i32>, split_tunnel::Error>) {
         let result = self.exclude_pids.list().inspect_err(|error| {
@@ -1898,7 +2261,7 @@ impl Daemon {
     }
 
     /// Update the split app paths in both the settings and tunnel
-    #[cfg(any(windows, target_os = "android"))]
+    #[cfg(any(target_os = "windows", target_os = "android"))]
     fn set_split_tunnel_paths(
         &mut self,
         tx: ResponseTx<(), Error>,
@@ -2036,7 +2399,7 @@ impl Daemon {
         );
     }
 
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     fn on_remove_split_tunnel_app(&mut self, tx: ResponseTx<(), Error>, app: impl Into<SplitApp>) {
         let settings = self.settings.to_settings();
 
@@ -2054,7 +2417,7 @@ impl Daemon {
         );
     }
 
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     fn on_clear_split_tunnel_apps(&mut self, tx: ResponseTx<(), Error>) {
         let settings = self.settings.to_settings();
         let new_list = HashSet::new();
@@ -2066,7 +2429,7 @@ impl Daemon {
         );
     }
 
-    #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_os = "macos"))]
     fn on_set_split_tunnel_state(&mut self, tx: ResponseTx<(), Error>, state: bool) {
         let settings = self.settings.to_settings();
         self.set_split_tunnel_paths(
@@ -2077,7 +2440,7 @@ impl Daemon {
         );
     }
 
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     fn on_get_split_tunnel_processes(
         &self,
         tx: ResponseTx<Vec<ExcludedProcess>, split_tunnel::Error>,
@@ -2091,7 +2454,7 @@ impl Daemon {
         );
     }
 
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     fn on_check_volumes(&mut self, tx: ResponseTx<(), Error>) {
         if self.volume_update_tx.unbounded_send(()).is_ok() {
             let _ = tx.send(Ok(()));
@@ -2120,6 +2483,19 @@ impl Daemon {
                 Self::oneshot_send(tx, Err(e), "set_relay_settings response");
             }
         }
+        if self.settings.update_default_location
+            && let Err(e) = self
+                .settings
+                .update(move |settings| settings.update_default_location = false)
+                .await
+                .map_err(Error::SettingsError)
+        {
+            log::error!(
+                "{}",
+                e.display_chain_with_msg("Unable to save has_updated_default_country")
+            );
+        }
+        self.update_recents().await;
     }
 
     async fn on_set_allow_lan(&mut self, tx: ResponseTx<(), settings::Error>, allow_lan: bool) {
@@ -2160,8 +2536,12 @@ impl Daemon {
             Ok(settings_changed) => {
                 Self::oneshot_send(tx, Ok(()), "set_show_beta_releases response");
                 if settings_changed {
-                    let mut handle = self.version_updater_handle.clone();
-                    handle.set_show_beta_releases(enabled).await;
+                    let version_handle = self.version_handle.clone();
+                    tokio::spawn(async move {
+                        if let Err(error) = version_handle.set_show_beta_releases(enabled).await {
+                            log::error!("Failed to reset beta releases state: {error}");
+                        }
+                    });
                 }
             }
             Err(e) => {
@@ -2172,31 +2552,31 @@ impl Daemon {
     }
 
     #[cfg(not(target_os = "android"))]
-    async fn on_set_block_when_disconnected(
+    async fn on_set_lockdown_mode(
         &mut self,
         tx: ResponseTx<(), settings::Error>,
-        block_when_disconnected: bool,
+        lockdown_mode: bool,
     ) {
         match self
             .settings
-            .update(move |settings| settings.block_when_disconnected = block_when_disconnected)
+            .update(move |settings| settings.lockdown_mode = lockdown_mode)
             .await
         {
             Ok(settings_changed) => {
                 if settings_changed {
-                    self.send_tunnel_command(TunnelCommand::BlockWhenDisconnected(
-                        block_when_disconnected,
+                    self.send_tunnel_command(TunnelCommand::LockdownMode(
+                        LockdownMode::from(lockdown_mode),
                         oneshot_map(tx, |tx, ()| {
-                            Self::oneshot_send(tx, Ok(()), "set_block_when_disconnected response");
+                            Self::oneshot_send(tx, Ok(()), "set_lockdown_mode response");
                         }),
                     ));
                 } else {
-                    Self::oneshot_send(tx, Ok(()), "set_block_when_disconnected response");
+                    Self::oneshot_send(tx, Ok(()), "set_lockdown_mode response");
                 }
             }
             Err(e) => {
                 log::error!("{}", e.display_chain_with_msg("Unable to save settings"));
-                Self::oneshot_send(tx, Err(e), "set_block_when_disconnected response");
+                Self::oneshot_send(tx, Err(e), "set_lockdown_mode response");
             }
         }
     }
@@ -2217,75 +2597,6 @@ impl Daemon {
             Err(e) => {
                 log::error!("{}", e.display_chain_with_msg("Unable to save settings"));
                 Self::oneshot_send(tx, Err(e), "set auto-connect response");
-            }
-        }
-    }
-
-    async fn on_set_openvpn_mssfix(
-        &mut self,
-        tx: ResponseTx<(), settings::Error>,
-        mssfix: Option<u16>,
-    ) {
-        match self
-            .settings
-            .update(move |settings| settings.tunnel_options.openvpn.mssfix = mssfix)
-            .await
-        {
-            Ok(settings_changed) => {
-                Self::oneshot_send(tx, Ok(()), "set_openvpn_mssfix response");
-                if settings_changed && self.get_target_tunnel_type() == Some(TunnelType::OpenVpn) {
-                    log::info!(
-                        "Initiating tunnel restart because the OpenVPN mssfix setting changed"
-                    );
-                    self.reconnect_tunnel();
-                }
-            }
-            Err(e) => {
-                log::error!("{}", e.display_chain_with_msg("Unable to save settings"));
-                Self::oneshot_send(tx, Err(e), "set_openvpn_mssfix response");
-            }
-        }
-    }
-
-    async fn on_set_bridge_settings(
-        &mut self,
-        tx: ResponseTx<(), Error>,
-        new_settings: BridgeSettings,
-    ) {
-        if new_settings.custom.is_none() && new_settings.bridge_type == BridgeType::Custom {
-            log::info!("Tried to select custom bridge but no custom bridge settings exist");
-            Self::oneshot_send(
-                tx,
-                Err(Error::NoCustomProxySaved),
-                "set_bridge_settings response",
-            );
-            return;
-        }
-
-        match self
-            .settings
-            .update(move |settings| settings.bridge_settings = new_settings)
-            .await
-        {
-            Ok(settings_changes) => {
-                if settings_changes {
-                    let access_mode_handler = self.access_mode_handler.clone();
-                    tokio::spawn(async move {
-                        if let Err(error) = access_mode_handler.rotate().await {
-                            log::error!("Failed to rotate API endpoint: {error}");
-                        }
-                    });
-                    self.reconnect_tunnel();
-                };
-                Self::oneshot_send(tx, Ok(()), "set_bridge_settings");
-            }
-
-            Err(e) => {
-                log::error!(
-                    "{}",
-                    e.display_chain_with_msg("Failed to set new bridge settings")
-                );
-                Self::oneshot_send(tx, Err(Error::SettingsError(e)), "set_bridge_settings");
             }
         }
     }
@@ -2316,34 +2627,6 @@ impl Daemon {
         }
     }
 
-    async fn on_set_bridge_state(
-        &mut self,
-        tx: ResponseTx<(), settings::Error>,
-        bridge_state: BridgeState,
-    ) {
-        let result = match self
-            .settings
-            .update(move |settings| settings.bridge_state = bridge_state)
-            .await
-        {
-            Ok(settings_changed) => {
-                if settings_changed {
-                    log::info!("Initiating tunnel restart because bridge state changed");
-                    self.reconnect_tunnel();
-                }
-                Ok(())
-            }
-            Err(error) => {
-                log::error!(
-                    "{}",
-                    error.display_chain_with_msg("Failed to set new bridge state")
-                );
-                Err(error)
-            }
-        };
-        Self::oneshot_send(tx, result, "on_set_bridge_state response");
-    }
-
     async fn on_set_enable_ipv6(&mut self, tx: ResponseTx<(), settings::Error>, enable_ipv6: bool) {
         match self
             .settings
@@ -2364,6 +2647,35 @@ impl Daemon {
         }
     }
 
+    async fn on_set_enable_recents(
+        &mut self,
+        tx: ResponseTx<(), settings::Error>,
+        enable_recents: bool,
+    ) {
+        match self
+            .settings
+            .update(|settings| match settings.recents {
+                None if enable_recents => {
+                    settings.recents = Some(vec![]);
+                    settings.update_recents();
+                }
+                Some(_) if !enable_recents => {
+                    settings.recents = None;
+                }
+                _ => (),
+            })
+            .await
+        {
+            Ok(_) => {
+                Self::oneshot_send(tx, Ok(()), "set_enable_recents response");
+            }
+            Err(e) => {
+                log::error!("{}", e.display_chain_with_msg("Unable to save settings"));
+                Self::oneshot_send(tx, Err(e), "set_enable_recents response");
+            }
+        }
+    }
+
     async fn on_set_quantum_resistant_tunnel(
         &mut self,
         tx: ResponseTx<(), settings::Error>,
@@ -2378,8 +2690,7 @@ impl Daemon {
         {
             Ok(settings_changed) => {
                 Self::oneshot_send(tx, Ok(()), "set_quantum_resistant_tunnel response");
-                if settings_changed && self.get_target_tunnel_type() == Some(TunnelType::Wireguard)
-                {
+                if settings_changed {
                     log::info!("Reconnecting because the PQ safety setting changed");
                     self.reconnect_tunnel();
                 }
@@ -2393,8 +2704,6 @@ impl Daemon {
 
     #[cfg(daita)]
     async fn on_set_daita_enabled(&mut self, tx: ResponseTx<(), settings::Error>, value: bool) {
-        use mullvad_types::{constraints::Constraint, Intersection};
-
         let result = self
             .settings
             .update(|settings| {
@@ -2405,16 +2714,11 @@ impl Daemon {
         match result {
             Ok(settings_changed) => {
                 Self::oneshot_send(tx, Ok(()), "set_daita_enabled response");
-                let RelaySettings::Normal(constraints) = &self.settings.relay_settings else {
+                if let RelaySettings::CustomTunnelEndpoint(_) = &self.settings.relay_settings {
                     return; // DAITA is not supported for custom relays
-                };
+                }
 
-                let wireguard_enabled = constraints
-                    .tunnel_protocol
-                    .intersection(Constraint::Only(TunnelType::Wireguard))
-                    .is_some();
-
-                if settings_changed && wireguard_enabled {
+                if settings_changed {
                     log::info!("Reconnecting because DAITA settings changed");
                     self.reconnect_tunnel();
                 }
@@ -2432,8 +2736,6 @@ impl Daemon {
         tx: ResponseTx<(), settings::Error>,
         value: bool,
     ) {
-        use mullvad_types::{constraints::Constraint, Intersection};
-
         match self
             .settings
             .update(|settings| {
@@ -2448,18 +2750,13 @@ impl Daemon {
             Ok(settings_changed) => {
                 Self::oneshot_send(tx, Ok(()), "set_daita_use_multihop_if_necessary response");
 
-                let RelaySettings::Normal(constraints) = &self.settings.relay_settings else {
+                if let RelaySettings::CustomTunnelEndpoint(_) = &self.settings.relay_settings {
                     return; // DAITA is not supported for custom relays
-                };
-
-                let wireguard_enabled = constraints
-                    .tunnel_protocol
-                    .intersection(Constraint::Only(TunnelType::Wireguard))
-                    .is_some();
+                }
 
                 let daita_enabled = self.settings.tunnel_options.wireguard.daita.enabled;
 
-                if settings_changed && wireguard_enabled && daita_enabled {
+                if settings_changed && daita_enabled {
                     log::info!("Reconnecting because DAITA settings changed");
                     self.reconnect_tunnel();
                 }
@@ -2484,7 +2781,7 @@ impl Daemon {
         {
             Ok(settings_changed) => {
                 Self::oneshot_send(tx, Ok(()), "set_daita_settings response");
-                if settings_changed && self.get_target_tunnel_type() != Some(TunnelType::OpenVpn) {
+                if settings_changed {
                     log::info!("Reconnecting because DAITA settings changed");
                     self.reconnect_tunnel();
                 }
@@ -2508,7 +2805,7 @@ impl Daemon {
         {
             Ok(settings_changed) => {
                 if settings_changed {
-                    let settings = self.settings.to_settings();
+                    let settings = self.settings.settings();
                     let resolvers =
                         dns::addresses_from_options(&settings.tunnel_options.dns_options);
                     self.send_tunnel_command(TunnelCommand::Dns(
@@ -2583,12 +2880,10 @@ impl Daemon {
             Ok(settings_changed) => {
                 Self::oneshot_send(tx, Ok(()), "set_wireguard_mtu response");
                 if settings_changed {
-                    if let Some(TunnelType::Wireguard) = self.get_connected_tunnel_type() {
-                        log::info!(
-                            "Initiating tunnel restart because the WireGuard MTU setting changed"
-                        );
-                        self.reconnect_tunnel();
-                    }
+                    log::info!(
+                        "Initiating tunnel restart because the WireGuard MTU setting changed"
+                    );
+                    self.reconnect_tunnel();
                 }
             }
             Err(e) => {
@@ -2610,22 +2905,51 @@ impl Daemon {
         {
             Ok(settings_changed) => {
                 Self::oneshot_send(tx, Ok(()), "set_wireguard_rotation_interval response");
-                if settings_changed {
-                    if let Err(error) = self
+                if settings_changed
+                    && let Err(error) = self
                         .account_manager
                         .set_rotation_interval(interval.unwrap_or_default())
                         .await
-                    {
-                        log::error!(
-                            "{}",
-                            error.display_chain_with_msg("Failed to update rotation interval")
-                        );
-                    }
+                {
+                    log::error!(
+                        "{}",
+                        error.display_chain_with_msg("Failed to update rotation interval")
+                    );
                 }
             }
             Err(e) => {
                 log::error!("{}", e.display_chain_with_msg("Unable to save settings"));
                 Self::oneshot_send(tx, Err(e), "set_wireguard_rotation_interval response");
+            }
+        }
+    }
+
+    async fn on_set_wireguard_allowed_ips(
+        &mut self,
+        tx: ResponseTx<(), settings::Error>,
+        allowed_ips: Constraint<AllowedIps>,
+    ) {
+        match self
+            .settings
+            .update(move |settings| {
+                if let RelaySettings::Normal(ref mut relay_settings) = settings.relay_settings {
+                    relay_settings.wireguard_constraints.allowed_ips = allowed_ips;
+                }
+            })
+            .await
+        {
+            Ok(settings_changed) => {
+                Self::oneshot_send(tx, Ok(()), "set_wireguard_allowed_ips response");
+                if settings_changed {
+                    log::info!(
+                        "Initiating tunnel restart because the WireGuard allowed IPs setting changed"
+                    );
+                    self.reconnect_tunnel();
+                }
+            }
+            Err(e) => {
+                log::error!("{}", e.display_chain_with_msg("Unable to save settings"));
+                Self::oneshot_send(tx, Err(e), "set_wireguard_allowed_ips response");
             }
         }
     }
@@ -2643,12 +2967,10 @@ impl Daemon {
     }
 
     async fn on_get_wireguard_key(&self, tx: ResponseTx<Option<PublicKey>, Error>) {
-        let result =
-            if let Ok(Some(config)) = self.account_manager.data().await.map(|s| s.into_device()) {
-                Ok(Some(config.device.wg_data.get_public_key()))
-            } else {
-                Err(Error::NoAccountNumber)
-            };
+        let result = match self.account_manager.data().await.map(|s| s.into_device()) {
+            Ok(Some(config)) => Ok(Some(config.device.wg_data.get_public_key())),
+            _ => Err(Error::NoAccountNumber),
+        };
         Self::oneshot_send(tx, result, "get_wireguard_key response");
     }
 
@@ -2656,8 +2978,9 @@ impl Daemon {
         &mut self,
         tx: ResponseTx<mullvad_types::custom_list::Id, Error>,
         name: String,
+        locations: BTreeSet<GeographicLocationConstraint>,
     ) {
-        let result = self.create_custom_list(name).await;
+        let result = self.create_custom_list(name, locations).await;
         Self::oneshot_send(tx, result, "create_custom_list response");
     }
 
@@ -2687,10 +3010,7 @@ impl Daemon {
         enabled: bool,
         access_method: AccessMethod,
     ) {
-        let result = self
-            .add_access_method(name, enabled, access_method)
-            .await
-            .map_err(Error::AccessMethodError);
+        let result = self.add_access_method(name, enabled, access_method).await;
         Self::oneshot_send(tx, result, "add_api_access_method response");
     }
 
@@ -2723,10 +3043,7 @@ impl Daemon {
         tx: ResponseTx<(), Error>,
         method: AccessMethodSetting,
     ) {
-        let result = self
-            .update_access_method(method)
-            .await
-            .map_err(Error::AccessMethodError);
+        let result = self.update_access_method(method).await;
         Self::oneshot_send(tx, result, "update_api_access_method response");
     }
 
@@ -2804,9 +3121,10 @@ impl Daemon {
         {
             Ok(Some(test_subject)) => test_subject,
             Ok(None) => {
-                let error = Error::ApiConnectionModeError(self::api::Error::Resolve {
-                    access_method: access_method.access_method,
-                });
+                let error =
+                    Error::ApiConnectionModeError(mullvad_api::access_mode::Error::Resolve {
+                        access_method: access_method.access_method,
+                    });
                 reply(Err(error));
                 return;
             }
@@ -2864,8 +3182,8 @@ impl Daemon {
         #[cfg(not(target_os = "android"))]
         {
             let (tx, _rx) = oneshot::channel();
-            self.send_tunnel_command(TunnelCommand::BlockWhenDisconnected(
-                self.settings.block_when_disconnected,
+            self.send_tunnel_command(TunnelCommand::LockdownMode(
+                LockdownMode::from(self.settings.lockdown_mode),
                 tx,
             ));
         }
@@ -2877,9 +3195,16 @@ impl Daemon {
         let dns = dns::addresses_from_options(&self.settings.tunnel_options.dns_options);
         self.send_tunnel_command(TunnelCommand::Dns(dns, tx));
 
-        self.version_updater_handle
-            .set_show_beta_releases(self.settings.show_beta_releases)
-            .await;
+        let version_handle = self.version_handle.clone();
+        let show_beta_releases = self.settings.show_beta_releases;
+        tokio::spawn(async move {
+            if let Err(error) = version_handle
+                .set_show_beta_releases(show_beta_releases)
+                .await
+            {
+                log::error!("Failed to reset beta releases state: {error}");
+            }
+        });
         let access_mode_handler = self.access_mode_handler.clone();
         tokio::spawn(async move {
             if let Err(error) = access_mode_handler.rotate().await {
@@ -2904,13 +3229,55 @@ impl Daemon {
         self.reconnect_tunnel();
     }
 
+    #[cfg(not(target_os = "android"))]
+    async fn on_get_rollout_threshold(&mut self, reply: oneshot::Sender<f32>) {
+        let seed = match self.settings.rollout_threshold_seed {
+            Some(seed) => seed,
+            None => self.generate_and_set().await,
+        };
+        let _ = reply.send(Self::calculate_rollout_threshold(seed));
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn calculate_rollout_threshold(seed: u32) -> f32 {
+        let version = mullvad_version::VERSION
+            .parse::<mullvad_version::Version>()
+            .expect("Failed to parse version");
+        let threshold = Rollout::threshold(seed, version);
+        // a tiny bit hacky way to map Rollout -> f32, but it works.
+        threshold
+            .to_string()
+            .parse()
+            .expect("threshold is a valid Rollout is a valid f32")
+    }
+
+    // Regenrate a new seed and store it to settings.
+    #[cfg(not(target_os = "android"))]
+    async fn generate_and_set(&mut self) -> u32 {
+        let seed = Rollout::seed();
+        self.set_rollout_threshold_seed(seed).await;
+        seed
+    }
+
+    // Store the given seed to settings.
+    #[cfg(not(target_os = "android"))]
+    async fn set_rollout_threshold_seed(&mut self, seed: u32) {
+        if let Err(err) = self
+            .settings
+            .update(|settings| settings.rollout_threshold_seed = Some(seed))
+            .await
+        {
+            log::warn!("Failed to save settings when updating rollout seed: {err}");
+        }
+    }
+
     fn oneshot_send<T>(tx: oneshot::Sender<T>, t: T, msg: &'static str) {
         if tx.send(t).is_err() {
             log::warn!("Unable to send {} to the daemon command sender", msg);
         }
     }
 
-    #[cfg_attr(target_os = "android", allow(unused_variables))]
+    #[cfg_attr(target_os = "android", expect(unused_variables))]
     fn on_trigger_shutdown(&mut self, user_init_shutdown: bool) {
         // Block all traffic before shutting down to ensure that no traffic can leak on boot or
         // shutdown.
@@ -2920,7 +3287,7 @@ impl Daemon {
         {
             log::debug!("Blocking firewall during shutdown");
             let (tx, _rx) = oneshot::channel();
-            self.send_tunnel_command(TunnelCommand::BlockWhenDisconnected(true, tx));
+            self.send_tunnel_command(TunnelCommand::LockdownMode(LockdownMode::yes(), tx));
         }
 
         self.disconnect_tunnel();
@@ -2935,8 +3302,20 @@ impl Daemon {
         //       without causing the service to be restarted.
         #[cfg(not(target_os = "android"))]
         if *self.target_state == TargetState::Secured {
+            let persist = if cfg!(target_os = "windows") {
+                // During app upgrades, as a safety measure, we make the firewall filters
+                // non-persistent. If the installation of the new version fails and
+                // the user is left in blocked state with no app, they can reboot
+                // to regain internet access.
+                self.settings.settings().lockdown_mode || self.settings.settings().auto_connect
+            } else {
+                true
+            };
             let (tx, _rx) = oneshot::channel();
-            self.send_tunnel_command(TunnelCommand::BlockWhenDisconnected(true, tx));
+            self.send_tunnel_command(TunnelCommand::LockdownMode(
+                LockdownMode::yes().persist(persist),
+                tx,
+            ));
         }
         self.target_state.lock();
 
@@ -3019,6 +3398,98 @@ impl Daemon {
         Self::oneshot_send(tx, feature_indicators, "get_feature_indicators response");
     }
 
+    // Debug features
+
+    /// Mark [relay] as active or inactive in the daemon's relay list.
+    fn on_toggle_relay(&mut self, relay: String, active: bool, tx: oneshot::Sender<()>) {
+        use mullvad_types::relay_list::RelayList;
+        let relays = {
+            let relay_list = self.relay_selector.get_relays();
+            let countries = {
+                let mut countries = relay_list.countries;
+                for country in &mut countries {
+                    let matching_country = relay == country.name;
+                    for city in &mut country.cities {
+                        let matching_city = relay == city.name;
+                        for settings_relay in &mut city.relays {
+                            let matching_relay = relay == settings_relay.hostname;
+                            if matching_relay || matching_city || matching_country {
+                                settings_relay.active = active;
+                            }
+                        }
+                    }
+                }
+                countries
+            };
+            RelayList {
+                countries,
+                ..relay_list
+            }
+        };
+
+        self.relay_selector.set_relays(relays.clone());
+
+        self.management_interface
+            .notifier()
+            .notify_relay_list(relays);
+
+        self.reconnect_tunnel();
+
+        Self::oneshot_send(tx, (), "on_toggle_relay response");
+    }
+
+    #[cfg_attr(not(in_app_upgrade), expect(clippy::unused_async))]
+    async fn on_app_upgrade(&self, tx: ResponseTx<(), version::Error>) {
+        #[cfg(in_app_upgrade)]
+        {
+            let result = self.version_handle.update_application().await;
+            Self::oneshot_send(tx, result, "on_app_upgrade response");
+        }
+        #[cfg(not(in_app_upgrade))]
+        {
+            log::warn!("Ignoring app upgrade command as in-app upgrades are disabled on this OS");
+            Self::oneshot_send(tx, Ok(()), "on_app_upgrade response")
+        };
+    }
+
+    #[cfg_attr(not(in_app_upgrade), expect(clippy::unused_async))]
+    async fn on_app_upgrade_abort(&self, tx: ResponseTx<(), version::Error>) {
+        #[cfg(in_app_upgrade)]
+        {
+            let result = self.version_handle.cancel_update().await;
+            Self::oneshot_send(tx, result, "on_app_upgrade_abort response");
+        }
+        #[cfg(not(in_app_upgrade))]
+        {
+            log::warn!(
+                "Ignoring cancel app upgrade command as in-app upgrades are disabled on this OS"
+            );
+
+            Self::oneshot_send(tx, Ok(()), "on_app_upgrade_abort response")
+        };
+    }
+
+    #[cfg_attr(not(in_app_upgrade), expect(clippy::unused_async))]
+    async fn on_get_app_upgrade_cache_dir(&self, tx: ResponseTx<PathBuf, version::Error>) {
+        #[cfg(in_app_upgrade)]
+        {
+            let result = self.version_handle.get_cache_dir().await;
+            Self::oneshot_send(tx, result, "on_get_app_upgrade_cache_dir response");
+        }
+        #[cfg(not(in_app_upgrade))]
+        {
+            log::warn!(
+                "Can't get cache dir for app upgrades since in-app upgrades are disabled on this OS"
+            );
+
+            Self::oneshot_send(
+                tx,
+                Ok(PathBuf::new()),
+                "on_get_app_upgrade_cache_dir response",
+            )
+        };
+    }
+
     /// Set the target state of the client. If it changed trigger the operations needed to
     /// progress towards that state.
     /// Returns a bool representing whether a state change was initiated.
@@ -3052,17 +3523,6 @@ impl Daemon {
         }
     }
 
-    const fn get_connected_tunnel_type(&self) -> Option<TunnelType> {
-        match self.tunnel_state.get_tunnel_type() {
-            Some(tunnel_type) if self.tunnel_state.is_connected() => Some(tunnel_type),
-            Some(_) | None => None,
-        }
-    }
-
-    const fn get_target_tunnel_type(&self) -> Option<TunnelType> {
-        self.tunnel_state.get_tunnel_type()
-    }
-
     fn send_tunnel_command(&self, command: TunnelCommand) {
         self.tunnel_state_machine_handle
             .command_tx()
@@ -3073,6 +3533,19 @@ impl Daemon {
     pub fn shutdown_handle(&self) -> DaemonShutdownHandle {
         DaemonShutdownHandle {
             tx: self.tx.clone(),
+        }
+    }
+
+    async fn update_recents(&mut self) {
+        if let Err(e) = self
+            .settings
+            .update(move |settings| settings.update_recents())
+            .await
+        {
+            log::error!(
+                "{}",
+                e.display_chain_with_msg("Unable to save recents to settings")
+            );
         }
     }
 }
@@ -3106,11 +3579,11 @@ fn oneshot_map<T1: Send + 'static, T2: Send + 'static>(
 }
 
 /// Remove any old RPC socket (if it exists).
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 pub async fn cleanup_old_rpc_socket(rpc_socket_path: impl AsRef<std::path::Path>) {
-    if let Err(err) = tokio::fs::remove_file(rpc_socket_path).await {
-        if err.kind() != std::io::ErrorKind::NotFound {
-            log::error!("Failed to remove old RPC socket: {}", err);
-        }
+    if let Err(err) = tokio::fs::remove_file(rpc_socket_path).await
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        log::error!("Failed to remove old RPC socket: {}", err);
     }
 }

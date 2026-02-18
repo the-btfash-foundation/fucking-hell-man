@@ -3,7 +3,7 @@
 //  PacketTunnel
 //
 //  Created by Marco Nikic on 2024-02-16.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -36,7 +36,6 @@ public class EphemeralPeerNegotiator: EphemeralPeerNegotiating {
         peerReceiver: any TunnelProvider,
         ephemeralPeerParams: EphemeralPeerParameters
     ) -> Bool {
-        // swiftlint:disable:next force_cast
         let ephemeralPeerReceiver = Unmanaged.passUnretained(peerReceiver as! EphemeralPeerReceiver)
             .toOpaque()
 

@@ -1,13 +1,14 @@
 use byteorder::{ByteOrder, NativeEndian};
-use nix::sys::{socket::InetAddr, time::TimeSpec};
+use netlink_packet_core::DecodeError;
+use nix::sys::socket::{SockaddrIn, SockaddrIn6};
 use std::{
     ffi::{CStr, CString},
-    mem,
-    net::IpAddr,
+    mem::{self, transmute},
+    net::{IpAddr, SocketAddr},
 };
+use zerocopy::FromBytes;
 
-pub use netlink_packet_utils::parsers::*;
-use netlink_packet_utils::DecodeError;
+use super::timespec::KernelTimespec;
 
 pub fn parse_ip_addr(bytes: &[u8]) -> Result<IpAddr, DecodeError> {
     if bytes.len() == 4 {
@@ -35,47 +36,55 @@ pub fn parse_wg_key(buffer: &[u8]) -> Result<[u8; 32], DecodeError> {
     }
 }
 
-pub fn parse_inet_sockaddr(buffer: &[u8]) -> Result<InetAddr, DecodeError> {
-    if buffer.len() != mem::size_of::<libc::sockaddr_in6>()
-        && buffer.len() != mem::size_of::<libc::sockaddr_in>()
-    {
-        return Err(format!(
+pub fn parse_inet_sockaddr(buffer: &[u8]) -> Result<SocketAddr, DecodeError> {
+    let wrong_len = || {
+        format!(
             "Unexpected length for sockaddr_in: {}, expected {} or {}",
             buffer.len(),
             mem::size_of::<libc::sockaddr_in6>(),
             mem::size_of::<libc::sockaddr_in>()
         )
-        .into());
-    }
-    let ptr = buffer.as_ptr();
+    };
+
     const AF_INET: u16 = libc::AF_INET as u16;
     const AF_INET6: u16 = libc::AF_INET6 as u16;
 
+    if buffer.len() < size_of::<u16>() {
+        return Err(wrong_len().into());
+    }
+
     match NativeEndian::read_u16(buffer) {
-        AF_INET => unsafe {
-            let sockaddr: *const libc::sockaddr_in = ptr as *const _;
-            Ok(InetAddr::V4(*sockaddr))
-        },
-        AF_INET6 => unsafe {
-            let sockaddr: *const libc::sockaddr_in6 = ptr as *const _;
-            Ok(InetAddr::V6(*sockaddr))
-        },
+        AF_INET => {
+            let buffer: &[u8; size_of::<libc::sockaddr_in>()] =
+                buffer.try_into().map_err(|_| wrong_len())?;
+
+            // SAFETY: sockaddr_in has a defined repr(C) layout and is valid for all bit patterns
+            let sockaddr: libc::sockaddr_in = unsafe { transmute(*buffer) };
+            let sockaddr = SockaddrIn::from(sockaddr);
+
+            Ok(SocketAddr::from(sockaddr))
+        }
+        AF_INET6 => {
+            let buffer: &[u8; size_of::<libc::sockaddr_in6>()] =
+                buffer.try_into().map_err(|_| wrong_len())?;
+
+            // SAFETY: sockaddr_in6 has a defined repr(C) layout and is valid for all bit patterns
+            let sockaddr: libc::sockaddr_in6 = unsafe { transmute(*buffer) };
+            let sockaddr = SockaddrIn6::from(sockaddr);
+
+            Ok(SocketAddr::from(sockaddr))
+        }
         unexpected_addr_family => {
             Err(format!("Unexpected address family: {unexpected_addr_family}").into())
         }
     }
 }
 
-pub fn parse_timespec(buffer: &[u8]) -> Result<TimeSpec, DecodeError> {
-    if buffer.len() != mem::size_of::<libc::timespec>() {
-        return Err(format!("Unexpected size for timespec: {}", buffer.len()).into());
-    }
-
-    Ok(TimeSpec::from(libc::timespec {
-        tv_sec: NativeEndian::read_i64(buffer),
-        // TODO: become compatible with 32-bit systems maybe?
-        tv_nsec: NativeEndian::read_i64(buffer),
-    }))
+/// Parse the last WireGuard handshake timestamp.
+/// The resulting [SystemTime] is a timestamp relative to [SystemTime::UNIX_EPOCH].
+pub fn parse_last_handshake_time(buffer: &[u8]) -> Result<KernelTimespec, DecodeError> {
+    KernelTimespec::read_from_bytes(buffer)
+        .map_err(|_err| format!("Unexpected size for timespec: {}", buffer.len()).into())
 }
 
 pub fn parse_cstring(buffer: &[u8]) -> Result<CString, DecodeError> {

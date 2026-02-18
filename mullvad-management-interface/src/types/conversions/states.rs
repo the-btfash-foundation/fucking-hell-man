@@ -1,11 +1,12 @@
-use crate::types::{proto, FromProtobufTypeError};
+use crate::types::{FromProtobufTypeError, proto};
+use talpid_types::net::IpVersion;
 
 impl From<mullvad_types::states::TunnelState> for proto::TunnelState {
     fn from(state: mullvad_types::states::TunnelState) -> Self {
         use mullvad_types::states::TunnelState as MullvadTunnelState;
         use proto::error_state::{
-            firewall_policy_error::ErrorType as PolicyErrorType, Cause, FirewallPolicyError,
-            GenerationError,
+            Cause, FirewallPolicyError, GenerationError,
+            firewall_policy_error::ErrorType as PolicyErrorType,
         };
 
         use talpid_types::tunnel as talpid_tunnel;
@@ -147,7 +148,7 @@ impl From<mullvad_types::states::TunnelState> for proto::TunnelState {
                                 error_state.cause()
                             {
                                 Some(proto::error_state::OtherAlwaysOnAppError {
-                                    app_name: app_name.to_string(),
+                                    app_name: app_name.clone(),
                                 })
                             } else {
                                 None
@@ -178,17 +179,26 @@ impl From<mullvad_types::states::TunnelState> for proto::TunnelState {
                                 error_state.cause()
                             {
                                 match reason {
-                                talpid_tunnel::ParameterGenerationError::NoMatchingRelay => {
-                                    i32::from(GenerationError::NoMatchingRelay)
+                                talpid_tunnel::ParameterGenerationError::NoMatchingRelayEntry => {
+                                    i32::from(GenerationError::NoMatchingRelayEntry)
                                 }
+                                talpid_tunnel::ParameterGenerationError::NoMatchingRelayExit => {
+                                    i32::from(GenerationError::NoMatchingRelayExit)
+                                }
+                                    talpid_tunnel::ParameterGenerationError::NoMatchingRelay => {
+                                        i32::from(GenerationError::NoMatchingRelay)
+                                    }
                                 talpid_tunnel::ParameterGenerationError::NoMatchingBridgeRelay => {
                                     i32::from(GenerationError::NoMatchingBridgeRelay)
                                 }
-                                talpid_tunnel::ParameterGenerationError::NoWireguardKey => {
-                                    i32::from(GenerationError::NoWireguardKey)
-                                }
-                                talpid_tunnel::ParameterGenerationError::CustomTunnelHostResultionError => {
+                                talpid_tunnel::ParameterGenerationError::CustomTunnelHostResolutionError => {
                                     i32::from(GenerationError::CustomTunnelHostResolutionError)
+                                }
+                                talpid_tunnel::ParameterGenerationError::IpVersionUnavailable { family: IpVersion::V4 } => {
+                                    i32::from(GenerationError::NetworkIpv4Unavailable)
+                                }
+                                talpid_tunnel::ParameterGenerationError::IpVersionUnavailable { family: IpVersion::V6 } => {
+                                    i32::from(GenerationError::NetworkIpv6Unavailable)
                                 }
                             }
                             } else {
@@ -262,7 +272,7 @@ impl TryFrom<proto::TunnelState> for mullvad_types::states::TunnelState {
         use talpid_types::{net as talpid_net, tunnel as talpid_tunnel};
 
         let state = match state.state {
-            #[cfg_attr(target_os = "android", allow(unused_variables))]
+            #[cfg_attr(target_os = "android", expect(unused_variables))]
             Some(proto::tunnel_state::State::Disconnected(proto::tunnel_state::Disconnected {
                 disconnected_location,
                 locked_down,
@@ -325,7 +335,7 @@ impl TryFrom<proto::TunnelState> for mullvad_types::states::TunnelState {
                     _ => {
                         return Err(FromProtobufTypeError::InvalidArgument(
                             "invalid \"after_disconnect\" action",
-                        ))
+                        ));
                     }
                 },
             ),
@@ -382,10 +392,13 @@ impl TryFrom<proto::TunnelState> for mullvad_types::states::TunnelState {
                     }
                     Ok(proto::error_state::Cause::TunnelParameterError) => {
                         let parameter_error = match proto::error_state::GenerationError::try_from(parameter_error) {
-                            Ok(proto::error_state::GenerationError::CustomTunnelHostResolutionError) => talpid_tunnel::ParameterGenerationError::CustomTunnelHostResultionError,
+                            Ok(proto::error_state::GenerationError::CustomTunnelHostResolutionError) => talpid_tunnel::ParameterGenerationError::CustomTunnelHostResolutionError,
                             Ok(proto::error_state::GenerationError::NoMatchingBridgeRelay) => talpid_tunnel::ParameterGenerationError::NoMatchingBridgeRelay,
+                            Ok(proto::error_state::GenerationError::NoMatchingRelayEntry) => talpid_tunnel::ParameterGenerationError::NoMatchingRelayEntry,
+                            Ok(proto::error_state::GenerationError::NoMatchingRelayExit) => talpid_tunnel::ParameterGenerationError::NoMatchingRelayExit,
+                            Ok(proto::error_state::GenerationError::NetworkIpv4Unavailable) => talpid_tunnel::ParameterGenerationError::IpVersionUnavailable { family: IpVersion::V4 },
+                            Ok(proto::error_state::GenerationError::NetworkIpv6Unavailable) => talpid_tunnel::ParameterGenerationError::IpVersionUnavailable { family: IpVersion::V6 },
                             Ok(proto::error_state::GenerationError::NoMatchingRelay) => talpid_tunnel::ParameterGenerationError::NoMatchingRelay,
-                            Ok(proto::error_state::GenerationError::NoWireguardKey) => talpid_tunnel::ParameterGenerationError::NoWireguardKey,
                             _ => return Err(FromProtobufTypeError::InvalidArgument(
                                 "invalid parameter error",
                             )),
@@ -403,7 +416,7 @@ impl TryFrom<proto::TunnelState> for mullvad_types::states::TunnelState {
                     _ => {
                         return Err(FromProtobufTypeError::InvalidArgument(
                             "invalid error cause",
-                        ))
+                        ));
                     }
                 };
 
@@ -422,7 +435,7 @@ impl TryFrom<proto::TunnelState> for mullvad_types::states::TunnelState {
             _ => {
                 return Err(FromProtobufTypeError::InvalidArgument(
                     "invalid tunnel state",
-                ))
+                ));
             }
         };
 
@@ -430,7 +443,7 @@ impl TryFrom<proto::TunnelState> for mullvad_types::states::TunnelState {
     }
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+#[cfg_attr(not(target_os = "windows"), expect(unused_variables))]
 fn try_firewall_policy_error_from_i32(
     policy_error: i32,
     lock_pid: u32,

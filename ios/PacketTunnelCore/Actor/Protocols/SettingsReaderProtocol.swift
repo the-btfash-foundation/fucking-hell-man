@@ -3,20 +3,20 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 25/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadSettings
 import MullvadTypes
 import Network
-import WireGuardKitTypes
+@preconcurrency import WireGuardKitTypes
 
 /// A type that implements a reader that can return settings required by `PacketTunnelActor` in order to configure the tunnel.
 public protocol SettingsReaderProtocol {
     /**
      Read settings from storage.
-
+    
      - Throws: an error thrown by this method is passed down to the implementation of `BlockedStateErrorMapperProtocol`.
      - Returns: `Settings` used to configure packet tunnel adapter.
      */
@@ -24,7 +24,7 @@ public protocol SettingsReaderProtocol {
 }
 
 /// Struct holding settings necessary to configure packet tunnel adapter.
-public struct Settings: Equatable {
+public struct Settings: Equatable, Sendable {
     /// Private key used by device.
     public var privateKey: PrivateKey
 
@@ -41,6 +41,23 @@ public struct Settings: Equatable {
         self.privateKey = privateKey
         self.interfaceAddresses = interfaceAddresses
         self.tunnelSettings = tunnelSettings
+    }
+
+    public func interfaceSettings() -> TunnelInterfaceSettings {
+        let dnsServers: [IPAddress] =
+            switch self.dnsServers {
+            case .gateway:
+                [IPv4Address(LocalNetworkIPs.gatewayAddressIpV4.rawValue)!]
+            case let .blocking(server):
+                [server]
+            case let .custom(servers):
+                servers
+            }
+        return TunnelInterfaceSettings(
+            interfaceAddresses: self.interfaceAddresses,
+            dns: dnsServers
+        )
+
     }
 }
 
@@ -89,7 +106,7 @@ extension Settings {
 }
 
 /// Enum describing selected DNS servers option.
-public enum SelectedDNSServers: Equatable {
+public enum SelectedDNSServers: Equatable, Sendable {
     /// Custom DNS servers.
     case custom([IPAddress])
     /// Mullvad server acting as a blocking DNS proxy.

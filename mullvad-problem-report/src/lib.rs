@@ -1,4 +1,4 @@
-use mullvad_api::{proxy::ApiConnectionMode, ApiEndpoint};
+use mullvad_api::{ApiEndpoint, proxy::ApiConnectionMode};
 use regex::Regex;
 use std::{
     borrow::Cow,
@@ -35,8 +35,8 @@ const MAX_SEND_ATTEMPTS: usize = 3;
 /// Custom macro to write a line to an output formatter that uses platform-specific newline
 /// character sequences.
 macro_rules! write_line {
-    ($fmt:expr $(,)*) => { write!($fmt, "{}", LINE_SEPARATOR) };
-    ($fmt:expr, $pattern:expr $(, $arg:expr)* $(,)*) => {
+    ($fmt:expr_2021 $(,)*) => { write!($fmt, "{}", LINE_SEPARATOR) };
+    ($fmt:expr_2021, $pattern:expr_2021 $(, $arg:expr_2021)* $(,)*) => {
         write!($fmt, $pattern, $( $arg ),*)
             .and_then(|_| write!($fmt, "{}", LINE_SEPARATOR))
     };
@@ -105,84 +105,156 @@ pub enum LogError {
     NoLocalAppDataDir,
 }
 
-pub fn collect_report<P: AsRef<Path>>(
-    extra_logs: &[P],
-    output_path: &Path,
-    redact_custom_strings: Vec<String>,
-    #[cfg(target_os = "android")] android_log_dir: &Path,
-) -> Result<(), Error> {
-    let mut problem_report = ProblemReport::new(redact_custom_strings);
+/// Problem report collector
+#[derive(Debug, Default)]
+pub struct ProblemReportCollector {
+    pub extra_logs: Vec<PathBuf>,
+    pub redact_custom_strings: Vec<String>,
 
-    let daemon_logs_dir = {
+    #[cfg(target_os = "android")]
+    pub android_log_dir: PathBuf,
+    #[cfg(target_os = "android")]
+    pub extra_logs_dir: PathBuf,
+    #[cfg(target_os = "android")]
+    pub unverified_purchases: i32,
+    #[cfg(target_os = "android")]
+    pub pending_purchases: i32,
+}
+
+impl ProblemReportCollector {
+    /// Collect the problem report and writes it to the specified path
+    pub fn write_to_path(self, path: impl AsRef<Path>) -> Result<(), Error> {
+        self.write(open_output_file(path)?)
+    }
+
+    /// Collect the problem report and writes it to the specified output
+    pub fn write(self, output: WriteSource<impl Write>) -> Result<(), Error> {
+        let mut problem_report = ProblemReport::new(self.redact_custom_strings);
+
+        let daemon_logs_dir = {
+            #[cfg(target_os = "android")]
+            {
+                Ok(&self.android_log_dir)
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                mullvad_paths::get_log_dir().map_err(LogError::GetLogDir)
+            }
+        };
+
+        let daemon_logs = daemon_logs_dir.and_then(list_logs);
+        match daemon_logs {
+            Ok(daemon_logs) => {
+                for log in daemon_logs {
+                    match log {
+                        Ok(path) => problem_report.add_log(&path),
+                        Err(error) => problem_report.add_error("Unable to get log path", &error),
+                    }
+                }
+            }
+            Err(error) => {
+                problem_report.add_error("Failed to list logs in daemon log directory", &error)
+            }
+        };
+        match frontend_log_dir().map(|dir| dir.and_then(list_logs)) {
+            Some(Ok(frontend_logs)) => {
+                for log in frontend_logs {
+                    match log {
+                        Ok(path) => problem_report.add_log(&path),
+                        Err(error) => problem_report.add_error("Unable to get log path", &error),
+                    }
+                }
+            }
+            Some(Err(error)) => {
+                problem_report.add_error("Failed to list logs in frontend log directory", &error)
+            }
+            None => {}
+        }
         #[cfg(target_os = "android")]
         {
-            Ok(android_log_dir.to_owned())
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            mullvad_paths::get_log_dir().map_err(LogError::GetLogDir)
-        }
-    };
+            match write_logcat_to_file(&self.android_log_dir) {
+                Ok(logcat_path) => problem_report.add_log(&logcat_path),
+                Err(error) => problem_report.add_error("Failed to collect logcat", &error),
+            }
 
-    let daemon_logs = daemon_logs_dir.and_then(list_logs);
-    match daemon_logs {
-        Ok(daemon_logs) => {
-            let mut other_logs = Vec::new();
-            for log in daemon_logs {
-                match log {
-                    Ok(path) => {
-                        if is_tunnel_log(&path) {
-                            problem_report.add_log(&path);
-                        } else {
-                            other_logs.push(path);
+            match list_logs(self.extra_logs_dir) {
+                Ok(android_app_logs) => {
+                    for log in android_app_logs {
+                        match log {
+                            Ok(path) => problem_report.add_log(&path),
+                            Err(error) => {
+                                problem_report.add_error("Unable to get log path", &error)
+                            }
                         }
                     }
-                    Err(error) => problem_report.add_error("Unable to get log path", &error),
                 }
+                Err(error) => problem_report
+                    .add_error("Failed to list logs in android app log directory", &error),
             }
-            for other_log in other_logs {
-                problem_report.add_log(&other_log);
-            }
+
+            problem_report.add_metadata(
+                "unverified-purchases".to_string(),
+                self.unverified_purchases.to_string(),
+            );
+            problem_report.add_metadata(
+                "pending-purchases".to_string(),
+                self.pending_purchases.to_string(),
+            );
         }
-        Err(error) => {
-            problem_report.add_error("Failed to list logs in daemon log directory", &error)
-        }
-    };
-    match frontend_log_dir().map(|dir| dir.and_then(list_logs)) {
-        Some(Ok(frontend_logs)) => {
-            for log in frontend_logs {
-                match log {
-                    Ok(path) => problem_report.add_log(&path),
-                    Err(error) => problem_report.add_error("Unable to get log path", &error),
-                }
-            }
-        }
-        Some(Err(error)) => {
-            problem_report.add_error("Failed to list logs in frontend log directory", &error)
-        }
-        None => {}
+
+        problem_report.add_logs(self.extra_logs);
+
+        problem_report
+            .write_to(output.write)
+            .map_err(|source| Error::WriteReportError {
+                path: output.source,
+                source,
+            })
     }
-    #[cfg(target_os = "android")]
-    match write_logcat_to_file(android_log_dir) {
-        Ok(logcat_path) => problem_report.add_log(&logcat_path),
-        Err(error) => problem_report.add_error("Failed to collect logcat", &error),
+}
+
+/// A [Write] with a named source.
+pub struct WriteSource<W: Write> {
+    pub write: W,
+    pub source: String,
+}
+
+/// Open a file to write the problem report to.
+pub fn open_output_file(path: impl AsRef<Path>) -> Result<WriteSource<BufWriter<File>>, Error> {
+    fn inner(path: impl AsRef<Path>) -> io::Result<BufWriter<File>> {
+        let file = File::create(path)?;
+        let mut permissions = file.metadata()?.permissions();
+        permissions.set_readonly(true);
+        file.set_permissions(permissions)?;
+        Ok(BufWriter::new(file))
     }
 
-    problem_report.add_logs(extra_logs);
+    let file_path = path.as_ref().display().to_string();
 
-    write_problem_report(output_path, &problem_report).map_err(|source| Error::WriteReportError {
-        path: output_path.display().to_string(),
+    let write = inner(path).map_err(|source| Error::WriteReportError {
+        path: file_path.clone(),
         source,
+    })?;
+
+    Ok(WriteSource {
+        write,
+        source: file_path,
     })
+}
+
+impl<W: Write> From<(W, String)> for WriteSource<W> {
+    fn from((write, source): (W, String)) -> Self {
+        WriteSource { write, source }
+    }
 }
 
 /// Returns an iterator over all files in the given directory that has the `.log` extension.
 fn list_logs(
-    log_dir: PathBuf,
+    log_dir: impl AsRef<Path>,
 ) -> Result<impl Iterator<Item = Result<PathBuf, LogError>>, LogError> {
-    fs::read_dir(&log_dir)
+    fs::read_dir(log_dir.as_ref())
         .map_err(|source| LogError::ListLogDir {
-            path: log_dir.display().to_string(),
+            path: log_dir.as_ref().display().to_string(),
             source,
         })
         .map(|dir_entries| {
@@ -199,7 +271,7 @@ fn list_logs(
                     }
                 }
                 Err(source) => Some(Err(LogError::ListLogDir {
-                    path: log_dir.display().to_string(),
+                    path: log_dir.as_ref().display().to_string(),
                     source,
                 })),
             })
@@ -238,27 +310,28 @@ fn frontend_log_dir() -> Option<Result<PathBuf, LogError>> {
     }
 }
 
-fn is_tunnel_log(path: &Path) -> bool {
-    match path.file_name() {
-        Some(file_name) => file_name.to_string_lossy().contains("openvpn"),
-        None => false,
-    }
-}
-
 #[cfg(target_os = "android")]
 fn write_logcat_to_file(log_dir: &Path) -> Result<PathBuf, io::Error> {
-    let logcat_path = log_dir.join("logcat.txt");
+    use std::process::{Command, Stdio};
 
-    duct::cmd!("logcat", "-d")
-        .stderr_to_stdout()
-        .stdout_path(&logcat_path)
-        .run()
-        .map(|_| logcat_path)
+    let logcat_path = log_dir.join("logcat.txt");
+    let logcat_file = File::create(&logcat_path)?;
+    let _stderr = logcat_file.try_clone()?;
+    let stdout = Stdio::from(logcat_file);
+    let stderr = Stdio::from(_stderr);
+
+    let _output = Command::new("logcat")
+        .arg("-d")
+        .stdout(stdout)
+        .stderr(stderr)
+        .output()?;
+    Ok(logcat_path)
 }
 
 pub fn send_problem_report(
     user_email: &str,
     user_message: &str,
+    account_token: Option<&str>,
     report_path: &Path,
     cache_dir: &Path,
     endpoint: ApiEndpoint,
@@ -280,6 +353,7 @@ pub fn send_problem_report(
     runtime.block_on(send_problem_report_inner(
         user_email,
         user_message,
+        account_token,
         &report_content,
         cache_dir,
         &endpoint,
@@ -289,6 +363,7 @@ pub fn send_problem_report(
 async fn send_problem_report_inner(
     user_email: &str,
     user_message: &str,
+    account_token: Option<&str>,
     report_content: &str,
     cache_dir: &Path,
     endpoint: &ApiEndpoint,
@@ -309,9 +384,16 @@ async fn send_problem_report_inner(
         api_runtime.mullvad_rest_handle(connection_mode.into_provider()),
     );
 
+    let message: String = match account_token {
+        Some(account_token) => {
+            format!("{user_message}\naccount-token: {account_token}")
+        }
+        None => user_message.to_string(),
+    };
+
     for _attempt in 0..MAX_SEND_ATTEMPTS {
         match api_client
-            .problem_report(user_email, user_message, report_content, &metadata)
+            .problem_report(user_email, &message, report_content, &metadata)
             .await
         {
             Ok(()) => {
@@ -331,15 +413,6 @@ async fn send_problem_report_inner(
         }
     }
     Err(Error::SendFailedTooManyTimes)
-}
-
-fn write_problem_report(path: &Path, problem_report: &ProblemReport) -> io::Result<()> {
-    let file = File::create(path)?;
-    let mut permissions = file.metadata()?.permissions();
-    permissions.set_readonly(true);
-    file.set_permissions(permissions)?;
-    problem_report.write_to(BufWriter::new(file))?;
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -362,6 +435,13 @@ impl ProblemReport {
             log_paths: HashSet::new(),
             redact_custom_strings,
         }
+    }
+
+    /// Add extra metadata to the problem report that is not possible to access from the daemon
+    /// directly.
+    #[cfg(target_os = "android")]
+    pub fn add_metadata(&mut self, key: String, value: String) {
+        self.metadata.insert(key, value);
     }
 
     /// Attach some file logs to this report. This method adds the error chain instead of the log
@@ -405,7 +485,7 @@ impl ProblemReport {
         let out1 = Self::redact_account_number(input);
         let out2 = Self::redact_home_dir(&out1);
         let out3 = Self::redact_network_info(&out2);
-        let out4 = Self::redact_guids(&out3);
+        let out4 = Self::redact_uuid_v4(&out3);
         self.redact_custom_strings(&out4).to_string()
     }
 
@@ -433,7 +513,11 @@ impl ProblemReport {
         RE.replace_all(input, "$start[REDACTED]")
     }
 
-    fn redact_guids(input: &str) -> Cow<'_, str> {
+    /// Redact all v4 UUIDs, including:
+    /// * Account IDs
+    /// * Device IDs
+    /// * Network interface GUIDs on Windows
+    fn redact_uuid_v4(input: &str) -> Cow<'_, str> {
         static RE: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r"(?i)\{?[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}\}?")
                 .unwrap()
@@ -643,7 +727,8 @@ mod tests {
     }
 
     #[test]
-    fn redacts_guid() {
+    fn redacts_uuid_v4() {
+        assert_redacts("1248e97e-134b-4820-92e1-abaf191c2840");
         assert_redacts("6B29FC40-CA47-1067-B31D-00DD010662DA");
         assert_redacts("123123ab-12ab-89cd-45ef-012345678901");
         assert_redacts("{123123ab-12ab-89cd-45ef-012345678901}");
@@ -653,7 +738,7 @@ mod tests {
     #[cfg(windows)]
     fn redacts_home_dir() {
         let assert_redacts_home_dir = |home_dir, test_str| {
-            let input = format!(r"pre {}\remaining\path post", test_str);
+            let input = format!(r"pre {test_str}\remaining\path post");
             let actual = redact_home_dir_inner(&input, Some(PathBuf::from(home_dir)));
             assert_eq!(r"pre ~\remaining\path post", actual);
         };
@@ -665,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn doesnt_redact_not_guid() {
+    fn doesnt_redact_not_uuid_v4() {
         assert_does_not_redact("23123ab-12ab-89cd-45ef-012345678901");
         assert_does_not_redact("GGGGGGGG-GGGG-GGGG-GGGG-GGGGGGGGGGGG");
     }

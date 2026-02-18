@@ -3,19 +3,20 @@
 //  PacketTunnelCoreTests
 //
 //  Created by pronebird on 15/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadMockData
 import MullvadTypes
 import Network
-@testable import PacketTunnelCore
 import XCTest
+
+@testable import MullvadMockData
+@testable import PacketTunnelCore
 
 final class TunnelMonitorTests: XCTestCase {
     let networkCounters = NetworkCounters()
 
-    func testShouldDetermineConnectionEstablished() throws {
+    func testShouldDetermineConnectionEstablished() async throws {
         let connectedExpectation = expectation(description: "Should report connected.")
         let connectionLostExpectation = expectation(description: "Should not report connection loss")
         connectionLostExpectation.isInverted = true
@@ -38,10 +39,10 @@ final class TunnelMonitorTests: XCTestCase {
 
         tunnelMonitor.start(probeAddress: .loopback)
 
-        waitForExpectations(timeout: .UnitTest.invertedTimeout)
+        await fulfillment(of: [connectedExpectation, connectionLostExpectation], timeout: .UnitTest.invertedTimeout)
     }
 
-    func testInitialConnectionTimings() {
+    func testInitialConnectionTimings() async throws {
         // Setup pinger so that it never receives any replies.
         let pinger = PingerMock(networkStatsReporting: networkCounters) { _, _ in .ignore }
 
@@ -108,7 +109,7 @@ final class TunnelMonitorTests: XCTestCase {
         // Start monitoring.
         tunnelMonitor.start(probeAddress: .loopback)
 
-        waitForExpectations(timeout: TimeInterval(timeout) / 1000)
+        await fulfillment(of: [expectation], timeout: TimeInterval(timeout) / 1000)
     }
 }
 

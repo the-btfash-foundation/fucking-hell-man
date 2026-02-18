@@ -66,6 +66,14 @@ Make sure that `sshd.service` is enabled on boot.
 systemctl enable sshd.service
 ```
 
+### Ubuntu
+
+Stop `unattended-upgrades` by uninstalling it
+
+```
+sudo apt remove unattended-upgrades
+```
+
 ## Finishing setup
 
 Now you are done! If the VM was configured correctly, `test-manager` will be able to install the required dependencies and run the test suite using the new OS image.
@@ -217,6 +225,15 @@ Windows Defender ocasionally kills the `test-runner` because it believes it to b
 
 Now you are done! If the VM was configured correctly, `test-manager` will be able to run the test suite using the new OS image.
 Now you should [add your new VM to the test-manager config](./test-manager/README.md#configuring-test-manager)
+
+## Notes on editing Windows VM images
+
+When editing the VM image, never shut it down with the test runner volume mounted (i.e. `E:`). When
+Windows is shut down with the disk mounted, it will be unable to remount it correctly when the image
+is replaced.
+
+To get around this behavior, remove the disk from your VM config before starting it with
+`--keep-changes`.
 
 # macOS 🚧
 

@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-04-06.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -15,7 +15,8 @@ class SettingsHeaderView: UITableViewHeaderFooterView {
     let titleLabel: UILabel = {
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = .systemFont(ofSize: 17)
+        titleLabel.font = .mullvadSmallSemiBold
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = UIColor.Cell.titleTextColor
         titleLabel.numberOfLines = 0
         return titleLabel
@@ -24,13 +25,15 @@ class SettingsHeaderView: UITableViewHeaderFooterView {
     let infoButton: UIButton = {
         let button = UIButton(type: .custom)
         button.setAccessibilityIdentifier(.infoButton)
+        button.adjustsImageSizeForAccessibilityContentSizeCategory = true
         button.tintColor = .white
-        button.setImage(UIImage(named: "IconInfo"), for: .normal)
+        button.setImage(UIImage.Buttons.info, for: .normal)
         return button
     }()
 
     let collapseButton: UIButton = {
         let button = UIButton(type: .custom)
+        button.adjustsImageSizeForAccessibilityContentSizeCategory = true
         button.setAccessibilityIdentifier(.expandButton)
         button.tintColor = .white
         return button
@@ -49,10 +52,17 @@ class SettingsHeaderView: UITableViewHeaderFooterView {
         }
     }
 
-    var didCollapseHandler: CollapseHandler?
-    var infoButtonHandler: InfoButtonHandler? { didSet {
-        infoButton.isHidden = infoButtonHandler == nil
-    }}
+    var didCollapseHandler: CollapseHandler? {
+        didSet {
+            collapseButton.isHidden = didCollapseHandler == nil
+        }
+    }
+
+    var infoButtonHandler: InfoButtonHandler? {
+        didSet {
+            infoButton.isHidden = infoButtonHandler == nil
+        }
+    }
 
     private let chevronDown = UIImage(named: "IconChevronDown")
     private let chevronUp = UIImage(named: "IconChevronUp")
@@ -68,29 +78,32 @@ class SettingsHeaderView: UITableViewHeaderFooterView {
             for: .touchUpInside
         )
 
+        collapseButton.isHidden = true
         collapseButton.addTarget(
             self,
             action: #selector(handleCollapseButton(_:)),
             for: .touchUpInside
         )
 
-        contentView.directionalLayoutMargins = UIMetrics.SettingsCell.layoutMargins
+        contentView.directionalLayoutMargins = UIMetrics.SettingsCell.defaultLayoutMargins
         contentView.backgroundColor = UIColor.Cell.Background.normal
 
-        let buttonAreaWidth = UIMetrics.contentLayoutMargins.leading + UIMetrics
+        let buttonAreaWidth =
+            UIMetrics.contentLayoutMargins.leading
+            + UIMetrics
             .contentLayoutMargins.trailing + buttonWidth
 
         contentView.addConstrainedSubviews([titleLabel, infoButton, collapseButton]) {
-            titleLabel.pinEdgesToSuperviewMargins(.all().excluding(.trailing).excluding(.bottom))
+            titleLabel.pinEdgesToSuperview(.init([.top(contentView.layoutMargins.top), .leading(16)]))
             titleLabel.bottomAnchor.constraint(
                 equalTo: contentView.bottomAnchor,
                 constant: -contentView.layoutMargins.bottom
             ).withPriority(.defaultHigh)
 
             infoButton.pinEdgesToSuperview(.init([.top(0), .bottom(0)]))
-            infoButton.leadingAnchor.constraint(
-                equalTo: titleLabel.trailingAnchor,
-                constant: -UIMetrics.interButtonSpacing
+            titleLabel.trailingAnchor.constraint(
+                equalTo: infoButton.leadingAnchor,
+                constant: UIMetrics.TableView.infoButtonSpacing
             )
             infoButton.widthAnchor.constraint(equalToConstant: buttonAreaWidth)
 
@@ -127,26 +140,17 @@ class SettingsHeaderView: UITableViewHeaderFooterView {
     }
 
     private func updateAccessibilityCustomActions() {
-        let actionName = isExpanded
-            ? NSLocalizedString(
-                "SETTINGS_HEADER_COLLAPSE_ACCESSIBILITY_ACTION",
-                tableName: "Settings",
-                value: "Collapse \(accessibilityCustomActionName)",
-                comment: ""
-            )
-            : NSLocalizedString(
-                "SETTINGS_HEADER_EXPAND_ACCESSIBILITY_ACTION",
-                tableName: "Settings",
-                value: "Expand \(accessibilityCustomActionName)",
-                comment: ""
-            )
+        let actionName =
+            isExpanded
+            ? String(format: NSLocalizedString("Collapse %@", comment: ""), accessibilityCustomActionName)
+            : String(format: NSLocalizedString("Expand %@", comment: ""), accessibilityCustomActionName)
 
         accessibilityCustomActions = [
             UIAccessibilityCustomAction(
                 name: actionName,
                 target: self,
                 selector: #selector(toggleCollapseAccessibilityAction)
-            ),
+            )
         ]
     }
 }

@@ -1,6 +1,6 @@
 use std::{io, net::IpAddr, time::Duration};
 
-use futures::{future, stream::FuturesUnordered, Future, TryStreamExt};
+use futures::{Future, TryStreamExt, future, stream::FuturesUnordered};
 use surge_ping::{Client, Config, PingIdentifier, PingSequence, SurgeError};
 use talpid_tunnel::{ICMP_HEADER_SIZE, IPV4_HEADER_SIZE, MIN_IPV4_MTU};
 use tokio_stream::StreamExt;
@@ -71,13 +71,15 @@ pub async fn automatic_mtu_correction(
 
 #[cfg(windows)]
 fn set_mtu_windows(verified_mtu: u16, iface_name: String, ipv6: bool) -> io::Result<()> {
-    use talpid_windows::net::{set_mtu, AddressFamily};
+    use talpid_windows::net::{AddressFamily, set_mtu};
 
     let luid = talpid_windows::net::luid_from_alias(iface_name)?;
     set_mtu(u32::from(verified_mtu), luid, AddressFamily::Ipv4)?;
     if ipv6 {
         let clamped_mtu = if verified_mtu < talpid_tunnel::MIN_IPV6_MTU {
-            log::warn!("Cannot set MTU to {verified_mtu} for IPv6, setting to the minimum value 1280 instead");
+            log::warn!(
+                "Cannot set MTU to {verified_mtu} for IPv6, setting to the minimum value 1280 instead"
+            );
             talpid_tunnel::MIN_IPV6_MTU
         } else {
             verified_mtu
@@ -112,10 +114,14 @@ async fn detect_mtu(
     #[cfg(target_os = "macos")]
     {
         use nix::sys::socket::{setsockopt, sockopt};
-        let fd = client.get_socket().get_native_sock();
+        use std::os::fd::BorrowedFd;
+
+        // SAFETY: `surge_ping` promises that the socket is open, and won't close as long as we
+        // hold on to `client`.
+        let fd = unsafe { BorrowedFd::borrow_raw(client.get_socket().get_native_sock()) };
         let buf_size = linspace.iter().map(|sz| usize::from(*sz)).sum();
-        setsockopt(fd, sockopt::SndBuf, &buf_size).map_err(Error::MtuSetBufferSize)?;
-        setsockopt(fd, sockopt::RcvBuf, &buf_size).map_err(Error::MtuSetBufferSize)?;
+        setsockopt(&fd, sockopt::SndBuf, &buf_size).map_err(Error::MtuSetBufferSize)?;
+        setsockopt(&fd, sockopt::RcvBuf, &buf_size).map_err(Error::MtuSetBufferSize)?;
     }
 
     // Shared buffer to reduce allocations
@@ -233,7 +239,7 @@ mod tests {
     /// see <https://docs.rs/tokio/latest/tokio/time/fn.pause.html#auto-advance> for details.
     mod timeout {
         use super::*;
-        use rand::{distributions::Uniform, thread_rng};
+        use rand::{Rng, distr::Uniform};
         use std::pin::Pin;
         use tokio::test;
 
@@ -274,11 +280,10 @@ mod tests {
         /// order.
         #[test(start_paused = true)]
         async fn all_pings_ok() {
-            let mut rng = thread_rng();
             // Random delay for each ping, but within PING_OFFSET_TIMEOUT of the first
-            let uniform = Uniform::new(Duration::ZERO, PING_OFFSET_TIMEOUT);
+            let uniform = Uniform::new(Duration::ZERO, PING_OFFSET_TIMEOUT).unwrap();
             let pings = (0..=100)
-                .map(|p| delayed_ping(Ok(p), rng.sample(uniform)))
+                .map(|p| delayed_ping(Ok(p), rand::rng().sample(uniform)))
                 .collect();
             let max = max_ping_size(pings).await.unwrap();
             assert_eq!(max, 100);
@@ -304,15 +309,15 @@ mod tests {
         /// each other in time, the largest return value is chosen as normal.
         #[test(start_paused = true)]
         async fn delay_first_ping() {
-            let mut rng = thread_rng();
             // Random delay for each ping, but within PING_OFFSET_TIMEOUT of the first and no sooner
             // than 5s
             let uniform = Uniform::new(
                 Duration::from_secs(5),
                 Duration::from_secs(5) + PING_OFFSET_TIMEOUT,
-            );
+            )
+            .unwrap();
             let pings = (0..=100)
-                .map(|p| delayed_ping(Ok(p), rng.sample(uniform)))
+                .map(|p| delayed_ping(Ok(p), rand::rng().sample(uniform)))
                 .collect();
             let max = max_ping_size(pings).await.unwrap();
             assert_eq!(max, 100);

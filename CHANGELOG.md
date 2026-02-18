@@ -22,6 +22,356 @@ Line wrap the file at 100 chars.                                              Th
 * **Security**: in case of vulnerabilities.
 
 ## [Unreleased]
+### Changed
+- Change `WireGuard port` to no longer affect the port used for LWO.
+- Change `Mullvad Bridges` access method to randomly pick any Mullvad-owned bridge.
+  Previously the access method was constrained to the five bridges closest to the exit relay.
+- Changed CLI command `mullvad obfuscation` to `mullvad anti-censorship`
+- The tunnel setup will not error out if sending ICMP is prohibited by the operating system.
+- Location setting no longer defaults to Sweden, instead it uses you current location if it
+  has available relays, and falls back to Sweden otherwise.
+
+#### Linux
+- Change "Go back" keyboard shortcut from `Esc` to `Alt + Left Arrow` or `Alt + [`.
+- Use Wayland by default on Linux if available, otherwise fall back to X11.
+
+#### macOS
+- Change "Go back" keyboard shortcut from `Esc` to `Cmd + Left Arrow` or `Cmd + [`.
+- GotaTun is now used as the WireGuard implementation. It replaces wireguard-go.
+
+#### Windows
+- Change "Go back" keyboard shortcut from `Esc` to `Alt + Left Arrow` or `Alt + [`.
+- Make Mullvad service run in case the
+  [split tunnel driver](https://github.com/mullvad/win-split-tunnel) fails to load.
+
+### Fixed
+- Fix "Time left" label in main view not updating when time passes.
+
+#### Windows
+- Update split tunnel driver to 1.2.5.0. This fixes audit issue `MLLVD-CR-24-102`,
+  and a BSOD when the driver was improperly unloaded.
+- Detect and kill processes preventing updates.
+
+#### macOS
+- Ignore utun interfaces when figuring out default routes. This prevents split tunneling from
+  failing when running some other software.
+- Allow incoming connections to the `mullvad-daemon` service when Application Firewall is
+  enabled. This may unblock DNS requests to the local DNS resolver running in the daemon process.
+
+### Security
+#### Windows
+- Warn user before clearing firewall rules during failed downgrades. This fix only applies to
+  downgrades to this version and future versions.
+
+
+## [2025.14] - 2025-12-09
+This release is identical to 2025.14-beta3.
+
+
+## [2025.14-beta3] - 2025-12-01
+### Fixed
+- Fix a regression introduced in 2025.14-beta1 where the WireGuard port selection was not respected.
+
+
+## [2025.14-beta2] - 2025-11-26
+### Added
+- Add port 443 to list of valid UDP2TCP ports.
+
+### Fixed
+- Fix issues where the in-app updates view is not in sync with the daemon after system is suspended
+  or daemon is restarted.
+
+
+## [2025.14-beta1] - 2025-11-11
+### Changed
+- Change `mullvad reconnect` to print an error message and exit with a non-zero exit code if issued
+  in the disconnected state.
+- Move settings in `WireGuard settings` view into the `VPN settings` view.
+  - Rename `Enable IpV6` setting to `In-tunnel IPv6`.
+  - Rename `IP version` setting to `Device IP version`.
+  - Merge `Obfuscation` settings and `WireGuard port` setting into new `Anti-censorship` view.
+
+### Removed
+- Remove OpenVPN support from the app.
+  - See blog post for more info: https://mullvad.net/en/blog/removing-openvpn-15th-january-2026
+- Remove "Automatic" as a setting for the "Quantum-resistant tunnel" option.
+
+
+## [2025.13] - 2025-11-06
+This release is identical to 2025.13-beta2.
+
+
+## [2025.13-beta2] - 2025-10-28
+### Fixed
+- Fix bug introduced in 2025.13-beta1 with translations sometimes not being formatted
+  correctly.
+
+
+## [2025.13-beta1] - 2025-10-20
+### Added
+- Add settings reset command to the CLI ('mullvad reset-settings').
+- Make feature indicators in connection panel navigate to the relevant setting when clicked.
+- Add Lightweight WireGuard Obfuscation method (LWO). This is a cheap obfuscation method that
+  prevents packets from being identified as standard WireGuard packets.
+- Add possibility to manage devices from account view.
+
+### Changed
+- Add validation for API access methods to only allow unique names. Access methods with
+  duplicated names will be renamed.
+- Change how externally triggered navigation is handled in the UI. This could potentially reduce
+  issues where users get stuck in the out-of-time view.
+- Update Electron from 36.5.0 to 37.6.0.
+- Run version check hourly and when interacting with the app instead of once per day.
+- Add support for gradual rollouts of new app releases
+
+
+### Fixed
+#### macOS
+- Fix high CPU usage on macOS 26 by updating Electron. This affected the app when it was visible.
+
+#### Linux
+- Install AppArmor profile on all Linux distributions that support AppArmor abi 4.0.
+
+
+## [2025.12] - 2025-10-20
+This release is identical to 2025.12-beta1.
+
+
+## [2025.12-beta1] - 2025-10-13
+### Fixed
+#### Windows
+- Mitigate BSOD caused by split tunnel driver during boot.
+
+
+## [2025.11] - 2025-10-13
+This release is for Windows only. This release reverts all functionality to how the app worked in
+version 2025.9 to fix a BSOD (boot loop) bug. Only a few users experienced the issue, but we deemed
+it critical enough to revert everything until we have a better understanding of the problem.
+
+
+## [2025.10] - 2025-10-08
+This release is identical to 2025.10-beta2.
+
+
+## [2025.10-beta2] - 2025-10-01
+### Fixed
+- QUIC obfuscation only using one in-address when connecting. It will now randomly select one of
+  the available in-addresses for each connection attempt.
+- `quinn_udp` crate flooding `mullvad-daemon.log` with warnings.
+
+
+## [2025.10-beta1] - 2025-09-16
+### Added
+- Add helpful warnings when clearing account history. This helps users not lose their account
+  numbers.
+
+#### Windows
+- Add additional logging for tunnel devices and split tunneling to problem reports.
+- Log WFP sessions when transaction lock timeout occurs.
+
+### Changed
+- Move placement of login button from inside the account number input to under account number.
+
+#### Windows
+- Implement UDP GSO for QUIC on client socket. This improves download speeds slightly.
+
+### Security
+#### Windows
+- Block traffic to exit node from non-Mullvad processes. This fixes a leak where traffic could be
+  encrypted once, but leave the entry node unencrypted, if and only if the destination were the exit
+  node. E.g., this might occur if a browser tries to open a TCP connection to the exit node IP.
+
+### Fixed
+- Fix version being labeled unsupported unexpectedly. So far, this only an issue when using
+  development builds.
+
+#### macOS
+- Fix apps attempting to use IPv6 with in-tunnel IPv6 disabled.
+- Re-add missing loopback alias if removed. This fixes some issues with DNS resolution.
+
+
+## [2025.9] - 2025-09-08
+This release is identical to 2025.9-beta1.
+
+
+## [2025.9-beta1] - 2025-08-25
+### Added
+- Add QUIC obfuscation (WireGuard only). It will be used automatically when connecting fails with
+  other methods.
+
+### Fixed
+#### macOS
+- Add support for parsing eslogger output version 10. This fixes split tunneling on macOS 26.
+- Avoid interpreting negative numbers from eslogger as PIDs.
+
+
+## [2025.8] - 2025-08-14
+This release is identical to 2025.8-beta3.
+
+
+## [2025.8-beta3] - 2025-08-11
+### Fixed
+#### Windows
+- Fix issue with installer running in compatibility mode during update.
+
+
+## [2025.8-beta2] - 2025-08-04
+No changes since 2025.8-beta1. This update is done in preparation for upcoming features.
+
+
+## [2025.8-beta1] - 2025-07-15
+### Added
+- Add in-app updates to Windows and macOS. This new feature lets you download, verify, and install
+  new versions from within the app.
+
+#### Linux
+- Make it possible to run the app with cgroups v1 fully disabled. Note that split tunneling is
+  currently unavailable when this is the case.
+
+### Windows
+- Add a button to start the Mullvad VPN system service if it's unavailable at launch
+
+### Changed
+#### macOS
+- Use a local DNS resolver on the 127.0.0.0/8 network, regardless of macOS version.
+
+#### Windows
+- Make firewall rules applied while upgrading the app not persist on reboot, unless "Lockdown mode"
+  or "Auto-connect along with "Launch app on start-up" is enabled. This serves as a safety fallback
+  if the update fails and the user is left with blocking firewall rules and no app.
+
+### Fixed
+#### macOS
+- Add grace period when best default route goes away to reduce frequency of random reconnects.
+
+### Security
+- Prevent unprivileged users from impersonating the gRPC server. This was relatively harmless
+  previously but is required due to in-app updates.
+
+#### Windows
+- Enable control flow integrity checks (CFG) for some C++ code. This excludes `wintun`,
+  `wireguard-nt`, and OpenVPN. This addresses `MLLVD-CR-24-101` to the extent that we found
+  it valuable.
+
+
+## [2025.7] - 2025-06-23
+This release is identical to 2025.7-beta1.
+
+
+## [2025.7-beta1] - 2025-06-04
+### Added
+- Add notification that shows when the user is connected to WireGuard with a port that is not
+supported.
+
+#### Linux
+- The deb package repositores now have static codenames on top of the existing distro version
+  specific codenames. The stable repository always has the "stable" codename,
+  and the beta repository has the "beta" codename.
+
+### Changed
+- Replace Classic McEliece with HQC as one of the post-quantum safe key exchange
+  mechanisms used for the quantum-resistant tunnels. The main benefits here are that HQC
+  uses a lot less CPU to compute the keypair, and the public key sent to the server
+  is drastically smaller.
+
+### Fixed
+- Automatically connect when IP version becomes available.
+
+#### Linux
+- Fix syntax error in Apparmor profile.
+- Fix issue where settings were lost after an upgrade if `mullvad-daemon` was not restarted
+  before `mullvad-early-boot-blocking.service`. That is, before a reboot.
+
+#### Windows
+- Fix issue where daemon got stuck trying to connect only over IPv4 (or only IPv6).
+
+#### macOS
+- Fully uninstall the app when it is removed by being dropped in the bin.
+
+### Security
+#### macOS
+- Fix potential local privilege escalation when app was incorrectly removed by being dropped
+  in the bin but still leaving behind a launch daemon. This fixes CVE-2025-46351 reported by
+  Egor Filatov (Positive Technologies).
+
+
+## [2025.6] - 2025-05-13
+This release is identical to 2025.6-beta2.
+
+
+## [2025.6-beta2] - 2025-05-07
+### Fixed
+- Fix "No OpenVPN servers" warning being displayed erroneously.
+
+
+## [2025.6-beta1] - 2025-04-15
+### Added
+- Add a notification for notifying users about the sunsetting of OpenVPN.
+
+### Changed
+#### Windows
+- Rename `win-shortcuts` native module to `windows-utils`.
+
+### Removed
+- Remove "Automatic" option for tunnel protocol. The default is now WireGuard.
+
+### Fixed
+- Fix `mullvad-cli` panicking if it tried to write to a closed pipe on Linux and macOS.
+- Fix bug where new users are not forwarded to the main view after payment.
+- Will no longer try to connect over IPv4 if IPv4 is not available.
+
+#### Windows
+- Fix error setting up tunnel when MTU was incorrectly set to a value below 1280 for IPv6.
+- Fix node native module being unpacked to a temporary folder.
+- Fix BSOD caused by routing loop in wireguard-nt.
+
+#### macOS
+- Fix bug in parsing of network services from SCDynamicStore.
+
+
+## [2025.5] - 2025-03-26
+This release is identical to 2025.5-beta1
+
+
+## [2025.5-beta1] - 2025-03-11
+### Added
+#### Windows
+- Add support for DAITA V2.
+- Add back wireguard-go (userspace WireGuard) support.
+
+### Removed
+- Stop bundling https://github.com/mullvad/apisocks5 as a standalone binary.
+- Remove Google's resolvers from encrypted DNS proxy.
+
+### Fixed
+#### macOS
+- Fix daemon ending up in blocked state if the user toggled split tunneling without having granted
+  Full Disk Access to `mullvad-daemon`. This could only ever be accomplished from the CLI.
+- Fix routing issue caused by upgrading `tun`.
+
+
+## [2025.4] - 2025-02-12
+This release is identical to 2025.4-beta1
+
+
+## [2025.4-beta1] - 2025-02-11
+### Changed
+#### Windows
+- Replace the Electron API `shell.readShortcutLink` with a custom, native rust module
+  `win-shortcuts`.
+
+### Fixed
+#### Windows
+- Fix GUI crashing at launch on some systems by replacing Electron's shortcut parser.
+
+
+## [2025.3] - 2025-02-07
+### Changed
+- Change order of items in settings view to show DAITA and multihop at the top.
+- Update Electron from 33.2.1 to 33.4.0.
+
+
+## [2025.3-beta1] - 2025-01-21
 ### Added
 #### Windows
 - Add support for Windows ARM64.
@@ -32,6 +382,9 @@ Line wrap the file at 100 chars.                                              Th
 - Update Electron from 30.0.4 to 33.2.1.
 - Move changelog from a dialog to a separate view.
 - Reduce the setup time of PQ tunnels by pre-computing McEliece keys.
+
+### Fixed
+- (macOS and Windows only) Add the correct route when using obfuscation with Wireguard.
 
 
 ## [2025.2] - 2025-01-08

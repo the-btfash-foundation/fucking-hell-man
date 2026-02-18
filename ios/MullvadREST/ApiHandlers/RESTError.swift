@@ -3,7 +3,7 @@
 //  RESTError
 //
 //  Created by pronebird on 27/07/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -11,7 +11,7 @@ import MullvadTypes
 
 extension REST {
     /// An error type returned by REST API classes.
-    public enum Error: LocalizedError, WrappingError {
+    public enum Error: LocalizedError, WrappingError, Sendable {
         /// Failure to create URL request.
         case createURLRequest(Swift.Error)
 
@@ -32,8 +32,8 @@ extension REST {
             case .createURLRequest:
                 return "Failure to create URL request."
 
-            case .network:
-                return "Network error."
+            case let .network(error):
+                return "Network error due to \(error.localizedDescription)."
 
             case let .unhandledResponse(statusCode, serverResponse):
                 var str = "Failure to handle server response: HTTP/\(statusCode)."
@@ -80,7 +80,7 @@ extension REST {
         }
     }
 
-    public struct ServerErrorResponse: Decodable {
+    public struct ServerErrorResponse: Decodable, Sendable {
         public let code: ServerResponseCode
         public let detail: String?
 
@@ -93,7 +93,8 @@ extension REST {
             let rawValue = try container.decode(String.self, forKey: .code)
 
             code = ServerResponseCode(rawValue: rawValue)
-            detail = try container.decodeIfPresent(String.self, forKey: .detail)
+            detail =
+                try container.decodeIfPresent(String.self, forKey: .detail)
                 ?? container.decodeIfPresent(String.self, forKey: .error)
         }
 
@@ -103,7 +104,7 @@ extension REST {
         }
     }
 
-    public struct ServerResponseCode: RawRepresentable, Equatable {
+    public struct ServerResponseCode: RawRepresentable, Equatable, Sendable {
         public static let invalidAccount = ServerResponseCode(rawValue: "INVALID_ACCOUNT")
         public static let keyLimitReached = ServerResponseCode(rawValue: "KEY_LIMIT_REACHED")
         public static let publicKeyNotFound = ServerResponseCode(rawValue: "PUBKEY_NOT_FOUND")
@@ -115,6 +116,7 @@ extension REST {
         public static let tooManyRequests = ServerResponseCode(rawValue: "TOO_MANY_REQUESTS")
         public static let invalidVoucher = ServerResponseCode(rawValue: "INVALID_VOUCHER")
         public static let usedVoucher = ServerResponseCode(rawValue: "VOUCHER_USED")
+        public static let parsingError = ServerResponseCode(rawValue: "PARSING_ERROR")
 
         public let rawValue: String
         public init(rawValue: String) {
@@ -135,7 +137,8 @@ extension REST {
             case .noTransport:
                 return "Transport is not configured."
             case let .invalidResponse(response):
-                return "Received invalid response. Expected HTTPURLResponse, got \(response.map { "\($0.self)" } ?? "(nil)")."
+                return
+                    "Received invalid response. Expected HTTPURLResponse, got \(response.map { "\($0.self)" } ?? "(nil)")."
             }
         }
     }

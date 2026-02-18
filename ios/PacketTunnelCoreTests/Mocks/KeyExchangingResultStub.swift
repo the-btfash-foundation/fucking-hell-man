@@ -3,7 +3,7 @@
 //  MullvadPostQuantumTests
 //
 //  Created by Mojgan on 2024-07-19.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 @testable import MullvadRustRuntime
@@ -25,9 +25,9 @@ struct KeyExchangingResultStub: EphemeralPeerReceiving {
 
     public func receiveEphemeralPeerPrivateKey(
         _ ephemeralPeerPrivateKey: PrivateKey,
-        daitaParameters daitaParamters: MullvadTypes.DaitaV2Parameters?
+        daitaParameters: MullvadTypes.DaitaV2Parameters?
     ) async {
-        await onReceiveEphemeralPeerPrivateKey?(ephemeralPeerPrivateKey, daitaParamters)
+        await onReceiveEphemeralPeerPrivateKey?(ephemeralPeerPrivateKey, daitaParameters)
     }
 
     func ephemeralPeerExchangeFailed() {

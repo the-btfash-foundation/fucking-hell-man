@@ -1,11 +1,11 @@
 import styled from 'styled-components';
 import { Styles } from 'styled-components/dist/types';
 
-import { colors } from '../../../config.json';
+import { Icon } from '../../lib/components';
+import { colors, ColorVariables } from '../../lib/foundations';
 import * as Cell from '../cell';
 import { buttonColor, ButtonColors } from '../cell/styles';
 import { measurements, normalText } from '../common-styles';
-import ImageView from '../ImageView';
 import InfoButton from '../InfoButton';
 
 export const StyledLocationRowContainer = styled(Cell.Container)({
@@ -82,11 +82,8 @@ export const StyledHoverIconButton = styled.button<ButtonColors & HoverButtonPro
   hoverButton,
 );
 
-export const StyledHoverIcon = styled(ImageView).attrs({
-  width: 18,
-  height: 18,
-  tintColor: colors.white60,
-  tintHoverColor: colors.white,
+export const StyledHoverIcon = styled(Icon).attrs({
+  color: 'whiteAlpha60',
 })({
   [`${StyledHoverIconButton}:hover &&`]: {
     backgroundColor: colors.white,
@@ -99,7 +96,7 @@ export const StyledHoverInfoButton = styled(InfoButton)<ButtonColors & HoverButt
 );
 
 export function getButtonColor(selected: boolean, level: number, disabled?: boolean) {
-  let backgroundColor = colors.blue60;
+  let backgroundColor: ColorVariables = colors.blue60;
   if (selected) {
     backgroundColor = colors.green;
   } else if (level === 1) {

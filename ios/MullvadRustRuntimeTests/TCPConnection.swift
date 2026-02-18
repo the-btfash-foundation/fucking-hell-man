@@ -3,7 +3,7 @@
 //  MullvadRustRuntimeTests
 //
 //  Created by pronebird on 27/06/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -11,7 +11,7 @@ import Network
 
 /// Minimal implementation of TCP connection capable of receiving data.
 /// > Warning: Do not use this implementation in production code. See the warning in `start()`.
-class TCPConnection: Connection {
+class TCPConnection: Connection, @unchecked Sendable {
     private let dispatchQueue = DispatchQueue(label: "TCPConnection")
     private let nwConnection: NWConnection
 

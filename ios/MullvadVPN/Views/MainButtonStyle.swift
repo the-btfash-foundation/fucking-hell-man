@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-12-05.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import SwiftUI
@@ -18,11 +18,11 @@ struct MainButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         return configuration.label
-            .frame(height: 44)
+            .frame(minHeight: 44)
             .foregroundColor(
                 isEnabled
-                    ? UIColor.primaryTextColor.color
-                    : UIColor.primaryTextColor.withAlphaComponent(0.2).color
+                    ? .mullvadTextPrimary
+                    : .mullvadTextPrimaryDisabled
             )
             .background(
                 isEnabled
@@ -44,20 +44,34 @@ extension MainButtonStyle {
         var color: Color {
             switch self {
             case .default:
-                UIColor.primaryColor.color
+                Color.MullvadButton.primary
             case .danger:
-                UIColor.dangerColor.color
+                Color.MullvadButton.danger
             case .success:
-                UIColor.successColor.color
+                Color.MullvadButton.positive
             }
         }
 
         var pressedColor: Color {
-            color.darkened(by: 0.4)!
+            switch self {
+            case .default:
+                Color.MullvadButton.primaryPressed
+            case .danger:
+                Color.MullvadButton.dangerPressed
+            case .success:
+                Color.MullvadButton.positivePressed
+            }
         }
 
         var disabledColor: Color {
-            color.darkened(by: 0.6)!
+            switch self {
+            case .default:
+                Color.MullvadButton.primaryDisabled
+            case .danger:
+                Color.MullvadButton.dangerDisabled
+            case .success:
+                Color.MullvadButton.positiveDisabled
+            }
         }
     }
 }

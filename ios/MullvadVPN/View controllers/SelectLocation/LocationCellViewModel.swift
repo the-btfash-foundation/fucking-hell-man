@@ -3,12 +3,12 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2024-02-05.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadTypes
 
-struct LocationCellViewModel: Hashable {
+struct LocationCellViewModel: Hashable, Sendable {
     let section: LocationSection
     let node: LocationNode
     var indentationLevel = 0
@@ -23,10 +23,8 @@ struct LocationCellViewModel: Hashable {
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.node == rhs.node &&
-            lhs.node.children.count == rhs.node.children.count &&
-            lhs.section == rhs.section &&
-            lhs.isSelected == rhs.isSelected
+        lhs.node == rhs.node && lhs.node.children.count == rhs.node.children.count && lhs.section == rhs.section
+            && lhs.isSelected == rhs.isSelected
     }
 }
 
@@ -66,14 +64,14 @@ extension LocationCellViewModel {
     /* Exclusion of other locations in the same node tree (as the currently excluded location)
      happens when there are no more hosts in that tree that can be selected.
      We check this by doing the following, in order:
-
+    
      1. Count hostnames in the tree. More than one means that there are other locations than
-     the excluded one for the relay selector to choose from. No exlusion.
-
+     the excluded one for the relay selector to choose from. No exclusion.
+    
      2. Count hostnames in the excluded node. More than one means that there are multiple
      locations for the relay selector to choose from. No exclusion.
-
-     3. Check existance of a location in the tree that matches the currently excluded location.
+    
+     3. Check existence of a location in the tree that matches the currently excluded location.
      No match means no exclusion.
      */
     func shouldExcludeLocation(_ excludedLocation: LocationCellViewModel?) -> Bool {
@@ -87,7 +85,7 @@ extension LocationCellViewModel {
             if case .hostname = location { true } else { false }
         }.count
 
-        // If the there's more than one selectable relay in the current node we don't need
+        // If there's more than one selectable relay in the current node we don't need
         // to show this in the location tree and can return early.
         guard hostCount == 1 else { return false }
 
@@ -97,7 +95,7 @@ extension LocationCellViewModel {
             if case .hostname = location { true } else { false }
         }.count
 
-        // If the there's more than one selectable relay in the excluded node we don't need
+        // If there's more than one selectable relay in the excluded node we don't need
         // to show this in the location tree and can return early.
         guard excludedHostCount == 1 else { return false }
 

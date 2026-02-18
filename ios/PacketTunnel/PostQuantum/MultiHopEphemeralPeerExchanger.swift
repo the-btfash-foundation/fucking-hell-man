@@ -3,7 +3,7 @@
 //  PacketTunnel
 //
 //  Created by Mojgan on 2024-07-15.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadREST
@@ -27,7 +27,9 @@ final class MultiHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
     private var exitPeerKey: EphemeralPeerKey!
     private var daitaParameters: DaitaV2Parameters?
 
-    private let defaultGatewayAddressRange = [IPAddressRange(from: "\(LocalNetworkIPs.gatewayAddress.rawValue)/32")!]
+    private let defaultGatewayAddressRange = [
+        IPAddressRange(from: "\(LocalNetworkIPs.gatewayAddressIpV4.rawValue)/32")!
+    ]
     private let allTrafficRange = [
         IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV4.rawValue)/0")!,
         IPAddressRange(from: "\(LocalNetworkIPs.defaultRouteIpV6.rawValue)/0")!,
@@ -71,8 +73,8 @@ final class MultiHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
         _ ephemeralPeerPrivateKey: PrivateKey,
         daitaParameters: DaitaV2Parameters?
     ) async {
-        self.daitaParameters = daitaParameters
         if state == .negotiatingWithEntry {
+            self.daitaParameters = daitaParameters
             entryPeerKey = EphemeralPeerKey(ephemeralKey: ephemeralPeerPrivateKey)
             await negotiateBetweenEntryAndExit()
         } else if state == .negotiatingBetweenEntryAndExit {
@@ -86,8 +88,8 @@ final class MultiHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
         ephemeralKey: PrivateKey,
         daitaParameters: DaitaV2Parameters?
     ) async {
-        self.daitaParameters = daitaParameters
         if state == .negotiatingWithEntry {
+            self.daitaParameters = daitaParameters
             entryPeerKey = EphemeralPeerKey(preSharedKey: preSharedKey, ephemeralKey: ephemeralKey)
             await negotiateBetweenEntryAndExit()
         } else if state == .negotiatingBetweenEntryAndExit {
@@ -98,14 +100,16 @@ final class MultiHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
 
     private func negotiateWithEntry() async {
         state = .negotiatingWithEntry
-        await onUpdateConfiguration(.single(EphemeralPeerRelayConfiguration(
-            relay: entry,
-            configuration: EphemeralPeerConfiguration(
-                privateKey: devicePrivateKey,
-                allowedIPs: defaultGatewayAddressRange,
-                daitaParameters: daitaParameters
-            )
-        )))
+        await onUpdateConfiguration(
+            .single(
+                EphemeralPeerRelayConfiguration(
+                    relay: entry,
+                    configuration: EphemeralPeerConfiguration(
+                        privateKey: devicePrivateKey,
+                        allowedIPs: defaultGatewayAddressRange,
+                        daitaParameters: daitaParameters
+                    )
+                )))
         keyExchanger.startNegotiation(
             with: devicePrivateKey,
             enablePostQuantum: enablePostQuantum,
@@ -115,25 +119,26 @@ final class MultiHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
 
     private func negotiateBetweenEntryAndExit() async {
         state = .negotiatingBetweenEntryAndExit
-        await onUpdateConfiguration(.multi(
-            entry: EphemeralPeerRelayConfiguration(
-                relay: entry,
-                configuration: EphemeralPeerConfiguration(
-                    privateKey: entryPeerKey.ephemeralKey,
-                    preSharedKey: entryPeerKey.preSharedKey,
-                    allowedIPs: [IPAddressRange(from: "\(exit.endpoint.ipv4Relay.ip)/32")!],
-                    daitaParameters: self.daitaParameters
+        await onUpdateConfiguration(
+            .multi(
+                entry: EphemeralPeerRelayConfiguration(
+                    relay: entry,
+                    configuration: EphemeralPeerConfiguration(
+                        privateKey: entryPeerKey.ephemeralKey,
+                        preSharedKey: entryPeerKey.preSharedKey,
+                        allowedIPs: [IPAddressRange(from: "\(exit.endpoint.socketAddress.ip)/32")!],
+                        daitaParameters: self.daitaParameters
+                    )
+                ),
+                exit: EphemeralPeerRelayConfiguration(
+                    relay: exit,
+                    configuration: EphemeralPeerConfiguration(
+                        privateKey: devicePrivateKey,
+                        allowedIPs: defaultGatewayAddressRange,
+                        daitaParameters: nil
+                    )
                 )
-            ),
-            exit: EphemeralPeerRelayConfiguration(
-                relay: exit,
-                configuration: EphemeralPeerConfiguration(
-                    privateKey: devicePrivateKey,
-                    allowedIPs: defaultGatewayAddressRange,
-                    daitaParameters: self.daitaParameters
-                )
-            )
-        ))
+            ))
         // Daita is always disabled when negotiating with the exit peer in the multihop scenarios
         keyExchanger.startNegotiation(
             with: devicePrivateKey,
@@ -144,26 +149,27 @@ final class MultiHopEphemeralPeerExchanger: EphemeralPeerExchangingProtocol {
 
     private func makeConnection() async {
         state = .makeConnection
-        await onUpdateConfiguration(.multi(
-            entry: EphemeralPeerRelayConfiguration(
-                relay: entry,
-                configuration: EphemeralPeerConfiguration(
-                    privateKey: entryPeerKey.ephemeralKey,
-                    preSharedKey: entryPeerKey.preSharedKey,
-                    allowedIPs: [IPAddressRange(from: "\(exit.endpoint.ipv4Relay.ip)/32")!],
-                    daitaParameters: self.daitaParameters
+        await onUpdateConfiguration(
+            .multi(
+                entry: EphemeralPeerRelayConfiguration(
+                    relay: entry,
+                    configuration: EphemeralPeerConfiguration(
+                        privateKey: entryPeerKey.ephemeralKey,
+                        preSharedKey: entryPeerKey.preSharedKey,
+                        allowedIPs: [IPAddressRange(from: "\(exit.endpoint.socketAddress.ip)/32")!],
+                        daitaParameters: self.daitaParameters
+                    )
+                ),
+                exit: EphemeralPeerRelayConfiguration(
+                    relay: exit,
+                    configuration: EphemeralPeerConfiguration(
+                        privateKey: exitPeerKey.ephemeralKey,
+                        preSharedKey: exitPeerKey.preSharedKey,
+                        allowedIPs: allTrafficRange,
+                        daitaParameters: nil
+                    )
                 )
-            ),
-            exit: EphemeralPeerRelayConfiguration(
-                relay: exit,
-                configuration: EphemeralPeerConfiguration(
-                    privateKey: exitPeerKey.ephemeralKey,
-                    preSharedKey: exitPeerKey.preSharedKey,
-                    allowedIPs: allTrafficRange,
-                    daitaParameters: self.daitaParameters
-                )
-            )
-        ))
+            ))
         self.onFinish()
     }
 }

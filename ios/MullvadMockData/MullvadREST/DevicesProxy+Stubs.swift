@@ -3,7 +3,7 @@
 //  MullvadVPNTests
 //
 //  Created by Marco Nikic on 2023-10-03.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -41,7 +41,7 @@ struct DevicesProxyStub: DeviceHandling {
 
     func createDevice(
         accountNumber: String,
-        request: REST.CreateDeviceRequest,
+        request: CreateDeviceRequest,
         retryStrategy: REST.RetryStrategy,
         completion: @escaping ProxyCompletionHandler<Device>
     ) -> Cancellable {

@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - .github/workflows/clippy.yml
+      - 'ci/cargo-ci.sh'
       - clippy.toml
+      - '**/Cargo.toml' # Lint rules defined in toml files
       - '**/*.rs'
   workflow_dispatch:
 
@@ -25,8 +27,7 @@ jobs:
 
       - name: Use default container image and resolve digest
         if: ${{ github.event.inputs.override_container_image == '' }}
-        run: |
-          echo "inner_container_image_android=$(cat ./building/android-container-image.txt)" >> $GITHUB_ENV
+        run: echo "inner_container_image_android=$(cat ./building/android-container-image.txt)" >> $GITHUB_ENV
 
     outputs:
       container_image_android: ${{ env.inner_container_image_android }}
@@ -38,45 +39,25 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
+      # By default, the longest path a filename can have in git on Windows is 260 character.
+      - name: Set git config for long paths
+        if: runner.os == 'Windows'
+        run: |
+          git config --system core.longpaths true
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+      - uses: ./.github/actions/mullvad-build-env
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout submodules
-        run: |
-          git submodule update --init --depth=1 dist-assets/binaries
-          git submodule update --init --recursive --depth=1 wireguard-go-rs
-
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          toolchain: stable
-          components: clippy
-          override: true
-
-      - name: Install build dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install libdbus-1-dev
-
-      - name: Install Go
-        if: matrix.os == 'linux-latest' || matrix.os == 'macos-latest'
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.21.3
+          rustup-components: clippy
+          rust-cache-targets: ${{ runner.os == 'Windows' }}
 
       - name: Clippy check
         shell: bash
-        env:
-          RUSTFLAGS: --deny warnings
         run: |
-          source env.sh
-          time cargo clippy --locked --all-targets --no-default-features
-          time cargo clippy --locked --all-targets --all-features
+          time ci/cargo-ci.sh clippy --workspace --all-targets --no-default-features
+          time ci/cargo-ci.sh clippy --workspace --all-targets --all-features
 
   clippy-check-android:
     name: Clippy linting, Android
@@ -97,11 +78,9 @@ jobs:
       - name: Checkout wireguard-go submodule
         run: |
           git config --global --add safe.directory '*'
-          git submodule update --init --recursive --depth=1 wireguard-go-rs
+          git submodule update --init wireguard-go-rs/libwg/wireguard-go
 
       - name: Clippy check
-        env:
-          RUSTFLAGS: --deny warnings
         run: |
-          cargo clippy --locked --all-targets --target x86_64-linux-android --package mullvad-jni --no-default-features
-          cargo clippy --locked --all-targets --target x86_64-linux-android --package mullvad-jni --all-features
+          ci/cargo-ci.sh clippy --all-targets --target x86_64-linux-android --package mullvad-jni --no-default-features
+          ci/cargo-ci.sh clippy --all-targets --target x86_64-linux-android --package mullvad-jni --all-features

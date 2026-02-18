@@ -3,13 +3,13 @@
 //  MullvadREST
 //
 //  Created by Jon Petersson on 2024-02-05.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
 import MullvadTypes
 
-public class IPOverrideWrapper: RelayCacheProtocol {
+public final class IPOverrideWrapper: RelayCacheProtocol {
     private let relayCache: RelayCacheProtocol
     private let ipOverrideRepository: any IPOverrideRepositoryProtocol
 
@@ -18,20 +18,22 @@ public class IPOverrideWrapper: RelayCacheProtocol {
         self.ipOverrideRepository = ipOverrideRepository
     }
 
-    public func read() throws -> StoredRelays {
+    public func read() throws -> CachedRelays {
         let cache = try relayCache.read()
         let relayResponse = apply(overrides: ipOverrideRepository.fetchAll(), to: cache.relays)
-        let rawData = try REST.Coding.makeJSONEncoder().encode(relayResponse)
 
-        return try StoredRelays(etag: cache.etag, rawData: rawData, updatedAt: cache.updatedAt)
+        return CachedRelays(relays: relayResponse, updatedAt: cache.updatedAt)
     }
 
-    public func readPrebundledRelays() throws -> StoredRelays {
+    public func readPrebundledRelays() throws -> CachedRelays {
         let prebundledRelays = try relayCache.readPrebundledRelays()
         let relayResponse = apply(overrides: ipOverrideRepository.fetchAll(), to: prebundledRelays.relays)
-        let rawData = try REST.Coding.makeJSONEncoder().encode(relayResponse)
 
-        return try StoredRelays(etag: prebundledRelays.etag, rawData: rawData, updatedAt: prebundledRelays.updatedAt)
+        return CachedRelays(
+            etag: prebundledRelays.etag,
+            relays: relayResponse,
+            updatedAt: prebundledRelays.updatedAt,
+        )
     }
 
     public func write(record: StoredRelays) throws {
@@ -69,7 +71,8 @@ public class IPOverrideWrapper: RelayCacheProtocol {
     }
 
     private func apply<T: AnyRelay>(overrides: [IPOverride], to relay: T) -> T {
-        return overrides
+        return
+            overrides
             .first { $0.hostname == relay.hostname }
             .flatMap {
                 relay.override(

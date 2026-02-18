@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 27/01/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -11,18 +11,19 @@ import MullvadREST
 import MullvadTypes
 import Operations
 import Routing
+import SwiftUI
 import UIKit
 
-final class LoginCoordinator: Coordinator, Presenting, DeviceManagementViewControllerDelegate {
+final class LoginCoordinator: Coordinator, Presenting {
     private let tunnelManager: TunnelManager
     private let devicesProxy: DeviceHandling
 
     private var loginController: LoginViewController?
-    private var lastLoginAction: LoginAction?
+    nonisolated(unsafe) private var lastLoginAction: LoginAction?
     private var subscriptions = Set<Combine.AnyCancellable>()
 
-    var didFinish: ((LoginCoordinator) -> Void)?
-    var didCreateAccount: (() -> Void)?
+    var didFinish: (@MainActor @Sendable (LoginCoordinator) -> Void)?
+    var didCreateAccount: (@MainActor @Sendable () -> Void)?
 
     var preferredAccountNumberPublisher: AnyPublisher<String, Never>?
     var presentationContext: UIViewController {
@@ -43,7 +44,10 @@ final class LoginCoordinator: Coordinator, Presenting, DeviceManagementViewContr
 
     func start(animated: Bool) {
         let interactor = LoginInteractor(tunnelManager: tunnelManager)
-        let loginController = LoginViewController(interactor: interactor)
+        let loginController = LoginViewController(
+            interactor: interactor,
+            alertPresenter: AlertPresenter(context: self)
+        )
 
         loginController.didFinishLogin = { [weak self] action, error in
             self?.didFinishLogin(action: action, error: error) ?? .nothing
@@ -63,16 +67,6 @@ final class LoginCoordinator: Coordinator, Presenting, DeviceManagementViewContr
         self.loginController = loginController
     }
 
-    // MARK: - DeviceManagementViewControllerDelegate
-
-    func deviceManagementViewControllerDidCancel(_ controller: DeviceManagementViewController) {
-        returnToLogin(repeatLogin: false)
-    }
-
-    func deviceManagementViewControllerDidFinish(_ controller: DeviceManagementViewController) {
-        returnToLogin(repeatLogin: true)
-    }
-
     // MARK: - Private
 
     private func didFinishLogin(action: LoginAction, error: Error?) -> EndLoginAction {
@@ -83,13 +77,15 @@ final class LoginCoordinator: Coordinator, Presenting, DeviceManagementViewContr
 
         if case let .useExistingAccount(accountNumber) = action {
             if let error = error as? REST.Error, error.compareErrorCode(.maxDevicesReached) {
-                return .wait(Promise { resolve in
-                    self.showDeviceList(for: accountNumber) { error in
-                        self.lastLoginAction = action
+                return .wait(
+                    Promise { resolve in
+                        nonisolated(unsafe) let sendableResolve = resolve
+                        self.showDeviceList(for: accountNumber) { error in
+                            self.lastLoginAction = action
 
-                        resolve(error.map { .failure($0) } ?? .success(()))
-                    }
-                })
+                            sendableResolve(error.map { .failure($0) } ?? .success(()))
+                        }
+                    })
             } else {
                 return .activateTextField
             }
@@ -106,38 +102,59 @@ final class LoginCoordinator: Coordinator, Presenting, DeviceManagementViewContr
     }
 
     private func returnToLogin(repeatLogin: Bool) {
-        guard let loginController else { return }
-
-        navigationController.popToViewController(loginController, animated: true) {
-            if let lastLoginAction = self.lastLoginAction, repeatLogin {
-                self.loginController?.start(action: lastLoginAction)
+        navigationController.dismiss(animated: true) { [weak self] in
+            if let lastLoginAction = self?.lastLoginAction, repeatLogin {
+                self?.loginController?.start(action: lastLoginAction)
             }
         }
     }
 
-    private func showDeviceList(for accountNumber: String, completion: @escaping (Error?) -> Void) {
+    private func showDeviceList(for accountNumber: String, completion: @escaping @Sendable (Error?) -> Void) {
         let interactor = DeviceManagementInteractor(
             accountNumber: accountNumber,
             devicesProxy: devicesProxy
         )
-        let controller = DeviceManagementViewController(
-            interactor: interactor,
-            alertPresenter: AlertPresenter(context: self)
-        )
-        controller.delegate = self
+        let controller = UIHostingController(
+            rootView: DeviceManagementView(
+                deviceManaging: interactor,
+                style: .tooManyDevices(returnToLogin),
+                onError: { title, error in
+                    let errorDescription =
+                        if case let .network(urlError) = error as? REST.Error {
+                            urlError.localizedDescription
+                        } else {
+                            error.localizedDescription
+                        }
+                    let presentation = AlertPresentation(
+                        id: "delete-device-error-alert",
+                        title: title,
+                        message: errorDescription,
+                        buttons: [
+                            AlertAction(
+                                title: NSLocalizedString("Got it!", comment: ""),
+                                style: .default
+                            )
+                        ]
+                    )
 
-        controller.fetchDevices(animateUpdates: false) { [weak self] result in
-            guard let self = self else { return }
-
-            switch result {
-            case .success:
-                navigationController.pushViewController(controller, animated: true) {
-                    completion(nil)
+                    let presenter = AlertPresenter(context: self)
+                    presenter.showAlert(presentation: presentation, animated: true)
                 }
-
-            case let .failure(error):
-                completion(error)
+            )
+        )
+        controller.navigationItem.rightBarButtonItem = UIBarButtonItem(
+            systemItem: .cancel,
+            primaryAction: UIAction(handler: { _ in
+                controller.dismiss(animated: true)
+            })
+        )
+        controller.isModalInPresentation = true
+        navigationController
+            .present(
+                CustomNavigationController(rootViewController: controller),
+                animated: true
+            ) {
+                completion(nil)
             }
-        }
     }
 }

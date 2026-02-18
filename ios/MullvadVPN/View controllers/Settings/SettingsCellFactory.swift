@@ -3,75 +3,73 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-03-09.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
 import UIKit
 
-protocol SettingsCellEventHandler {
-    func showInfo(for button: SettingsInfoButtonItem)
-}
-
-final class SettingsCellFactory: CellFactoryProtocol {
+@MainActor
+final class SettingsCellFactory: @preconcurrency CellFactoryProtocol {
     let tableView: UITableView
-    var delegate: SettingsCellEventHandler?
     var viewModel: SettingsViewModel
     private let interactor: SettingsInteractor
+    private var contentSizeCategory = UIApplication.shared.preferredContentSizeCategory
 
     init(tableView: UITableView, interactor: SettingsInteractor) {
         self.tableView = tableView
         self.interactor = interactor
 
         viewModel = SettingsViewModel(from: interactor.tunnelSettings)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(preferredContentSizeChanged(_:)),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
     }
 
     func makeCell(for item: SettingsDataSource.Item, indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: item.reuseIdentifier.rawValue, for: indexPath)
+        let cell: UITableViewCell
 
+        cell =
+            tableView
+            .dequeueReusableCell(
+                withIdentifier: item.reuseIdentifier.rawValue
+            )
+            ?? SettingsCell(
+                style: contentSizeCategory.isLarge ? .subtitle : item.reuseIdentifier.cellStyle,
+                reuseIdentifier: item.reuseIdentifier.rawValue
+            )
+
+        // Configure the cell with the common logic
         configureCell(cell, item: item, indexPath: indexPath)
 
         return cell
     }
 
-    // swiftlint:disable:next function_body_length
     func configureCell(_ cell: UITableViewCell, item: SettingsDataSource.Item, indexPath: IndexPath) {
         switch item {
         case .vpnSettings:
             guard let cell = cell as? SettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "VPN_SETTINGS_CELL_LABEL",
-                tableName: "Settings",
-                value: "VPN settings",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("VPN settings", comment: "")
             cell.detailTitleLabel.text = nil
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.disclosureType = .chevron
 
-        case .version:
+        case .changelog:
             guard let cell = cell as? SettingsCell else { return }
-
-            cell.titleLabel.text = NSLocalizedString(
-                "APP_VERSION_CELL_LABEL",
-                tableName: "Settings",
-                value: "App version",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("What’s new", comment: "")
             cell.detailTitleLabel.text = Bundle.main.productVersion
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
-            cell.disclosureType = .none
+            cell.disclosureType = .chevron
 
         case .problemReport:
             guard let cell = cell as? SettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "REPORT_PROBLEM_CELL_LABEL",
-                tableName: "Settings",
-                value: "Report a problem",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Report a problem", comment: "")
             cell.detailTitleLabel.text = nil
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.disclosureType = .chevron
@@ -79,25 +77,14 @@ final class SettingsCellFactory: CellFactoryProtocol {
         case .faq:
             guard let cell = cell as? SettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "FAQ_AND_GUIDES_CELL_LABEL",
-                tableName: "Settings",
-                value: "FAQs & Guides",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("FAQs & Guides", comment: "")
             cell.detailTitleLabel.text = nil
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.disclosureType = .externalLink
 
         case .apiAccess:
             guard let cell = cell as? SettingsCell else { return }
-
-            cell.titleLabel.text = NSLocalizedString(
-                "API_ACCESS_CELL_LABEL",
-                tableName: "Settings",
-                value: "API access",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("API access", comment: "")
             cell.detailTitleLabel.text = nil
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.disclosureType = .chevron
@@ -105,19 +92,12 @@ final class SettingsCellFactory: CellFactoryProtocol {
         case .daita:
             guard let cell = cell as? SettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "DAITA_CELL_LABEL",
-                tableName: "Settings",
-                value: "DAITA",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("DAITA", comment: "")
 
-            cell.detailTitleLabel.text = NSLocalizedString(
-                "DAITA_CELL_DETAIL_LABEL",
-                tableName: "Settings",
-                value: viewModel.daitaSettings.daitaState.isEnabled ? "On" : "Off",
-                comment: ""
-            )
+            cell.detailTitleLabel.text =
+                viewModel.daitaSettings.daitaState.isEnabled
+                ? NSLocalizedString("On", comment: "")
+                : NSLocalizedString("Off", comment: "")
 
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.disclosureType = .chevron
@@ -125,22 +105,58 @@ final class SettingsCellFactory: CellFactoryProtocol {
         case .multihop:
             guard let cell = cell as? SettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "MULTIHOP_CELL_LABEL",
-                tableName: "Settings",
-                value: "Multihop",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Multihop", comment: "")
 
-            cell.detailTitleLabel.text = NSLocalizedString(
-                "MULTIHOP_CELL_DETAIL_LABEL",
-                tableName: "Settings",
-                value: viewModel.multihopState.isEnabled ? "On" : "Off",
-                comment: ""
-            )
+            cell.detailTitleLabel.text =
+                viewModel.multihopState.isEnabled
+                ? NSLocalizedString("On", comment: "")
+                : NSLocalizedString("Off", comment: "")
+
+            cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
+            cell.disclosureType = .chevron
+
+        case .language:
+            guard let cell = cell as? SettingsCell else { return }
+
+            cell.titleLabel.text = NSLocalizedString("Language", comment: "")
+
+            cell.detailTitleLabel.text = viewModel.currentLanguage
+
+            cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
+            cell.disclosureType = .externalLink
+
+        case .notificationSettings:
+            guard let cell = cell as? SettingsCell else { return }
+
+            cell.titleLabel.text = NSLocalizedString("Notifications", comment: "")
+            cell.detailTitleLabel.text = nil
+
+        case .includeAllNetworks:
+            guard let cell = cell as? SettingsCell else { return }
+
+            cell.titleLabel.text = NSLocalizedString("Force all apps", comment: "")
+
+            cell.detailTitleLabel.text =
+                viewModel.includeAllNetworksState.isEnabled
+                ? NSLocalizedString("On", comment: "")
+                : NSLocalizedString("Off", comment: "")
 
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.disclosureType = .chevron
         }
+    }
+
+    @objc private func preferredContentSizeChanged(_ notification: Notification) {
+        if let newContentSizeCategory = notification.userInfo?[UIContentSizeCategory.newValueUserInfoKey]
+            as? UIContentSizeCategory
+        {
+            contentSizeCategory = newContentSizeCategory
+        }
+    }
+}
+
+private extension UIContentSizeCategory {
+    var isLarge: Bool {
+        (self > .extraExtraExtraLarge) || (self > .accessibilityLarge)
     }
 }

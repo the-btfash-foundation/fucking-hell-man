@@ -3,23 +3,18 @@
 //  MullvadVPNUITests
 //
 //  Created by Niklas Berglund on 2024-01-30.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import XCTest
 
-class WelcomePage: Page {
+class WelcomePage: PaymentPage {
     @discardableResult override init(_ app: XCUIApplication) {
         super.init(app)
 
         self.pageElement = app.otherElements[.welcomeView]
         waitForPageToBeShown()
-    }
-
-    @discardableResult func tapAddTimeButton() -> Self {
-        app.buttons[AccessibilityIdentifier.purchaseButton].tap()
-        return self
     }
 
     @discardableResult func tapRedeemButton() -> Self {

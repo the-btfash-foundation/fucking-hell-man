@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 17/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Routing
@@ -83,12 +83,42 @@ enum AppRoute: AppRouteProtocol {
     case settings(SettingsNavigationRoute?)
 
     /**
+     Settings route. Contains sub-route to display.
+     */
+    case vpnSettings(VPNSettingsSection?)
+
+    /**
+     Multihop standalone route (not subsetting).
+     */
+    case multihop
+
+    /**
+     DNS settings standalone route (not subsetting).
+     */
+    case dnsSettings
+
+    /**
+     Ip overrides standalone route (not subsetting).
+     */
+    case ipOverrides
+
+    /**
+     DAITA standalone route (not subsetting).
+     */
+    case daita
+
+    /**
+     IAN standalone route (not subsetting).
+     */
+    case includeAllNetworks
+
+    /**
      Select location route.
      */
     case selectLocation
 
     /**
-     Changelog route.
+     Changelog standalone route (not subsetting).
      */
     case changelog
 
@@ -105,7 +135,7 @@ enum AppRoute: AppRouteProtocol {
 
     var isExclusive: Bool {
         switch self {
-        case .account, .settings, .changelog, .alert:
+        case .account, .settings, .alert:
             return true
         default:
             return false
@@ -124,13 +154,11 @@ enum AppRoute: AppRouteProtocol {
         switch self {
         case .tos, .login, .main, .revoked, .outOfTime, .welcome:
             return .primary
-        case .changelog:
-            return .changelog
         case .selectLocation:
             return .selectLocation
         case .account:
             return .account
-        case .settings:
+        case .settings, .daita, .changelog, .vpnSettings, .multihop, .dnsSettings, .ipOverrides, .includeAllNetworks:
             return .settings
         case let .alert(id):
             return .alert(id)

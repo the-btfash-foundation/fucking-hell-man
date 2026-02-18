@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 20/05/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadLogging
@@ -13,7 +13,7 @@ import MullvadTypes
 import Operations
 import UIKit
 
-class SceneDelegate: UIResponder, UIWindowSceneDelegate, SettingsMigrationUIHandler {
+class SceneDelegate: UIResponder, UIWindowSceneDelegate, @preconcurrency SettingsMigrationUIHandler {
     private let logger = Logger(label: "SceneDelegate")
 
     var window: UIWindow?
@@ -27,7 +27,6 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, SettingsMigrationUIHand
     private var tunnelObserver: TunnelObserver?
 
     private var appDelegate: AppDelegate {
-        // swiftlint:disable:next force_cast
         UIApplication.shared.delegate as! AppDelegate
     }
 
@@ -78,15 +77,21 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, SettingsMigrationUIHand
                     hostname: ApplicationConfiguration.hostName
                 )
             ),
-            appPreferences: AppPreferences(),
+            appPreferences: appDelegate.appPreferences,
             accessMethodRepository: accessMethodRepository,
-            transportProvider: appDelegate.configuredTransportProvider,
-            ipOverrideRepository: appDelegate.ipOverrideRepository
+            ipOverrideRepository: appDelegate.ipOverrideRepository,
+            relaySelectorWrapper: appDelegate.relaySelector
         )
 
         appCoordinator?.onShowSettings = { [weak self] in
             // Refresh account data and device each time user opens settings
             self?.refreshLoginMetadata(forceUpdate: true)
+        }
+
+        appCoordinator?.onNewNotificationSettings = { [weak self] notificationSettings in
+            guard let self = self else { return }
+            appDelegate.notificationSettingsListener.onNewSettings?(notificationSettings)
+            NotificationManager.shared.updateNotifications()
         }
 
         appCoordinator?.onShowAccount = { [weak self] in
@@ -121,12 +126,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, SettingsMigrationUIHand
     /**
      Refresh login metadata (account and device data) potentially throttling refresh requests based on recency of
      the last issued request.
-
+    
      Account data is always refreshed when either settings or account are presented on screen, otherwise only when close
      to or past expiry.
-
+    
      Both account and device data are refreshed regardless of other conditions when `forceUpdate` is `true`.
-
+    
      For more information on exact timings used for throttling refresh requests refer to `AccountDataThrottling` and
      `DeviceDataThrottling` types.
      */
@@ -207,21 +212,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, SettingsMigrationUIHand
 
         let presentation = AlertPresentation(
             id: "settings-migration-error-alert",
-            title: NSLocalizedString(
-                "ALERT_TITLE",
-                tableName: "SettingsMigrationUI",
-                value: "Settings migration error",
-                comment: ""
-            ),
+            title: NSLocalizedString("Settings migration error", comment: ""),
             message: Self.migrationErrorReason(error),
             buttons: [
                 AlertAction(
-                    title: NSLocalizedString("Got it!", tableName: "SettingsMigrationUI", comment: ""),
+                    title: NSLocalizedString("Got it!", comment: ""),
                     style: .default,
                     handler: {
                         completionHandler()
                     }
-                ),
+                )
             ]
         )
 
@@ -232,9 +232,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, SettingsMigrationUIHand
     private static func migrationErrorReason(_ error: Error) -> String {
         if error is UnsupportedSettingsVersionError {
             return NSLocalizedString(
-                "NEWER_STORED_SETTINGS_ERROR",
-                tableName: "SettingsMigrationUI",
-                value: """
+                """
                 The version of settings stored on device is unrecognized.\
                 Settings will be reset to defaults and the device will be logged out.
                 """,
@@ -242,9 +240,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, SettingsMigrationUIHand
             )
         } else {
             return NSLocalizedString(
-                "INTERNAL_ERROR",
-                tableName: "SettingsMigrationUI",
-                value: """
+                """
                 Internal error occurred. Settings will be reset to defaults and device logged out.
                 """,
                 comment: ""

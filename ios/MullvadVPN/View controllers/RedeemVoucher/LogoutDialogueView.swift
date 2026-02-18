@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2023-08-29.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -20,17 +20,13 @@ class LogoutDialogueView: UIView {
 
     private let messageLabel: UILabel = {
         let label = UILabel()
-
-        let message = NSMutableAttributedString(string: NSLocalizedString(
-            "ACCOUNT_NUMBER_AS_VOUCHER_INPUT_ERROR_BODY",
-            tableName: "CreateAccountRedeemingVoucher",
-            value: """
-            It looks like you have entered a Mullvad account number instead of a voucher code. \
-            Do you want to log in to an existing account?
-            If so, click log out below to log in with the other account number.
-            """,
-            comment: ""
-        ))
+        let message = NSMutableAttributedString(
+            string: NSLocalizedString(
+                "It looks like you’ve entered an account number instead of a voucher code. "
+                    + "If you would like to change the active account, please log out first.",
+                comment: ""
+            )
+        )
         message.apply(paragraphStyle: .alert)
 
         label.attributedText = message
@@ -43,12 +39,7 @@ class LogoutDialogueView: UIView {
 
     private let logoutButton: AppButton = {
         let button = AppButton(style: .danger)
-        button.setTitle(NSLocalizedString(
-            "LOGOUT_BUTTON_TITLE",
-            tableName: "CreateAccountRedeemingVoucher",
-            value: "Log out",
-            comment: ""
-        ), for: .normal)
+        button.setTitle(NSLocalizedString("Log out", comment: ""), for: .normal)
         return button
     }()
 
@@ -120,18 +111,20 @@ class LogoutDialogueView: UIView {
         guard hideConstraint?.isActive == true else { return }
         showConstraint?.isActive = true
         hideConstraint?.isActive = false
-        animateWith(animations: {
-            self.containerView.alpha = 1.0
-        }, duration: 0.3, delay: 0.2)
+        animateWith(
+            animations: {
+                self.containerView.alpha = 1.0
+            }, duration: 0.3, delay: 0.2)
     }
 
     private func fadeOut() {
         guard showConstraint?.isActive == true else { return }
         showConstraint?.isActive = false
         hideConstraint?.isActive = true
-        animateWith(animations: {
-            self.containerView.alpha = 0.0
-        }, duration: 0.0, delay: 0.0)
+        animateWith(
+            animations: {
+                self.containerView.alpha = 0.0
+            }, duration: 0.0, delay: 0.0)
     }
 
     private func animateWith(

@@ -3,15 +3,16 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 09/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
 /// Content view presenting a label and text field.
-class TextCellContentView: UIView, UIContentView, UIGestureRecognizerDelegate {
+class TextCellContentView: UIView, UIContentView, UIGestureRecognizerDelegate, Sendable {
     private var textLabel = UILabel()
     private var textField = CustomTextField()
+    private var containerView = UIStackView()
 
     var configuration: UIContentConfiguration {
         get {
@@ -19,7 +20,8 @@ class TextCellContentView: UIView, UIContentView, UIGestureRecognizerDelegate {
         }
         set {
             guard let newConfiguration = newValue as? TextCellContentConfiguration,
-                  actualConfiguration != newConfiguration else { return }
+                actualConfiguration != newConfiguration
+            else { return }
 
             let previousConfiguration = actualConfiguration
             actualConfiguration = newConfiguration
@@ -38,7 +40,6 @@ class TextCellContentView: UIView, UIContentView, UIGestureRecognizerDelegate {
         actualConfiguration = configuration
 
         super.init(frame: CGRect(x: 0, y: 0, width: 100, height: 44))
-
         configureSubviews()
         addSubviews()
         addTapGestureRecognizer()
@@ -50,7 +51,6 @@ class TextCellContentView: UIView, UIContentView, UIGestureRecognizerDelegate {
 
     private func configureSubviews(previousConfiguration: TextCellContentConfiguration? = nil) {
         guard actualConfiguration != previousConfiguration else { return }
-
         configureTextLabel()
         configureTextField()
         configureLayoutMargins()
@@ -71,6 +71,7 @@ class TextCellContentView: UIView, UIContentView, UIGestureRecognizerDelegate {
 
         textLabel.font = textProperties.font
         textLabel.textColor = textProperties.color
+        textLabel.adjustsFontForContentSizeCategory = true
 
         textLabel.text = actualConfiguration.text
     }
@@ -84,17 +85,28 @@ class TextCellContentView: UIView, UIContentView, UIGestureRecognizerDelegate {
     }
 
     private func addSubviews() {
-        textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        containerView.addArrangedSubview(textLabel)
+        containerView.addArrangedSubview(textField)
+        containerView.spacing = 8.0
+        textLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        textLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        textLabel.setContentCompressionResistancePriority(.defaultHigh + 1, for: .horizontal)
-
-        addConstrainedSubviews([textLabel, textField]) {
-            textField.pinEdgesToSuperviewMargins(.all().excluding(.leading))
-            textLabel.pinEdgesToSuperviewMargins(.all().excluding(.trailing))
-            textField.leadingAnchor.constraint(equalToSystemSpacingAfter: textLabel.trailingAnchor, multiplier: 1)
+        addConstrainedSubviews([containerView]) {
+            containerView.pinEdgesToSuperviewMargins()
         }
+    }
+
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        DispatchQueue.main.async {
+            self.updateAxisIfNeeded()
+        }
+    }
+
+    private func updateAxisIfNeeded() {
+        let newAxis: NSLayoutConstraint.Axis = containerView.isOverflowed ? .vertical : .horizontal
+        guard newAxis != containerView.axis else { return }
+        containerView.axis = newAxis
+        invalidateIntrinsicContentSize()
     }
 
     // MARK: - Gesture recognition
@@ -158,7 +170,8 @@ extension TextCellContentView: UITextFieldDelegate {
     ) -> Bool {
         guard
             let currentString = textField.text,
-            let stringRange = Range(range, in: currentString) else { return false }
+            let stringRange = Range(range, in: currentString)
+        else { return false }
         let updatedText = currentString.replacingCharacters(in: stringRange, with: string)
 
         if let maxLength = actualConfiguration.maxLength, maxLength < updatedText.count {
@@ -175,8 +188,10 @@ extension TextCellContentView: UITextFieldDelegate {
 }
 
 extension TextCellContentConfiguration.TextFieldProperties {
+    @MainActor
     func apply(to textField: CustomTextField) {
         textField.font = font
+        textField.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
         textField.backgroundColor = .clear
         textField.textColor = textColor
         textField.placeholderTextColor = placeholderColor
@@ -197,6 +212,7 @@ extension TextCellContentConfiguration.TextFieldProperties {
 }
 
 extension TextCellContentConfiguration.EditingEvents {
+    @MainActor
     func register(in textField: UITextField) {
         onChange.map { textField.addAction($0, for: .editingChanged) }
         onBegin.map { textField.addAction($0, for: .editingDidBegin) }
@@ -204,6 +220,7 @@ extension TextCellContentConfiguration.EditingEvents {
         onEndOnExit.map { textField.addAction($0, for: .editingDidEndOnExit) }
     }
 
+    @MainActor
     func unregister(from textField: UITextField) {
         onChange.map { textField.removeAction($0, for: .editingChanged) }
         onBegin.map { textField.removeAction($0, for: .editingDidBegin) }

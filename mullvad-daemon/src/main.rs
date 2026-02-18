@@ -3,8 +3,9 @@ use std::{path::PathBuf, thread, time::Duration};
 #[cfg(not(windows))]
 use mullvad_daemon::cleanup_old_rpc_socket;
 use mullvad_daemon::{
-    exception_logging, logging, rpc_uniqueness_check, runtime, version, Daemon,
-    DaemonCommandChannel, DaemonConfig,
+    Daemon, DaemonCommandChannel, DaemonConfig, exception_logging,
+    logging::{self, LogLocation},
+    rpc_uniqueness_check, runtime, version,
 };
 use talpid_types::ErrorExt;
 
@@ -16,7 +17,6 @@ mod macos_launch_daemon;
 #[cfg(windows)]
 mod system_service;
 
-const DAEMON_LOG_FILENAME: &str = "daemon.log";
 #[cfg(target_os = "linux")]
 const EARLY_BOOT_LOG_FILENAME: &str = "early-boot-fw.log";
 
@@ -35,7 +35,8 @@ fn main() {
         }
     };
 
-    log::debug!("Process exiting with code {}", exit_code);
+    log::debug!("Process exiting with code {exit_code}");
+    runtime.shutdown_timeout(Duration::from_millis(100));
     std::process::exit(exit_code);
 }
 
@@ -57,13 +58,14 @@ async fn run() -> Result<(), String> {
 
     match config.command {
         cli::Command::Daemon => {
-            // uniqueness check must happen before logging initializaton,
+            // uniqueness check must happen before logging initialization,
             // as initializing logs will rotate any existing log file.
             assert_unique().await?;
-            let log_dir = init_daemon_logging(config)?;
+            let (log_location, log_handle) = init_daemon_logging(config)?;
             log::trace!("Using configuration: {:?}", config);
 
-            run_standalone(log_dir).await
+            let log_dir = log_location.map(|l| l.directory);
+            run_standalone(log_dir, log_handle).await
         }
 
         #[cfg(target_os = "linux")]
@@ -78,7 +80,6 @@ async fn run() -> Result<(), String> {
         #[cfg(target_os = "windows")]
         cli::Command::RunAsService => {
             assert_unique().await?;
-            let _ = init_daemon_logging(config)?;
             system_service::run()
         }
 
@@ -110,57 +111,68 @@ async fn assert_unique() -> Result<(), &'static str> {
 }
 
 /// Initialize logging to stderr and to file (if configured).
-fn init_daemon_logging(config: &cli::Config) -> Result<Option<PathBuf>, String> {
-    let log_dir = get_log_dir(config)?;
-    let log_path = |filename| log_dir.as_ref().map(|dir| dir.join(filename));
+fn init_daemon_logging(
+    config: &cli::Config,
+) -> Result<(Option<LogLocation>, logging::LogHandle), String> {
+    let log_location = get_log_dir(config)?.map(|directory| LogLocation {
+        directory,
+        filename: PathBuf::from("daemon.log"),
+    });
 
-    init_logger(config, log_path(DAEMON_LOG_FILENAME))?;
+    let log_handle = init_logger(config, log_location.clone())?;
 
-    if let Some(ref log_dir) = log_dir {
-        log::info!("Logging to {}", log_dir.display());
+    if let Some(log_location) = log_location.as_ref() {
+        log::info!("Logging to {}", log_location.log_path().display());
     }
-    Ok(log_dir)
+    Ok((log_location, log_handle))
 }
 
-/// Initialize logging to stder and to the [`EARLY_BOOT_LOG_FILENAME`]
+/// Initialize logging to stderr and to the [`EARLY_BOOT_LOG_FILENAME`]
 #[cfg(target_os = "linux")]
-fn init_early_boot_logging(config: &cli::Config) {
+fn init_early_boot_logging(config: &cli::Config) -> Option<logging::LogHandle> {
+    let log_file_location = get_log_dir(config)
+        .ok()
+        .flatten()
+        .map(|log_dir| LogLocation {
+            directory: log_dir,
+            filename: PathBuf::from(EARLY_BOOT_LOG_FILENAME),
+        });
+
     // If it's possible to log to the filesystem - attempt to do so, but failing that mustn't stop
     // the daemon from starting here.
-    if let Ok(Some(log_dir)) = get_log_dir(config) {
-        if init_logger(config, Some(log_dir.join(EARLY_BOOT_LOG_FILENAME))).is_ok() {
-            return;
-        }
-    }
-
-    let _ = init_logger(config, None);
+    init_logger(config, log_file_location)
+        .or_else(|e| {
+            eprintln!("Failed to initialize early-boot logging to file: '{e}'");
+            init_logger(config, None)
+        })
+        .ok()
 }
 
 /// Initialize logging to stderr and to file (if provided).
 ///
 /// Also install the [exception_logging] signal handler to log faults.
-fn init_logger(config: &cli::Config, log_file: Option<PathBuf>) -> Result<(), String> {
+fn init_logger(
+    config: &cli::Config,
+    log_location: Option<LogLocation>,
+) -> Result<logging::LogHandle, String> {
     #[cfg(unix)]
-    if let Some(log_file) = &log_file {
+    if let Some(log_location) = log_location.as_ref() {
         use std::os::unix::ffi::OsStrExt;
 
         exception_logging::set_log_file(
-            std::ffi::CString::new(log_file.as_os_str().as_bytes())
+            std::ffi::CString::new(log_location.log_path().as_os_str().as_bytes())
                 .map_err(|_| "Log file path contains null-bytes".to_string())?,
         );
     }
 
     exception_logging::enable();
 
-    logging::init_logger(
-        config.log_level,
-        log_file.as_ref(),
-        config.log_stdout_timestamps,
-    )
-    .map_err(|e| e.display_chain_with_msg("Unable to initialize logger"))?;
+    let log_handle =
+        logging::init_logger(config.log_level, log_location, config.log_stdout_timestamps)
+            .map_err(|e| e.display_chain_with_msg("Unable to initialize logger"))?;
     log_panics::init();
     version::log_version();
-    Ok(())
+    Ok(log_handle)
 }
 
 fn get_log_dir(config: &cli::Config) -> Result<Option<PathBuf>, String> {
@@ -173,7 +185,10 @@ fn get_log_dir(config: &cli::Config) -> Result<Option<PathBuf>, String> {
     }
 }
 
-async fn run_standalone(log_dir: Option<PathBuf>) -> Result<(), String> {
+async fn run_standalone(
+    log_dir: Option<PathBuf>,
+    log_handle: logging::LogHandle,
+) -> Result<(), String> {
     #[cfg(not(windows))]
     cleanup_old_rpc_socket(mullvad_paths::get_rpc_socket_path()).await;
 
@@ -181,7 +196,7 @@ async fn run_standalone(log_dir: Option<PathBuf>) -> Result<(), String> {
         log::warn!("Running daemon as a non-administrator user, clients might refuse to connect");
     }
 
-    let daemon = create_daemon(log_dir).await?;
+    let daemon = create_daemon(log_dir, log_handle).await?;
 
     let shutdown_handle = daemon.shutdown_handle();
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -204,7 +219,10 @@ async fn run_standalone(log_dir: Option<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 
-async fn create_daemon(log_dir: Option<PathBuf>) -> Result<Daemon, String> {
+async fn create_daemon(
+    log_dir: Option<PathBuf>,
+    log_handle: logging::LogHandle,
+) -> Result<Daemon, String> {
     let rpc_socket_path = mullvad_paths::get_rpc_socket_path();
     let resource_dir = mullvad_paths::get_resource_dir();
     let settings_dir = mullvad_paths::settings_dir()
@@ -220,6 +238,7 @@ async fn create_daemon(log_dir: Option<PathBuf>) -> Result<Daemon, String> {
             cache_dir,
             rpc_socket_path,
             endpoint: mullvad_api::ApiEndpoint::from_env_vars(),
+            log_handle,
         },
         DaemonCommandChannel::new(),
     )
@@ -229,8 +248,7 @@ async fn create_daemon(log_dir: Option<PathBuf>) -> Result<Daemon, String> {
 
 #[cfg(unix)]
 fn running_as_admin() -> bool {
-    let uid = unsafe { libc::getuid() };
-    uid == 0
+    nix::unistd::Uid::current().is_root()
 }
 
 #[cfg(windows)]

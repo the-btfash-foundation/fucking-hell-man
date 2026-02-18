@@ -1,26 +1,28 @@
-use super::{config::TEST_CONFIG, Error, TestContext, WAIT_FOR_TUNNEL_STATE_TIMEOUT};
+use super::{Error, TestContext, WAIT_FOR_TUNNEL_STATE_TIMEOUT, config::TEST_CONFIG};
 use crate::{
     mullvad_daemon::RpcClientProvider,
     network_monitor::{
-        self, start_packet_monitor, MonitorOptions, MonitorUnexpectedlyStopped, PacketMonitor,
+        self, MonitorOptions, MonitorUnexpectedlyStopped, PacketMonitor, start_packet_monitor,
     },
     tests::{
         account::{clear_devices, new_device_client},
         helpers,
     },
 };
-use anyhow::{anyhow, bail, ensure, Context};
+use anyhow::{Context, anyhow, bail, ensure};
 use futures::StreamExt;
-use mullvad_management_interface::{client::DaemonEvent, MullvadProxyClient};
+use mullvad_management_interface::{MullvadProxyClient, client::DaemonEvent};
 use mullvad_relay_selector::{
-    query::RelayQuery, GetRelay, RelaySelector, SelectorConfig, WireguardConfig,
+    GetRelay, RelaySelector, SelectorConfig, WireguardConfig,
+    query::{RelayQuery, WireguardRelayQuery},
 };
 use mullvad_types::{
     constraints::Constraint,
+    custom_list::CustomList,
     relay_constraints::{
         GeographicLocationConstraint, LocationConstraint, RelayConstraints, RelaySettings,
     },
-    relay_list::Relay,
+    relay_list::{Relay, WireguardRelay},
     states::TunnelState,
 };
 use pcap::Direction;
@@ -32,9 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 use talpid_types::net::wireguard::{PeerConfig, PrivateKey, TunnelConfig};
-use test_rpc::{
-    meta::Os, mullvad_daemon::ServiceStatus, package::Package, AmIMullvad, ServiceClient, SpawnOpts,
-};
+use test_rpc::{AmIMullvad, ServiceClient, SpawnOpts, meta::Os, package::Package};
 use tokio::time::sleep;
 
 pub const THROTTLE_RETRY_DELAY: Duration = Duration::from_secs(120);
@@ -72,19 +72,15 @@ pub async fn install_app(
     log::info!("Installing app '{}'", app_filename);
     rpc.install_app(get_package_desc(app_filename)).await?;
 
-    // verify that daemon is running
-    if rpc.mullvad_daemon_get_status().await? != ServiceStatus::Running {
-        bail!(Error::DaemonNotRunning);
-    }
-
     // Set the log level to trace
     rpc.set_daemon_log_level(test_rpc::mullvad_daemon::Verbosity::Trace)
-        .await?;
-
-    replace_openvpn_certificate(rpc).await?;
+        .await
+        .context("Failed to set log level")?;
 
     // Override env vars
-    rpc.set_daemon_environment(get_app_env().await?).await?;
+    rpc.set_daemon_environment(get_app_env().await?)
+        .await
+        .context("Failed to set daemon environment")?;
 
     // Wait for the relay list to be updated
     let mut mullvad_client = rpc_provider.new_client().await;
@@ -92,27 +88,6 @@ pub async fn install_app(
         .await
         .context("Failed to update relay list")?;
     Ok(mullvad_client)
-}
-
-/// Replace the OpenVPN CA certificate which is currently used by the installed Mullvad App.
-/// This needs to be invoked after reach (re)installation to use the custom OpenVPN certificate.
-async fn replace_openvpn_certificate(rpc: &ServiceClient) -> Result<(), Error> {
-    const DEST_CERT_FILENAME: &str = "ca.crt";
-
-    let dest_dir = match TEST_CONFIG.os {
-        Os::Windows => "C:\\Program Files\\Mullvad VPN\\resources",
-        Os::Linux => "/opt/Mullvad VPN/resources",
-        Os::Macos => "/Applications/Mullvad VPN.app/Contents/Resources",
-    };
-
-    let dest = Path::new(dest_dir)
-        .join(DEST_CERT_FILENAME)
-        .as_os_str()
-        .to_string_lossy()
-        .into_owned();
-    rpc.write_file(dest, TEST_CONFIG.openvpn_certificate.to_vec())
-        .await
-        .map_err(Error::Rpc)
 }
 
 pub fn get_package_desc(name: &str) -> Package {
@@ -132,7 +107,7 @@ pub async fn reboot(rpc: &mut ServiceClient) -> Result<(), Error> {
     #[cfg(target_os = "macos")]
     crate::vm::network::macos::configure_tunnel()
         .await
-        .map_err(|error| Error::Other(format!("Failed to recreate custom wg tun: {error}")))?;
+        .context("Failed to recreate custom wg tun: {error}")?;
 
     Ok(())
 }
@@ -350,20 +325,16 @@ pub fn get_interface_mac(interface: &str) -> anyhow::Result<Option<[u8; 6]>> {
 /// Get the index of a network interface (on the test-manager machine).
 #[cfg(target_os = "linux")] // not used on macos
 pub fn get_interface_index(interface: &str) -> anyhow::Result<std::ffi::c_uint> {
-    use nix::errno::Errno;
+    use nix::net::if_::if_nametoindex;
     use std::ffi::CString;
 
     let interface = CString::new(interface).context(anyhow!(
         "Failed to turn interface name {interface:?} into cstr"
     ))?;
 
-    match unsafe { libc::if_nametoindex(interface.as_ptr()) } {
-        0 => {
-            let err = Errno::last();
-            Err(err).context("Failed to get interface index")
-        }
-        i => Ok(i),
-    }
+    if_nametoindex(interface.as_ref()).context(anyhow!(
+        "Failed to get index of network interface {interface:?}"
+    ))
 }
 
 /// Log in and retry if it fails due to throttling
@@ -459,15 +430,15 @@ pub async fn connect_and_wait(
 }
 
 pub async fn disconnect_and_wait(mullvad_client: &mut MullvadProxyClient) -> Result<(), Error> {
-    log::debug!("Disconnecting");
-    mullvad_client.disconnect_tunnel().await?;
+    log::trace!("Disconnecting");
+    mullvad_client.disconnect_tunnel("test-manager").await?;
 
     wait_for_tunnel_state(mullvad_client.clone(), |state| {
         matches!(state, TunnelState::Disconnected { .. })
     })
     .await?;
 
-    log::debug!("Disconnected");
+    log::trace!("Disconnected");
 
     Ok(())
 }
@@ -479,12 +450,12 @@ pub async fn wait_for_tunnel_state(
     let events = rpc
         .events_listen()
         .await
-        .map_err(|status| Error::Daemon(format!("Failed to get event stream: {}", status)))?;
+        .map_err(|status| Error::Daemon(format!("Failed to get event stream: {status}")))?;
 
     let state = rpc
         .get_tunnel_state()
         .await
-        .map_err(|error| Error::Daemon(format!("Failed to get tunnel state: {:?}", error)))?;
+        .map_err(|error| Error::Daemon(format!("Failed to get tunnel state: {error:?}")))?;
 
     if accept_state_fn(&state) {
         return Ok(state);
@@ -495,7 +466,7 @@ pub async fn wait_for_tunnel_state(
 
 pub async fn find_next_tunnel_state(
     stream: impl futures::Stream<Item = Result<DaemonEvent, mullvad_management_interface::Error>>
-        + Unpin,
+    + Unpin,
     accept_state_fn: impl Fn(&mullvad_types::states::TunnelState) -> bool,
 ) -> Result<mullvad_types::states::TunnelState, Error> {
     tokio::time::timeout(
@@ -510,8 +481,9 @@ pub async fn find_next_tunnel_state(
 }
 
 pub async fn find_daemon_event<Accept, AcceptedEvent>(
-    mut event_stream: impl futures::Stream<Item = Result<DaemonEvent, mullvad_management_interface::Error>>
-        + Unpin,
+    mut event_stream: impl futures::Stream<
+        Item = Result<DaemonEvent, mullvad_management_interface::Error>,
+    > + Unpin,
     accept_event: Accept,
 ) -> Result<AcceptedEvent, Error>
 where
@@ -524,10 +496,7 @@ where
                 None => continue,
             },
             Some(Err(status)) => {
-                break Err(Error::Daemon(format!(
-                    "Failed to get next event: {}",
-                    status
-                )))
+                break Err(Error::Daemon(format!("Failed to get next event: {status}")));
             }
             None => break Err(Error::Daemon(String::from("Lost daemon event stream"))),
         }
@@ -566,7 +535,7 @@ pub async fn geoip_lookup_with_retries(rpc: &ServiceClient) -> Result<AmIMullvad
 
     loop {
         let result = rpc
-            .geoip_lookup(TEST_CONFIG.mullvad_host.to_owned())
+            .geoip_lookup(TEST_CONFIG.mullvad_host.clone())
             .await
             .map_err(Error::GeoipLookup);
 
@@ -595,38 +564,59 @@ impl<T> Drop for AbortOnDrop<T> {
     }
 }
 
+/// Applies the given query to the daemon location selection. The query will be intersected with
+/// the current location settings, so that the default location custom list is still used.
 pub async fn apply_settings_from_relay_query(
     mullvad_client: &mut MullvadProxyClient,
     query: RelayQuery,
-) -> Result<(), Error> {
-    let (constraints, bridge_state, bridge_settings, obfuscation) = query.into_settings();
+) -> anyhow::Result<()> {
+    // To prevent overwriting default custom list location constraint, we make an intersection with
+    // a query containing only the current location constraint
+    let intersected_relay_query = intersect_with_current_location(mullvad_client, query.clone())
+        .await
+        .with_context(|| {
+            format!("Failed to join query with current daemon settings. Query: {query:#?}")
+        })?;
+    let (constraints, obfuscation) = intersected_relay_query.into_settings();
 
     mullvad_client
         .set_relay_settings(constraints.into())
         .await
-        .map_err(|error| Error::Daemon(format!("Failed to set relay settings: {}", error)))?;
-    mullvad_client
-        .set_bridge_state(bridge_state)
-        .await
-        .map_err(|error| Error::Daemon(format!("Failed to set bridge state: {}", error)))?;
-    mullvad_client
-        .set_bridge_settings(bridge_settings)
-        .await
-        .map_err(|error| Error::Daemon(format!("Failed to set bridge settings: {}", error)))?;
+        .context("Failed to set daemon settings")?;
     mullvad_client
         .set_obfuscation_settings(obfuscation)
         .await
-        .map_err(|error| Error::Daemon(format!("Failed to set obfuscation settings: {}", error)))
+        .context("Failed to set obfuscation settings")?;
+    Ok(())
 }
 
-pub async fn set_relay_settings(
+pub async fn set_custom_endpoint(
     mullvad_client: &mut MullvadProxyClient,
-    relay_settings: impl Into<RelaySettings>,
+    custom_endpoint: mullvad_types::CustomTunnelEndpoint,
 ) -> Result<(), Error> {
     mullvad_client
-        .set_relay_settings(relay_settings.into())
+        .set_relay_settings(RelaySettings::CustomTunnelEndpoint(custom_endpoint))
         .await
-        .map_err(|error| Error::Daemon(format!("Failed to set relay settings: {}", error)))
+        .map_err(|error| Error::Daemon(format!("Failed to set relay settings: {error}")))
+}
+
+pub async fn update_relay_constraints(
+    mullvad_client: &mut MullvadProxyClient,
+    fn_mut: impl FnOnce(&mut RelayConstraints),
+) -> anyhow::Result<()> {
+    let settings = mullvad_client
+        .get_settings()
+        .await
+        .context("Failed to get setting from daemon")?;
+    let RelaySettings::Normal(mut relay_constraints) = settings.relay_settings else {
+        bail!("Mutating custom endpoint not supported");
+    };
+    fn_mut(&mut relay_constraints);
+    mullvad_client
+        .set_relay_settings(RelaySettings::Normal(relay_constraints))
+        .await
+        .context("Failed to set relay settings")?;
+    Ok(())
 }
 
 /// Wait for the relay list to be updated, to make sure we have the overridden one.
@@ -680,7 +670,7 @@ pub fn unreachable_wireguard_tunnel() -> talpid_types::net::wireguard::Connectio
 /// This is independent of the running daemon's environment.
 /// It is solely dependant on the current value of [`TEST_CONFIG`].
 pub async fn get_app_env() -> anyhow::Result<HashMap<String, String>> {
-    use mullvad_api::env;
+    use mullvad_api_constants::env;
 
     let api_host = format!("api.{}", TEST_CONFIG.mullvad_host);
     let api_host_with_port = format!("{api_host}:443");
@@ -694,29 +684,105 @@ pub async fn get_app_env() -> anyhow::Result<HashMap<String, String>> {
     ]))
 }
 
-/// Constrain the daemon to only select the relay selected with `query` when establishing all
-/// future tunnels (until relay settings are updated, see [`set_relay_settings`]). Returns the
-/// selected [`Relay`] for future reference.
+/// Constrain the daemon to only select the relay compatible with `query` and the currently
+/// connected-to relay when establishing all future tunnels (until relay settings are updated, see
+/// [`set_relay_settings`]).
+/// Returns the selected [`Relay`] for future reference.
+pub async fn constrain_to_relay(
+    mullvad_client: &mut MullvadProxyClient,
+    query: RelayQuery,
+) -> anyhow::Result<WireguardRelay> {
+    let intersect_query = intersect_with_current_location(mullvad_client, query.clone()).await?;
+    let (exit, relay_constraints) =
+        get_single_relay_location_contraint(mullvad_client, intersect_query.clone()).await?;
+    let (_relay_constraints, obfuscation) = intersect_query.into_settings();
+    mullvad_client
+        .set_relay_settings(RelaySettings::Normal(relay_constraints))
+        .await
+        .context("Failed to set relay settings")?;
+    mullvad_client
+        .set_obfuscation_settings(obfuscation)
+        .await
+        .context("Failed to set obfuscation settings")?;
+    Ok(exit)
+}
+
+/// Intersects the given query with the current location constraints, to prevent accidentally
+/// overwriting the default location custom list
+async fn intersect_with_current_location(
+    mullvad_client: &mut MullvadProxyClient,
+    query: RelayQuery,
+) -> anyhow::Result<RelayQuery> {
+    let settings = mullvad_client
+        .get_settings()
+        .await
+        .context("Failed to get settings")?;
+    let RelaySettings::Normal(constraint) = settings.relay_settings else {
+        unimplemented!("Setting location for a custom endpoint is not supported");
+    };
+
+    // Construct a relay query preserving only the information about the current location
+    let current_location_query = RelayQuery::new(
+        constraint.location,
+        Constraint::Any,
+        Constraint::Any,
+        WireguardRelayQuery {
+            entry_location: constraint.wireguard_constraints.entry_location,
+            ..Default::default()
+        },
+    );
+    use mullvad_types::Intersection;
+    let intersect_query = query
+        .intersection(current_location_query)
+        .context("Relay query incompatible with default settings")?;
+    Ok(intersect_query)
+}
+
+/// Get a query representing the current daemon settings
+async fn get_query_from_current_settings(
+    mullvad_client: &mut MullvadProxyClient,
+) -> anyhow::Result<RelayQuery> {
+    let settings = mullvad_client
+        .get_settings()
+        .await
+        .context("Failed to get settings")?;
+    RelayQuery::try_from(settings).context("Failed to convert settings to relay query")
+}
+
+pub async fn get_all_pickable_relays(
+    mullvad_client: &mut MullvadProxyClient,
+) -> anyhow::Result<Vec<WireguardRelay>> {
+    let settings = mullvad_client.get_settings().await?;
+    let relay_list = mullvad_client.get_relay_locations().await?;
+    let relays = mullvad_relay_selector::filter_matching_relay_list(
+        &helpers::get_query_from_current_settings(mullvad_client).await?,
+        &relay_list,
+        &settings.custom_lists,
+    );
+    Ok(relays)
+}
+
+/// Selects a relay compatible with the given query and relay list from the client, and returns a
+/// location constraint for only that relay, along with the relay itself.
 ///
 /// # Note
 /// This function does not handle bridges and multihop configurations (currently). There is no
 /// particular reason for this other than it not being needed at the time, so feel free to extend
 /// this function :).
-pub async fn constrain_to_relay(
+async fn get_single_relay_location_contraint(
     mullvad_client: &mut MullvadProxyClient,
     query: RelayQuery,
-) -> anyhow::Result<Relay> {
+) -> anyhow::Result<(WireguardRelay, RelayConstraints)> {
     /// Convert the result of invoking the relay selector to a relay constraint.
     fn convert_to_relay_constraints(
         query: RelayQuery,
         selected_relay: GetRelay,
-    ) -> anyhow::Result<(Relay, RelayConstraints)> {
+    ) -> anyhow::Result<(WireguardRelay, RelayConstraints)> {
         match selected_relay {
-            GetRelay::Wireguard {
+            GetRelay::Mullvad {
                 inner: WireguardConfig::Singlehop { exit },
                 ..
-            }
-            | GetRelay::OpenVpn { exit, .. } => {
+            } => {
                 let location = into_constraint(&exit);
                 let (mut relay_constraints, ..) = query.into_settings();
                 relay_constraints.location = location;
@@ -725,18 +791,12 @@ pub async fn constrain_to_relay(
             unsupported => bail!("Can not constrain to a {unsupported:?}"),
         }
     }
-
     let settings = mullvad_client.get_settings().await?;
-    // Construct a relay selector with up-to-date information from the runnin daemon's relay list
     let relay_list = mullvad_client.get_relay_locations().await?;
-    let relay_selector = get_daemon_relay_selector(&settings, relay_list);
-    // Select an(y) appropriate relay for the given query and constrain the daemon to only connect
-    // to that specific relay (when connecting).
+    let bridge_list = mullvad_client.get_bridges().await?;
+    let relay_selector = get_daemon_relay_selector(&settings, relay_list, bridge_list);
     let relay = relay_selector.get_relay_by_query(query.clone())?;
-    let (exit, relay_constraints) = convert_to_relay_constraints(query, relay)?;
-    set_relay_settings(mullvad_client, RelaySettings::Normal(relay_constraints)).await?;
-
-    Ok(exit)
+    convert_to_relay_constraints(query, relay)
 }
 
 /// Get a mirror of the relay selector used by the daemon.
@@ -746,8 +806,13 @@ pub async fn constrain_to_relay(
 pub fn get_daemon_relay_selector(
     settings: &mullvad_types::settings::Settings,
     relay_list: mullvad_types::relay_list::RelayList,
+    bridge_list: mullvad_types::relay_list::BridgeList,
 ) -> RelaySelector {
-    RelaySelector::from_list(SelectorConfig::from_settings(settings), relay_list)
+    RelaySelector::new(
+        SelectorConfig::from_settings(settings),
+        relay_list,
+        bridge_list,
+    )
 }
 
 /// Convenience function for constructing a constraint from a given [`Relay`].
@@ -773,7 +838,7 @@ pub fn into_constraint(relay: &Relay) -> Constraint<LocationConstraint> {
 /// To customize [`Pinger`] before the pinging and network monitoring starts,
 /// see [`PingerBuilder`]. Call [`start`](Pinger::start) to start pinging, and
 /// [`stop`](Pinger::stop) to get the leak test results.
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct Pinger {
     // These values can be configured with [`PingerBuilder`].
     destination: SocketAddr,
@@ -821,7 +886,7 @@ impl Pinger {
         // Create some network activity for the network monitor to sniff.
         let ping_rpc = rpc.clone();
         let mut interval = tokio::time::interval(builder.interval.period());
-        #[allow(clippy::async_yields_async)]
+        #[expect(clippy::async_yields_async)]
         let ping_task = AbortOnDrop::new(tokio::spawn(async move {
             loop {
                 send_guest_probes_without_monitor(ping_rpc.clone(), None, builder.destination)
@@ -870,7 +935,7 @@ pub struct PingerBuilder {
     interval: tokio::time::Interval,
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 impl PingerBuilder {
     /// Create a default [`PingerBuilder`].
     ///
@@ -923,7 +988,7 @@ pub struct ConnCheckerHandle<'a> {
 
 pub struct ConnectionStatus {
     /// True if <https://am.i.mullvad.net/> reported we are connected.
-    am_i_mullvad: bool,
+    am_i_mullvad: anyhow::Result<bool>,
 
     /// True if we sniffed TCP packets going outside the tunnel.
     leaked_tcp: bool,
@@ -939,7 +1004,7 @@ impl ConnChecker {
     pub fn new(
         rpc: ServiceClient,
         mullvad_client: MullvadProxyClient,
-        leak_destination: SocketAddr,
+        leak_destination: impl Into<SocketAddr>,
     ) -> Self {
         let artifacts_dir = &TEST_CONFIG.artifacts_dir;
         let executable_path = match TEST_CONFIG.os {
@@ -950,7 +1015,7 @@ impl ConnChecker {
         Self {
             rpc,
             mullvad_client,
-            leak_destination,
+            leak_destination: leak_destination.into(),
             split: false,
             executable_path,
             payload: None,
@@ -970,6 +1035,11 @@ impl ConnChecker {
         log::debug!("spawning connection checker");
 
         let opts = {
+            let ipvx = match self.leak_destination {
+                SocketAddr::V4(..) => "ipv4",
+                SocketAddr::V6(..) => "ipv6",
+            };
+
             let mut args = [
                 "--interactive",
                 "--timeout",
@@ -983,7 +1053,7 @@ impl ConnChecker {
                 "--leak-udp",
                 "--leak-icmp",
                 "--url",
-                &format!("https://am.i.{}/json", TEST_CONFIG.mullvad_host),
+                &format!("https://{ipvx}.am.i.{}/json", TEST_CONFIG.mullvad_host),
             ]
             .map(String::from)
             .to_vec();
@@ -1076,28 +1146,64 @@ impl ConnCheckerHandle<'_> {
         self.checker.unsplit().await
     }
 
+    /// Assert that traffic is blocked and that no packets are leaked.
+    pub async fn assert_blocked(&mut self) -> anyhow::Result<()> {
+        log::info!("checking that connection is blocked");
+        async {
+            let status = self.check_connection().await?;
+            ensure!(status.am_i_mullvad.is_err());
+            ensure!(!status.leaked_tcp);
+            ensure!(!status.leaked_udp);
+            ensure!(!status.leaked_icmp);
+            Ok(())
+        }
+        .await
+        .with_context(|| {
+            anyhow!(
+                "assert_secure failed (leak_destination={})",
+                self.checker.leak_destination,
+            )
+        })
+    }
+
     /// Assert that traffic is flowing through the Mullvad tunnel and that no packets are leaked.
     pub async fn assert_secure(&mut self) -> anyhow::Result<()> {
         log::info!("checking that connection is secure");
-        let status = self.check_connection().await?;
-        ensure!(status.am_i_mullvad);
-        ensure!(!status.leaked_tcp);
-        ensure!(!status.leaked_udp);
-        ensure!(!status.leaked_icmp);
-
-        Ok(())
+        async {
+            let status = self.check_connection().await?;
+            ensure!(status.am_i_mullvad?);
+            ensure!(!status.leaked_tcp);
+            ensure!(!status.leaked_udp);
+            ensure!(!status.leaked_icmp);
+            Ok(())
+        }
+        .await
+        .with_context(|| {
+            anyhow!(
+                "assert_secure failed (leak_destination={})",
+                self.checker.leak_destination,
+            )
+        })
     }
 
     /// Assert that traffic is NOT flowing through the Mullvad tunnel and that packets ARE leaked.
     pub async fn assert_insecure(&mut self) -> anyhow::Result<()> {
         log::info!("checking that connection is not secure");
-        let status = self.check_connection().await?;
-        ensure!(!status.am_i_mullvad);
-        ensure!(status.leaked_tcp);
-        ensure!(status.leaked_udp);
-        ensure!(status.leaked_icmp);
-
-        Ok(())
+        async {
+            let status = self.check_connection().await?;
+            ensure!(!status.am_i_mullvad?);
+            ensure!(status.leaked_tcp);
+            ensure!(status.leaked_udp);
+            ensure!(status.leaked_icmp);
+            Ok(())
+        }
+        .await
+        .with_context(|| {
+            anyhow!(
+                "assert_secure failed (leak_destination={})",
+                self.checker.leak_destination,
+            )
+        })
     }
 
     pub async fn check_connection(&mut self) -> anyhow::Result<ConnectionStatus> {
@@ -1126,8 +1232,10 @@ impl ConnCheckerHandle<'_> {
             .await
             .map_err(|_e| anyhow!("Packet monitor unexpectedly stopped"))?;
 
+        let leak_destination = self.checker.leak_destination;
+
         Ok(ConnectionStatus {
-            am_i_mullvad: parse_am_i_mullvad(line)?,
+            am_i_mullvad: parse_am_i_mullvad(line),
 
             leaked_tcp: (monitor_result.packets.iter())
                 .any(|pkt| pkt.protocol == IpNextHeaderProtocols::Tcp),
@@ -1135,8 +1243,10 @@ impl ConnCheckerHandle<'_> {
             leaked_udp: (monitor_result.packets.iter())
                 .any(|pkt| pkt.protocol == IpNextHeaderProtocols::Udp),
 
-            leaked_icmp: (monitor_result.packets.iter())
-                .any(|pkt| pkt.protocol == IpNextHeaderProtocols::Icmp),
+            leaked_icmp: (monitor_result.packets.iter()).any(|pkt| match leak_destination {
+                SocketAddr::V4(..) => pkt.protocol == IpNextHeaderProtocols::Icmp,
+                SocketAddr::V6(..) => pkt.protocol == IpNextHeaderProtocols::Icmpv6,
+            }),
         })
     }
 
@@ -1199,160 +1309,39 @@ fn parse_am_i_mullvad(result: String) -> anyhow::Result<bool> {
     })
 }
 
-pub mod custom_lists {
-    use super::*;
+/// Set the location to the given [`LocationConstraint`]. The same location constraint will be set
+/// for the multihop entry.
+pub async fn set_location(
+    mullvad_client: &mut MullvadProxyClient,
+    location: impl Into<LocationConstraint>,
+) -> anyhow::Result<()> {
+    let location_constraint: LocationConstraint = location.into();
+    let settings = mullvad_client
+        .get_settings()
+        .await
+        .map_err(|error| Error::Daemon(format!("Failed to set relay settings: {error}")))?;
 
-    use mullvad_types::custom_list::{CustomList, Id};
-    use std::sync::{LazyLock, Mutex};
+    let RelaySettings::Normal(mut constraint) = settings.relay_settings else {
+        unimplemented!("Setting location for a custom endpoint is not supported");
+    };
+    constraint.location = Constraint::Only(location_constraint.clone());
+    constraint.wireguard_constraints.entry_location = Constraint::Only(location_constraint);
+    mullvad_client
+        .set_relay_settings(RelaySettings::Normal(constraint))
+        .await?;
+    Ok(())
+}
 
-    // Expose all custom list variants as a shorthand.
-    pub use List::*;
-
-    /// The default custom list to use as location for all tests.
-    pub const DEFAULT_LIST: List = List::Nordic;
-
-    /// Mapping between [List] to daemon custom lists. Since custom list ids are assigned by the
-    /// daemon at the creation of the custom list settings object, we can't map a custom list
-    /// name to a specific list before runtime.
-    static IDS: LazyLock<Mutex<HashMap<List, Id>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-    /// Pre-defined (well-typed) custom lists which may be useful in different test scenarios.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum List {
-        /// A selection of Nordic servers
-        Nordic,
-        /// A selection of European servers
-        Europe,
-        /// This custom list contains relays which are close geographically to the computer running
-        /// the test scenarios, which hopefully means there will be little latency between the test
-        /// machine and these relays
-        LowLatency,
-        /// Antithesis of [List::LowLatency], these relays are located far away from the test
-        /// server. Use this custom list if you want to simulate scenarios where the probability
-        /// of experiencing high latencies is desirable.
-        HighLatency,
-    }
-
-    impl List {
-        pub fn name(self) -> String {
-            use List::*;
-            match self {
-                Nordic => "Nordic".to_string(),
-                Europe => "Europe".to_string(),
-                LowLatency => "Low Latency".to_string(),
-                HighLatency => "High Latency".to_string(),
-            }
-        }
-
-        /// Iterator over all custom lists.
-        pub fn all() -> impl Iterator<Item = List> {
-            use List::*;
-            [Nordic, Europe, LowLatency, HighLatency].into_iter()
-        }
-
-        pub fn locations(self) -> impl Iterator<Item = GeographicLocationConstraint> {
-            use List::*;
-            let country = GeographicLocationConstraint::country;
-            let city = GeographicLocationConstraint::city;
-            match self {
-                Nordic => {
-                    vec![country("no"), country("se"), country("fi"), country("dk")].into_iter()
-                }
-                Europe => vec![
-                    // North
-                    country("se"),
-                    // West
-                    country("fr"),
-                    // East
-                    country("ro"),
-                    // South
-                    country("it"),
-                ]
-                .into_iter(),
-                LowLatency => {
-                    // Assumption: Test server is located in Gothenburg, Sweden.
-                    vec![city("se", "got")].into_iter()
-                }
-                HighLatency => {
-                    // Assumption: Test server is located in Gothenburg, Sweden.
-                    vec![country("au"), country("ca"), country("za")].into_iter()
-                }
-            }
-        }
-
-        pub fn to_constraint(self) -> Option<LocationConstraint> {
-            let ids = IDS.lock().unwrap();
-            let id = ids.get(&self)?;
-            Some(LocationConstraint::CustomList { list_id: *id })
-        }
-    }
-
-    impl From<List> for LocationConstraint {
-        fn from(custom_list: List) -> Self {
-            // TODO: Is this _too_ unsound ??
-            custom_list.to_constraint().unwrap()
-        }
-    }
-
-    /// Add a set of custom lists which can be used in different test scenarios.
-    ///
-    /// See [`List`] for available custom lists.
-    pub async fn add_default_lists(mullvad_client: &mut MullvadProxyClient) -> anyhow::Result<()> {
-        for custom_list in List::all() {
-            let id = mullvad_client
-                .create_custom_list(custom_list.name())
-                .await?;
-            let mut daemon_dito = find_custom_list(mullvad_client, &custom_list.name()).await?;
-            assert_eq!(id, daemon_dito.id);
-            for locations in custom_list.locations() {
-                daemon_dito.locations.insert(locations);
-            }
-            mullvad_client.update_custom_list(daemon_dito).await?;
-            // Associate this custom list variant with a specific, runtime custom list id.
-            IDS.lock().unwrap().insert(custom_list, id);
-        }
-        Ok(())
-    }
-
-    /// Set the default location to the custom list specified by `DEFAULT_LIST`. This also includes
-    /// entry location for multihop. It does not, however, affect bridge location for OpenVPN.
-    /// This is for simplify, as bridges default to using the server closest to the exit anyway, and
-    /// OpenVPN is slated for removal.
-    pub async fn set_default_location(
-        mullvad_client: &mut MullvadProxyClient,
-    ) -> anyhow::Result<()> {
-        let constraints = get_custom_list_location_relay_constraints(DEFAULT_LIST);
-
-        mullvad_client
-            .set_relay_settings(constraints.into())
-            .await
-            .context("Failed to set relay settings")
-    }
-
-    fn get_custom_list_location_relay_constraints(custom_list: List) -> RelayConstraints {
-        let wireguard_constraints = mullvad_types::relay_constraints::WireguardConstraints {
-            entry_location: Constraint::Only(custom_list.into()),
-            ..Default::default()
-        };
-
-        RelayConstraints {
-            location: Constraint::Only(custom_list.into()),
-            wireguard_constraints,
-            ..Default::default()
-        }
-    }
-
-    /// Dig out a custom list from the daemon settings based on the custom list's name.
-    /// There should be an rpc for this.
-    async fn find_custom_list(
-        rpc: &mut MullvadProxyClient,
-        name: &str,
-    ) -> anyhow::Result<CustomList> {
-        rpc.get_settings()
-            .await?
-            .custom_lists
-            .into_iter()
-            .find(|list| list.name == name)
-            .ok_or(anyhow!("List '{name}' not found"))
-    }
+/// Dig out a custom list from the daemon settings based on the custom list's name.
+/// There should be an rpc for this.
+pub async fn find_custom_list(
+    rpc: &mut MullvadProxyClient,
+    name: &str,
+) -> anyhow::Result<CustomList> {
+    rpc.get_settings()
+        .await?
+        .custom_lists
+        .into_iter()
+        .find(|list| list.name == name)
+        .ok_or(anyhow!("List '{name}' not found"))
 }

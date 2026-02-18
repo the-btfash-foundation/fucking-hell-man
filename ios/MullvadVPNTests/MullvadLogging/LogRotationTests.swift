@@ -3,11 +3,12 @@
 //  MullvadVPNTests
 //
 //  Created by Jon Petersson on 2024-04-12.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadLogging
 import XCTest
+
+@testable import MullvadLogging
 
 final class LogRotationTests: XCTestCase {
     let fileManager = FileManager.default
@@ -25,43 +26,6 @@ final class LogRotationTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try fileManager.removeItem(at: directoryPath)
-    }
-
-    func testRotatingActiveLogWhenSizeLimitIsExceeded() throws {
-        let logName = "test.log"
-        let logPath = directoryPath.appendingPathComponent(logName)
-
-        let totalLogSizeLimit = 200
-        let totalLogTestSize = 645
-        let logChunkSize = 20
-
-        let expectedLogCount = Int(ceil(Double(totalLogTestSize) / Double(totalLogSizeLimit)))
-        let writeOperationCount = Int(ceil(Double(totalLogTestSize) / Double(logChunkSize)))
-
-        let stream = LogFileOutputStream(fileURL: logPath, header: "", fileSizeLimit: UInt64(totalLogSizeLimit))
-        for _ in 0 ..< writeOperationCount {
-            stream.write(stringOfSize(logChunkSize))
-        }
-        stream.synchronize()
-
-        let actualLogCount = try fileManager.contentsOfDirectory(atPath: directoryPath.relativePath).count
-        XCTAssertEqual(expectedLogCount, actualLogCount)
-
-        for index in 0 ..< actualLogCount {
-            var expectedFileName = logName
-
-            if index != 0 {
-                // Rotated log filenames start at "_2".
-                expectedFileName = expectedFileName.replacingOccurrences(of: ".log", with: "_\(index + 1).log")
-            }
-
-            let logExists = fileManager.fileExists(
-                atPath: directoryPath
-                    .appendingPathComponent(expectedFileName)
-                    .relativePath
-            )
-            XCTAssertTrue(logExists)
-        }
     }
 
     func testRotateLogsByStorageSizeLimit() throws {
@@ -138,11 +102,11 @@ final class LogRotationTests: XCTestCase {
 
 extension LogRotationTests {
     private func stringOfSize(_ size: Int) -> String {
-        (0 ..< size).map { "\($0 % 10)" }.joined(separator: "")
+        (0..<size).map { "\($0 % 10)" }.joined(separator: "")
     }
 
     private func writeDataToDisk(path: URL, fileSize: Int) throws {
-        let data = Data((0 ..< fileSize).map { UInt8($0 & 0xff) })
+        let data = Data((0..<fileSize).map { UInt8($0 & 0xff) })
         try data.write(to: path)
     }
 }

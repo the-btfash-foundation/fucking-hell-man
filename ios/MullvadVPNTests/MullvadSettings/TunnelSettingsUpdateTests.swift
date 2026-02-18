@@ -3,13 +3,14 @@
 //  MullvadVPNTests
 //
 //  Created by Andrew Bulhak on 2024-02-14.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadSettings
 import MullvadTypes
 import Network
 import XCTest
+
+@testable import MullvadSettings
 
 final class TunnelSettingsUpdateTests: XCTestCase {
     func testApplyDNSSettings() {
@@ -35,17 +36,58 @@ final class TunnelSettingsUpdateTests: XCTestCase {
         var settings = LatestTunnelSettings()
 
         // When:
-        let update = TunnelSettingsUpdate.obfuscation(WireGuardObfuscationSettings(
-            state: .udpOverTcp,
-            udpOverTcpPort: .port5001
-        ))
+        let update = TunnelSettingsUpdate.obfuscation(
+            WireGuardObfuscationSettings(
+                state: .udpOverTcp,
+                udpOverTcpPort: .port5001
+            ))
         update.apply(to: &settings)
 
         // Then:
-        XCTAssertEqual(settings.wireGuardObfuscation, WireGuardObfuscationSettings(
-            state: .udpOverTcp,
-            udpOverTcpPort: .port5001
-        ))
+        XCTAssertEqual(
+            settings.wireGuardObfuscation,
+            WireGuardObfuscationSettings(
+                state: .udpOverTcp,
+                udpOverTcpPort: .port5001
+            ))
+    }
+
+    func testApplyShadowsocksObfuscation() {
+        // Given:
+        var settings = LatestTunnelSettings()
+
+        // When:
+        let update = TunnelSettingsUpdate.obfuscation(
+            WireGuardObfuscationSettings(
+                state: .shadowsocks
+            ))
+        update.apply(to: &settings)
+
+        // Then:
+        XCTAssertEqual(
+            settings.wireGuardObfuscation,
+            WireGuardObfuscationSettings(
+                state: .shadowsocks
+            ))
+    }
+
+    func testApplyQuicObfuscation() {
+        // Given:
+        var settings = LatestTunnelSettings()
+
+        // When:
+        let update = TunnelSettingsUpdate.obfuscation(
+            WireGuardObfuscationSettings(
+                state: .quic
+            ))
+        update.apply(to: &settings)
+
+        // Then:
+        XCTAssertEqual(
+            settings.wireGuardObfuscation,
+            WireGuardObfuscationSettings(
+                state: .quic
+            ))
     }
 
     func testApplyRelayConstraints() {
@@ -70,11 +112,18 @@ final class TunnelSettingsUpdateTests: XCTestCase {
         var settings = LatestTunnelSettings()
 
         // When:
-        let update = TunnelSettingsUpdate.quantumResistance(.on)
+        var update = TunnelSettingsUpdate.quantumResistance(.on)
         update.apply(to: &settings)
 
         // Then:
-        XCTAssertEqual(settings.tunnelQuantumResistance, .on)
+        XCTAssertTrue(settings.tunnelQuantumResistance.isEnabled)
+
+        // When again:
+        update = TunnelSettingsUpdate.quantumResistance(.automatic)
+        update.apply(to: &settings)
+
+        // Then again:
+        XCTAssertTrue(settings.tunnelQuantumResistance.isEnabled)
     }
 
     func testApplyMultihop() {
@@ -100,5 +149,25 @@ final class TunnelSettingsUpdateTests: XCTestCase {
 
         // Then:
         XCTAssertEqual(settings.daita, daitaSettings)
+    }
+
+    func testApplyIncludeAllNetworks() {
+        // Given:
+        let includeAllNetworksState = InclueAllNetworksState.on
+        let localNetworkSharingState = LocalNetworkSharingState.on
+        var settings = LatestTunnelSettings()
+
+        // When:
+        let update = TunnelSettingsUpdate.includeAllNetworks(
+            IncludeAllNetworksSettings(
+                includeAllNetworksState: includeAllNetworksState,
+                localNetworkSharingState: localNetworkSharingState
+            )
+        )
+        update.apply(to: &settings)
+
+        // Then:
+        XCTAssertEqual(settings.includeAllNetworks.includeAllNetworksIsEnabled, includeAllNetworksState.isEnabled)
+        XCTAssertEqual(settings.includeAllNetworks.localNetworkSharingIsEnabled, localNetworkSharingState.isEnabled)
     }
 }

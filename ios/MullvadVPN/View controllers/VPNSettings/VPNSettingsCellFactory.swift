@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-03-09.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
@@ -15,10 +15,10 @@ protocol VPNSettingsCellEventHandler {
     func addCustomPort(_ port: UInt16)
     func selectCustomPortEntry(_ port: UInt16) -> Bool
     func selectObfuscationState(_ state: WireGuardObfuscationState)
-    func switchMultihop(_ state: MultihopState)
 }
 
-final class VPNSettingsCellFactory: CellFactoryProtocol {
+@MainActor
+final class VPNSettingsCellFactory: @preconcurrency CellFactoryProtocol {
     let tableView: UITableView
     var viewModel: VPNSettingsViewModel
     var delegate: VPNSettingsCellEventHandler?
@@ -31,25 +31,18 @@ final class VPNSettingsCellFactory: CellFactoryProtocol {
 
     func makeCell(for item: VPNSettingsDataSource.Item, indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: item.reuseIdentifier.rawValue, for: indexPath)
-
         configureCell(cell, item: item, indexPath: indexPath)
 
         return cell
     }
 
-    // swiftlint:disable:next cyclomatic_complexity function_body_length
     func configureCell(_ cell: UITableViewCell, item: VPNSettingsDataSource.Item, indexPath: IndexPath) {
         (cell as? SettingsCell)?.detailTitleLabel.accessibilityIdentifier = nil
         switch item {
         case .dnsSettings:
             guard let cell = cell as? SettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "DNS_SETTINGS_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "DNS settings",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("DNS settings", comment: "")
 
             cell.disclosureType = .chevron
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
@@ -57,12 +50,7 @@ final class VPNSettingsCellFactory: CellFactoryProtocol {
         case .ipOverrides:
             guard let cell = cell as? SettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "IP_OVERRIDE_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Server IP override",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Server IP override", comment: "")
 
             cell.disclosureType = .chevron
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
@@ -70,12 +58,7 @@ final class VPNSettingsCellFactory: CellFactoryProtocol {
         case let .wireGuardPort(port):
             guard let cell = cell as? SelectableSettingsCell else { return }
 
-            var portString = NSLocalizedString(
-                "WIREGUARD_PORT_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Automatic",
-                comment: ""
-            )
+            var portString = NSLocalizedString("Automatic", comment: "")
             if let port {
                 portString = String(port)
             }
@@ -87,18 +70,8 @@ final class VPNSettingsCellFactory: CellFactoryProtocol {
         case .wireGuardCustomPort:
             guard let cell = cell as? SettingsInputCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "WIREGUARD_CUSTOM_PORT_CELL_LABEL",
-                tableName: "VPNSettings",
-                value: "Custom",
-                comment: ""
-            )
-            cell.textField.placeholder = NSLocalizedString(
-                "WIREGUARD_CUSTOM_PORT_CELL_INPUT_PLACEHOLDER",
-                tableName: "VPNSettings",
-                value: "Port",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Custom", comment: "")
+            cell.textField.placeholder = NSLocalizedString("Port", comment: "")
 
             cell.textField.setAccessibilityIdentifier(.customWireGuardPortTextField)
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
@@ -128,31 +101,19 @@ final class VPNSettingsCellFactory: CellFactoryProtocol {
         case .wireGuardObfuscationAutomatic:
             guard let cell = cell as? SelectableSettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "WIREGUARD_OBFUSCATION_AUTOMATIC_LABEL",
-                tableName: "VPNSettings",
-                value: "Automatic",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Automatic", comment: "")
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.applySubCellStyling()
 
         case .wireGuardObfuscationUdpOverTcp:
             guard let cell = cell as? SelectableSettingsDetailsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "WIREGUARD_OBFUSCATION_UDP_TCP_LABEL",
-                tableName: "VPNSettings",
-                value: "UDP-over-TCP",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("UDP-over-TCP", comment: "")
 
-            cell.detailTitleLabel.text = String(format: NSLocalizedString(
-                "WIREGUARD_OBFUSCATION_UDP_TCP_PORT",
-                tableName: "VPNSettings",
-                value: "Port: %@",
-                comment: ""
-            ), viewModel.obfuscationUpdOverTcpPort.description)
+            cell.detailTitleLabel.text = String(
+                format: NSLocalizedString("Port: %@", comment: ""),
+                viewModel.obfuscationUpdOverTcpPort.description
+            )
 
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.detailTitleLabel.setAccessibilityIdentifier(.wireGuardObfuscationUdpOverTcpPort)
@@ -165,19 +126,12 @@ final class VPNSettingsCellFactory: CellFactoryProtocol {
         case .wireGuardObfuscationShadowsocks:
             guard let cell = cell as? SelectableSettingsDetailsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "WIREGUARD_OBFUSCATION_SHADOWSOCKS_LABEL",
-                tableName: "VPNSettings",
-                value: "Shadowsocks",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Shadowsocks", comment: "")
 
-            cell.detailTitleLabel.text = String(format: NSLocalizedString(
-                "WIREGUARD_OBFUSCATION_SHADOWSOCKS_PORT",
-                tableName: "VPNSettings",
-                value: "Port: %@",
-                comment: ""
-            ), viewModel.obfuscationShadowsocksPort.description)
+            cell.detailTitleLabel.text = String(
+                format: NSLocalizedString("Port: %@", comment: ""),
+                viewModel.obfuscationShadowsocksPort.description
+            )
 
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.detailTitleLabel.setAccessibilityIdentifier(.wireGuardObfuscationShadowsocksPort)
@@ -187,15 +141,19 @@ final class VPNSettingsCellFactory: CellFactoryProtocol {
                 self?.delegate?.showDetails(for: .wireguardOverShadowsocks)
             }
 
+        case .wireGuardObfuscationQuic:
+            guard let cell = cell as? SelectableSettingsCell else { return }
+
+            cell.titleLabel.text = NSLocalizedString("QUIC", comment: "")
+
+            cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
+            cell.detailTitleLabel.setAccessibilityIdentifier(.wireGuardObfuscationQuic)
+            cell.applySubCellStyling()
+
         case .wireGuardObfuscationOff:
             guard let cell = cell as? SelectableSettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "WIREGUARD_OBFUSCATION_OFF_LABEL",
-                tableName: "VPNSettings",
-                value: "Off",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Off", comment: "")
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.applySubCellStyling()
 
@@ -203,48 +161,28 @@ final class VPNSettingsCellFactory: CellFactoryProtocol {
             guard let cell = cell as? SelectableSettingsCell else { return }
 
             let portString = port.description
-            cell.titleLabel.text = NSLocalizedString(
-                "WIREGUARD_OBFUSCATION_PORT_LABEL",
-                tableName: "VPNSettings",
-                value: portString,
-                comment: ""
-            )
+            cell.titleLabel.text = portString
             cell.accessibilityIdentifier = "\(item.accessibilityIdentifier)\(portString)"
             cell.applySubCellStyling()
 
         case .quantumResistanceAutomatic:
             guard let cell = cell as? SelectableSettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "QUANTUM_RESISTANCE_AUTOMATIC_LABEL",
-                tableName: "VPNSettings",
-                value: "Automatic",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Automatic", comment: "")
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.applySubCellStyling()
 
         case .quantumResistanceOn:
             guard let cell = cell as? SelectableSettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "QUANTUM_RESISTANCE_ON_LABEL",
-                tableName: "VPNSettings",
-                value: "On",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("On", comment: "")
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.applySubCellStyling()
 
         case .quantumResistanceOff:
             guard let cell = cell as? SelectableSettingsCell else { return }
 
-            cell.titleLabel.text = NSLocalizedString(
-                "QUANTUM_RESISTANCE_OFF_LABEL",
-                tableName: "VPNSettings",
-                value: "Off",
-                comment: ""
-            )
+            cell.titleLabel.text = NSLocalizedString("Off", comment: "")
             cell.setAccessibilityIdentifier(item.accessibilityIdentifier)
             cell.applySubCellStyling()
         }

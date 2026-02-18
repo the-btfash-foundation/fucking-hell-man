@@ -1,0 +1,99 @@
+package net.mullvad.mullvadvpn.feature.notification.impl
+
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.ramcosta.composedestinations.annotation.Destination
+import com.ramcosta.composedestinations.annotation.ExternalModuleGraph
+import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import net.mullvad.mullvadvpn.core.animation.SlideInFromRightTransition
+import net.mullvad.mullvadvpn.lib.common.Lc
+import net.mullvad.mullvadvpn.lib.ui.component.NavigateBackIconButton
+import net.mullvad.mullvadvpn.lib.ui.component.ScaffoldWithMediumTopBar
+import net.mullvad.mullvadvpn.lib.ui.component.listitem.SwitchListItem
+import net.mullvad.mullvadvpn.lib.ui.designsystem.MullvadCircularProgressIndicatorLarge
+import net.mullvad.mullvadvpn.lib.ui.theme.AppTheme
+import net.mullvad.mullvadvpn.lib.ui.theme.Dimens
+import org.koin.androidx.compose.koinViewModel
+
+@Preview("Loading|Normal")
+@Composable
+private fun PreviewNotificationSettingsScreen(
+    @PreviewParameter(NotificationSettingsUiStatePreviewParameterProvider::class)
+    state: Lc<Unit, NotificationSettingsUiState>
+) {
+    AppTheme {
+        NotificationSettingsScreen(
+            state = state,
+            onBackClick = {},
+            onToggleLocationInNotifications = {},
+        )
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Destination<ExternalModuleGraph>(style = SlideInFromRightTransition::class)
+@Composable
+fun NotificationSettings(navigator: DestinationsNavigator) {
+    val vm = koinViewModel<NotificationSettingsViewModel>()
+    val state by vm.uiState.collectAsStateWithLifecycle()
+
+    NotificationSettingsScreen(
+        state = state,
+        onBackClick = { navigator.navigateUp() },
+        onToggleLocationInNotifications = vm::onToggleLocationInNotifications,
+    )
+}
+
+@Composable
+fun NotificationSettingsScreen(
+    state: Lc<Unit, NotificationSettingsUiState>,
+    onBackClick: () -> Unit,
+    onToggleLocationInNotifications: (Boolean) -> Unit,
+) {
+    ScaffoldWithMediumTopBar(
+        appBarTitle = stringResource(id = R.string.settings_notifications),
+        navigationIcon = { NavigateBackIconButton { onBackClick() } },
+    ) { modifier ->
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = modifier.padding(horizontal = Dimens.sideMarginNew),
+        ) {
+            when (state) {
+                is Lc.Loading -> Loading()
+                is Lc.Content -> {
+                    NotificationSettingsContent(
+                        state = state.value,
+                        onToggleLocationInNotifications = onToggleLocationInNotifications,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotificationSettingsContent(
+    state: NotificationSettingsUiState,
+    onToggleLocationInNotifications: (Boolean) -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        SwitchListItem(
+            title = stringResource(R.string.enable_location_in_notification),
+            isToggled = state.locationInNotificationEnabled,
+            onCellClicked = onToggleLocationInNotifications,
+        )
+    }
+}
+
+@Composable
+private fun Loading() {
+    MullvadCircularProgressIndicatorLarge()
+}

@@ -1,23 +1,20 @@
-# Mullvad
-# Keeping all Mullvad classes etc until the project has been split into multiple sub-projects
-# where it's better defined where the FFI/JNI boundaries are.
--keep class net.mullvad.** { *; }
-
 # Mullvad daemon FFI/JNI
 # See: <repository-root>/mullvad-jni/classes.rs
+# Keep all talpid classes as they are used for JNI calls
+-keep class net.mullvad.talpid.** { *; }
+# These are specific classes used in JNI calls with the daemon
+-keep class net.mullvad.mullvadvpn.lib.endpoint.ApiEndpointOverride { *; }
+-keep class net.mullvad.mullvadvpn.app.service.MullvadDaemon { *; }
+-keep class net.mullvad.mullvadvpn.app.service.MullvadVpnService { *; }
+# All classes that are used in JNI calls are subclasses of Parcelable
 -keep class android.os.Parcelable { *; }
+# Common java types used in JNI calls
 -keep class java.lang.Boolean { *; }
 -keep class java.lang.Integer { *; }
 -keep class java.lang.String { *; }
 -keep class java.net.InetAddress { *; }
 -keep class java.net.InetSocketAddress { *; }
 -keep class java.util.ArrayList { *; }
-
-# Joda Time
--dontwarn org.joda.convert.**
--dontwarn org.joda.time.**
--keep class org.joda.time.** { *; }
--keep interface org.joda.time.** { *; }
 
 # grpc
 -keep class io.grpc.okhttp.OkHttpChannelBuilder { *; }
@@ -29,5 +26,12 @@
 -dontwarn com.squareup.okhttp.CipherSuite
 -dontwarn com.squareup.okhttp.ConnectionSpec
 -dontwarn com.squareup.okhttp.TlsVersion
+
+# datastore
+-keep class net.mullvad.mullvadvpn.repository.UserPreferences { *; }
+
+# for logging
+-keepnames class net.mullvad.mullvadvpn.lib.payment.model.PurchaseResult
+-keepnames class net.mullvad.mullvadvpn.lib.payment.model.PaymentAvailability
 
 

@@ -3,14 +3,14 @@
 //  MullvadVPN
 //
 //  Created by Andreas Lif on 2022-08-05.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadREST
 import MullvadTypes
 import UIKit
 
-protocol RedeemVoucherViewControllerDelegate: AnyObject {
+protocol RedeemVoucherViewControllerDelegate: AnyObject, Sendable {
     func redeemVoucherDidSucceed(
         _ controller: RedeemVoucherViewController,
         with response: REST.SubmitVoucherResponse
@@ -18,9 +18,10 @@ protocol RedeemVoucherViewControllerDelegate: AnyObject {
     func redeemVoucherDidCancel(_ controller: RedeemVoucherViewController)
 }
 
+@MainActor
 class RedeemVoucherViewController: UIViewController, UINavigationControllerDelegate, RootContainment {
     private let contentView: RedeemVoucherContentView
-    private var interactor: RedeemVoucherInteractor
+    nonisolated(unsafe) private var interactor: RedeemVoucherInteractor
 
     weak var delegate: RedeemVoucherViewControllerDelegate?
 
@@ -52,10 +53,6 @@ class RedeemVoucherViewController: UIViewController, UINavigationControllerDeleg
     }
 
     var prefersDeviceInfoBarHidden: Bool {
-        true
-    }
-
-    var prefersNotificationBarHidden: Bool {
         true
     }
 
@@ -113,16 +110,22 @@ class RedeemVoucherViewController: UIViewController, UINavigationControllerDeleg
     private func submit(code: String) {
         contentView.state = .verifying
         contentView.isEditing = false
-        interactor.redeemVoucher(code: code, completion: { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case let .success(value):
-                contentView.state = .success
-                delegate?.redeemVoucherDidSucceed(self, with: value)
-            case let .failure(error):
-                contentView.state = .failure(error)
-            }
-        })
+        interactor.redeemVoucher(
+            code: code,
+            completion: { [weak self] result in
+                guard let self else { return }
+                /// Safe to assume `@MainActor` isolation because
+                /// `TunnelManager.redeemVoucher` sets the `RedeemVoucherOperation`'s `completionQueue` to `.main`
+                MainActor.assumeIsolated {
+                    switch result {
+                    case let .success(value):
+                        contentView.state = .success
+                        delegate?.redeemVoucherDidSucceed(self, with: value)
+                    case let .failure(error):
+                        contentView.state = .failure(error)
+                    }
+                }
+            })
     }
 
     private func cancel() {

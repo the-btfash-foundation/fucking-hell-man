@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-05-05.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -27,12 +27,7 @@ class SettingsInputCell: SelectableSettingsCell {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
 
         toolbarDoneButton = UIBarButtonItem(
-            title: NSLocalizedString(
-                "INPUT_CELL_TOOLBAR_BUTTON_DONE",
-                tableName: "VPNSettings",
-                value: "Done",
-                comment: ""
-            ),
+            title: NSLocalizedString("Done", comment: ""),
             style: .done,
             target: self,
             action: #selector(confirmInput)

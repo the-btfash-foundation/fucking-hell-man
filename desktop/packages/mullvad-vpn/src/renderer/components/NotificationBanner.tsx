@@ -1,14 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import { motion } from 'motion/react';
+import React from 'react';
 import styled from 'styled-components';
 
-import { colors } from '../../config.json';
 import { messages } from '../../shared/gettext';
 import { InAppNotificationIndicatorType } from '../../shared/notifications/notification';
 import { IconButton } from '../lib/components';
-import { useEffectEvent, useLastDefinedValue, useStyledRef } from '../lib/utility-hooks';
-import * as AppButton from './AppButton';
+import { colors } from '../lib/foundations';
+import { useExclusiveTask } from '../lib/hooks/use-exclusive-task';
 import { tinyText } from './common-styles';
-import ImageView from './ImageView';
 
 const NOTIFICATION_AREA_ID = 'notification-area';
 
@@ -17,7 +16,7 @@ export const NotificationTitle = styled.span(tinyText, {
 });
 
 export const NotificationSubtitleText = styled.span(tinyText, {
-  color: colors.white60,
+  color: colors.whiteAlpha60,
 });
 
 interface INotificationSubtitleProps {
@@ -28,55 +27,34 @@ export function NotificationSubtitle(props: INotificationSubtitleProps) {
   return React.Children.count(props.children) > 0 ? <NotificationSubtitleText {...props} /> : null;
 }
 
-export const NotificationActionButton = styled(AppButton.SimpleButton)({
-  flex: 1,
-  justifyContent: 'center',
-  cursor: 'default',
-  padding: '4px',
-  background: 'transparent',
-  border: 'none',
-});
-
-export const NotificationActionButtonInner = styled(ImageView)({
-  [NotificationActionButton + ':hover &&']: {
-    backgroundColor: colors.white80,
-  },
-});
-
 interface NotificationActionProps {
   onClick: () => Promise<void>;
 }
 
 export function NotificationOpenLinkAction(props: NotificationActionProps) {
+  const [onClick] = useExclusiveTask(props.onClick);
   return (
-    <AppButton.BlockingButton onClick={props.onClick}>
-      <NotificationActionButton
-        aria-describedby={NOTIFICATION_AREA_ID}
-        aria-label={messages.gettext('Open URL')}>
-        <NotificationActionButtonInner
-          height={12}
-          width={12}
-          tintColor={colors.white60}
-          source="icon-extLink"
-        />
-      </NotificationActionButton>
-    </AppButton.BlockingButton>
+    <IconButton
+      size="small"
+      variant="secondary"
+      onClick={onClick}
+      aria-describedby={NOTIFICATION_AREA_ID}
+      aria-label={messages.gettext('Open URL')}>
+      <IconButton.Icon icon="external" />
+    </IconButton>
   );
 }
 
 export function NotificationTroubleshootDialogAction(props: NotificationActionProps) {
   return (
-    <NotificationActionButton
+    <IconButton
+      size="small"
+      variant="secondary"
       aria-describedby={NOTIFICATION_AREA_ID}
       aria-label={messages.gettext('Troubleshoot')}
       onClick={props.onClick}>
-      <NotificationActionButtonInner
-        height={12}
-        width={12}
-        tintColor={colors.white60}
-        source="icon-info"
-      />
-    </NotificationActionButton>
+      <IconButton.Icon icon="info-circle" />
+    </IconButton>
   );
 }
 
@@ -84,12 +62,12 @@ export function NotificationCloseAction(props: NotificationActionProps) {
   return (
     <IconButton
       aria-describedby={NOTIFICATION_AREA_ID}
+      variant="secondary"
       aria-label={messages.pgettext('accessibility', 'Close notification')}
       onClick={props.onClick}
-      icon="icon-close"
-      size="small"
-      variant="secondary"
-    />
+      size="small">
+      <IconButton.Icon icon="cross-circle" />
+    </IconButton>
   );
 }
 
@@ -123,25 +101,18 @@ export const NotificationIndicator = styled.div<INotificationIndicatorProps>((pr
   borderRadius: '5px',
   marginTop: '4px',
   marginRight: '8px',
-  backgroundColor: props.$type ? notificationIndicatorTypeColorMap[props.$type] : 'transparent',
+  backgroundColor: props.$type
+    ? notificationIndicatorTypeColorMap[props.$type]
+    : colors.transparent,
 }));
 
-interface ICollapsibleProps {
-  $alignBottom: boolean;
-  $height?: number;
-}
-
-const Collapsible = styled.div<ICollapsibleProps>((props) => {
-  return {
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: props.$alignBottom ? 'flex-end' : 'flex-start',
-    backgroundColor: colors.darkerBlue,
-    overflow: 'hidden',
-    // Using auto as the initial value prevents transition if a notification is visible on mount.
-    height: props.$height === undefined ? 'auto' : `${props.$height}px`,
-    transition: 'height 250ms ease-in-out',
-  };
+const Collapsible = styled(motion.div)({
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'flex-start',
+  translateY: '0%',
+  backgroundColor: colors.darkerBlue50,
+  overflow: 'hidden',
 });
 
 const Content = styled.section({
@@ -154,30 +125,20 @@ const Content = styled.section({
 interface INotificationBannerProps {
   children?: React.ReactNode; // Array<NotificationContent | NotificationActions>,
   className?: string;
+  animateIn: boolean;
 }
 
-export function NotificationBanner(props: INotificationBannerProps) {
-  const [contentHeight, setContentHeight] = useState<number>();
-  const [alignBottom, setAlignBottom] = useState(false);
-
-  const contentRef = useStyledRef<HTMLDivElement>();
-
-  const children = useLastDefinedValue(props.children);
-
-  const updateHeightEvent = useEffectEvent(() => {
-    const newHeight =
-      props.children !== undefined ? (contentRef.current?.getBoundingClientRect().height ?? 0) : 0;
-    if (newHeight !== contentHeight) {
-      setContentHeight(newHeight);
-      setAlignBottom((alignBottom) => alignBottom || contentHeight === 0 || newHeight === 0);
-    }
-  });
-
-  useEffect(() => updateHeightEvent());
+export function NotificationBanner({ className, children, animateIn }: INotificationBannerProps) {
+  const translateYInitial = animateIn ? '-100%' : '0%';
 
   return (
-    <Collapsible $height={contentHeight} className={props.className} $alignBottom={alignBottom}>
-      <Content ref={contentRef}>{children}</Content>
+    <Collapsible
+      animate={{ translateY: '0%' }}
+      className={className}
+      exit={{ translateY: '-100%' }}
+      initial={{ translateY: translateYInitial }}
+      transition={{ duration: 0.25 }}>
+      <Content>{children}</Content>
     </Collapsible>
   );
 }

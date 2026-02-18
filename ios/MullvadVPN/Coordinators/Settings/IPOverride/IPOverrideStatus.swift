@@ -3,49 +3,29 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-01-17.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
 enum IPOverrideStatus: Equatable, CustomStringConvertible {
-    case active, noImports, importSuccessful(Context), importFailed(Context)
+    case active, noImports
+    case importSuccessful(Context)
+    case importFailed(Context)
 
-    enum Context {
-        case file, text
-
-        // Used in "statusDescription" below to form a complete sentence and therefore not localized here.
-        var description: String {
-            switch self {
-            case .file: "of file"
-            case .text: "via text"
-            }
-        }
+    enum Context: Equatable {
+        case text
+        case file(fileName: String)
     }
 
     var title: String {
         switch self {
         case .active:
-            NSLocalizedString(
-                "IP_OVERRIDE_STATUS_TITLE_ACTIVE",
-                tableName: "IPOverride",
-                value: "Overrides active",
-                comment: ""
-            )
+            NSLocalizedString("OVERRIDES ACTIVE", comment: "")
         case .noImports, .importFailed:
-            NSLocalizedString(
-                "IP_OVERRIDE_STATUS_TITLE_NO_IMPORTS",
-                tableName: "IPOverride",
-                value: "No overrides imported",
-                comment: ""
-            )
+            NSLocalizedString("NO OVERRIDES IMPORTED", comment: "")
         case .importSuccessful:
-            NSLocalizedString(
-                "IP_OVERRIDE_STATUS_TITLE_IMPORT_SUCCESSFUL",
-                tableName: "IPOverride",
-                value: "Import successful",
-                comment: ""
-            )
+            NSLocalizedString("IMPORT SUCCESSFUL", comment: "")
         }
     }
 
@@ -73,19 +53,25 @@ enum IPOverrideStatus: Equatable, CustomStringConvertible {
         case .active, .noImports:
             ""
         case let .importFailed(context):
-            String(format: NSLocalizedString(
-                "IP_OVERRIDE_STATUS_DESCRIPTION_INACTIVE",
-                tableName: "IPOverride",
-                value: "Import %@ was unsuccessful, please try again.",
-                comment: ""
-            ), context.description)
+            switch context {
+            case .file(let fileName):
+                String(
+                    format: NSLocalizedString("Import of %@ was unsuccessful, please try again.", comment: ""),
+                    fileName
+                )
+            case .text:
+                NSLocalizedString("Import of text was unsuccessful, please try again.", comment: "")
+            }
         case let .importSuccessful(context):
-            String(format: NSLocalizedString(
-                "IP_OVERRIDE_STATUS_DESCRIPTION_INACTIVE",
-                tableName: "IPOverride",
-                value: "Import %@ was successful, overrides are now active.",
-                comment: ""
-            ), context.description)
+            switch context {
+            case .file(let fileName):
+                String(
+                    format: NSLocalizedString("Import of %@ was successful, overrides are now active.", comment: ""),
+                    fileName
+                )
+            case .text:
+                NSLocalizedString("Import of text was successful, overrides are now active.", comment: "")
+            }
         }
     }
 }

@@ -3,9 +3,10 @@
 //  MullvadREST
 //
 //  Created by Mojgan on 2024-05-17.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
+import CoreLocation
 import MullvadSettings
 import MullvadTypes
 
@@ -16,15 +17,20 @@ extension RelaySelector {
             by relayConstraint: RelayConstraint<UserSelectedRelays>,
             in relays: REST.ServerRelaysResponse,
             filterConstraint: RelayConstraint<RelayFilter>,
-            daitaEnabled: Bool
+            daitaEnabled: Bool,
+            includeInactive: Bool = false
         ) throws -> [RelayWithLocation<REST.ServerRelay>] {
-            let mappedRelays = mapRelays(relays: relays.wireguard.relays, locations: relays.locations)
+            let mappedRelays = RelayWithLocation.locateRelays(
+                relays: relays.wireguard.relays,
+                locations: relays.locations
+            )
 
             return try applyConstraints(
                 relayConstraint,
                 filterConstraint: filterConstraint,
                 daitaEnabled: daitaEnabled,
-                relays: mappedRelays
+                relays: mappedRelays,
+                includeInactive: includeInactive
             )
         }
 
@@ -44,7 +50,12 @@ extension RelaySelector {
 
             var relayWithLocation: RelayWithLocation<REST.ServerRelay>?
             if let referenceLocation {
-                let relay = closestRelay(to: referenceLocation, using: relayWithLocations)
+                let relay =
+                    randomCloseRelay(
+                        to: CLLocationCoordinate2D(
+                            latitude: referenceLocation.latitude, longitude: referenceLocation.longitude),
+                        using: relayWithLocations
+                    ) as? REST.ServerRelay
                 relayWithLocation = relayWithLocations.first(where: { $0.relay == relay })
             }
 
@@ -55,43 +66,6 @@ extension RelaySelector {
             }
 
             return createMatch(for: relayWithLocation, port: port, wireguard: wireguard)
-        }
-
-        public static func closestRelay(
-            to location: Location,
-            using relayWithLocations: [RelayWithLocation<REST.ServerRelay>]
-        ) -> REST.ServerRelay? {
-            let relaysWithDistance = relayWithLocations.map {
-                RelayWithDistance(
-                    relay: $0.relay,
-                    distance: Haversine.distance(
-                        location.latitude,
-                        location.longitude,
-                        $0.serverLocation.latitude,
-                        $0.serverLocation.longitude
-                    )
-                )
-            }.sorted {
-                $0.distance < $1.distance
-            }.prefix(5)
-
-            let relaysGroupedByDistance = Dictionary(grouping: relaysWithDistance, by: { $0.distance })
-            guard let closetsRelayGroup = relaysGroupedByDistance.min(by: { $0.key < $1.key })?.value else {
-                return nil
-            }
-
-            var greatestDistance = 0.0
-            closetsRelayGroup.forEach {
-                if $0.distance > greatestDistance {
-                    greatestDistance = $0.distance
-                }
-            }
-
-            let closestRelay = rouletteSelection(relays: closetsRelayGroup, weightFunction: { relay in
-                UInt64(1 + greatestDistance - relay.distance)
-            })
-
-            return closestRelay?.relay
         }
     }
 

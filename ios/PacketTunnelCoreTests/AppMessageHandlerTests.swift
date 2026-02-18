@@ -3,48 +3,52 @@
 //  PacketTunnelCoreTests
 //
 //  Created by Jon Petersson on 2023-09-28.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
-@testable import MullvadMockData
-@testable import MullvadREST
 import MullvadTypes
 import PacketTunnelCore
 import XCTest
 
+@testable import MullvadMockData
+@testable import MullvadREST
+
 final class AppMessageHandlerTests: XCTestCase {
-    func testHandleAppMessageForSendURLRequest() async throws {
+    // MARK: APIRequest
+
+    func testHandleAppMessageForSendAPIRequest() async throws {
         let sendRequestExpectation = expectation(description: "Expect sending request")
 
-        let urlRequestProxy = URLRequestProxyStub(sendRequestExpectation: sendRequestExpectation)
-        let appMessageHandler = createAppMessageHandler(urlRequestProxy: urlRequestProxy)
+        let apiRequestProxy = APIRequestProxyStub(sendRequestExpectation: sendRequestExpectation)
+        let appMessageHandler = createAppMessageHandler(apiRequestProxy: apiRequestProxy)
 
-        let url = URL(string: "localhost")!
-        let urlRequest = ProxyURLRequest(
+        let apiRequest = ProxyAPIRequest(
             id: UUID(),
-            urlRequest: URLRequest(url: url)
-        )!
+            request: .getAddressList(.default)
+        )
 
         _ = try? await appMessageHandler.handleAppMessage(
-            TunnelProviderMessage.sendURLRequest(urlRequest).encode()
+            TunnelProviderMessage.sendAPIRequest(apiRequest).encode()
         )
 
         await fulfillment(of: [sendRequestExpectation], timeout: .UnitTest.timeout)
     }
 
-    func testHandleAppMessageForCancelURLRequest() async throws {
+    func testHandleAppMessageForCancelAPIRequest() async throws {
         let cancelRequestExpectation = expectation(description: "Expect cancelling request")
 
-        let urlRequestProxy = URLRequestProxyStub(cancelRequestExpectation: cancelRequestExpectation)
-        let appMessageHandler = createAppMessageHandler(urlRequestProxy: urlRequestProxy)
+        let apiRequestProxy = APIRequestProxyStub(cancelRequestExpectation: cancelRequestExpectation)
+        let appMessageHandler = createAppMessageHandler(apiRequestProxy: apiRequestProxy)
 
         _ = try? await appMessageHandler.handleAppMessage(
-            TunnelProviderMessage.cancelURLRequest(UUID()).encode()
+            TunnelProviderMessage.cancelAPIRequest(UUID()).encode()
         )
 
         await fulfillment(of: [cancelRequestExpectation], timeout: .UnitTest.timeout)
     }
+
+    // MARK: Other
 
     func testHandleAppMessageForTunnelStatus() async throws {
         let stateExpectation = expectation(description: "Expect getting state")
@@ -99,11 +103,18 @@ final class AppMessageHandlerTests: XCTestCase {
         let selectedRelays = SelectedRelays(
             entry: nil,
             exit: SelectedRelay(
-                endpoint: match.endpoint,
+                endpoint: SelectedEndpoint(
+                    socketAddress: .ipv4(match.endpoint.ipv4Relay),
+                    ipv4Gateway: match.endpoint.ipv4Gateway,
+                    ipv6Gateway: match.endpoint.ipv6Gateway,
+                    publicKey: match.endpoint.publicKey,
+                    obfuscation: .off
+                ),
                 hostname: match.relay.hostname,
-                location: match.location
+                location: match.location,
+                features: nil
             ),
-            retryAttempt: 0
+            retryAttempt: 0,
         )
 
         _ = try? await appMessageHandler.handleAppMessage(
@@ -117,11 +128,11 @@ final class AppMessageHandlerTests: XCTestCase {
 extension AppMessageHandlerTests {
     func createAppMessageHandler(
         actor: PacketTunnelActorProtocol = PacketTunnelActorStub(),
-        urlRequestProxy: URLRequestProxyProtocol = URLRequestProxyStub()
+        apiRequestProxy: APIRequestProxyProtocol = APIRequestProxyStub()
     ) -> AppMessageHandler {
         return AppMessageHandler(
             packetTunnelActor: actor,
-            urlRequestProxy: urlRequestProxy
+            apiRequestProxy: apiRequestProxy
         )
     }
 }

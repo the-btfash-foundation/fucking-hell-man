@@ -3,10 +3,11 @@
 //  PacketTunnelCoreTests
 //
 //  Created by Mojgan on 2024-07-15.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
+
 @testable import MullvadTypes
 @testable import PacketTunnelCore
 

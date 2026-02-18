@@ -1,4 +1,4 @@
-use crate::net::TunnelEndpoint;
+use crate::net::{IpVersion, TunnelEndpoint};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 #[cfg(target_os = "android")]
@@ -16,7 +16,7 @@ pub enum TunnelStateTransition {
     },
     #[cfg(target_os = "android")]
     /// No connection is established and network is unsecured.
-    Disconnected,
+    Disconnected {},
     /// Network is secured but tunnel is still connecting.
     Connecting(TunnelEndpoint),
     /// Tunnel is connected.
@@ -121,18 +121,24 @@ impl ErrorStateCause {
 #[derive(thiserror::Error, Debug, Serialize, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParameterGenerationError {
-    /// Failure to select a matching tunnel relay
+    /// Failure to select a matching entry tunnel relay
+    #[error("Failure to select a matching entry tunnel relay")]
+    NoMatchingRelayEntry,
+    /// Failure to select a matching exit tunnel relay
+    #[error("Failure to select a matching exit tunnel relay")]
+    NoMatchingRelayExit,
+    /// Failure to select a matching tunnel relay, but we do not know if it is an entry or an exit
     #[error("Failure to select a matching tunnel relay")]
     NoMatchingRelay,
     /// Failure to select a matching bridge relay
     #[error("Failure to select a matching bridge relay")]
     NoMatchingBridgeRelay,
-    /// Returned when tunnel parameters can't be generated because wireguard key is not available.
-    #[error("No wireguard key available")]
-    NoWireguardKey,
     /// Failure to resolve the hostname of a custom tunnel configuration
     #[error("Can't resolve hostname for custom tunnel host")]
-    CustomTunnelHostResultionError,
+    CustomTunnelHostResolutionError,
+    /// User has selected an IP version that is not available on the network
+    #[error("The requested IP version ({family}) is not available")]
+    IpVersionUnavailable { family: IpVersion },
 }
 
 /// Application that prevents setting the firewall policy.

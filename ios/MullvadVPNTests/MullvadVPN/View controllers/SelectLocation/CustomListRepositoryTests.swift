@@ -3,15 +3,16 @@
 //  MullvadVPNTests
 //
 //  Created by Mojgan on 2024-02-07.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadSettings
 import Network
 import XCTest
 
+@testable import MullvadSettings
+
 class CustomListRepositoryTests: XCTestCase {
-    static let store = InMemorySettingsStore<SettingNotFound>()
+    nonisolated(unsafe) static let store = InMemorySettingsStore<SettingNotFound>()
     private var repository = CustomListRepository()
 
     override class func setUp() {
@@ -19,7 +20,7 @@ class CustomListRepositoryTests: XCTestCase {
     }
 
     override class func tearDown() {
-        SettingsManager.unitTestStore = nil
+        store.reset()
     }
 
     override func tearDownWithError() throws {
@@ -42,10 +43,12 @@ class CustomListRepositoryTests: XCTestCase {
     }
 
     func testAddingCustomList() throws {
-        let item = CustomList(name: "Netflix", locations: [
-            .country("SE"),
-            .city("SE", "Gothenburg"),
-        ])
+        let item = CustomList(
+            name: "Netflix",
+            locations: [
+                .country("SE"),
+                .city("SE", "Gothenburg"),
+            ])
         try repository.save(list: item)
 
         let storedItem = repository.fetch(by: item.id)
@@ -53,10 +56,12 @@ class CustomListRepositoryTests: XCTestCase {
     }
 
     func testUpdatingCustomList() throws {
-        var item = CustomList(name: "Netflix", locations: [
-            .country("SE"),
-            .city("SE", "Gothenburg"),
-        ])
+        var item = CustomList(
+            name: "Netflix",
+            locations: [
+                .country("SE"),
+                .city("SE", "Gothenburg"),
+            ])
         try repository.save(list: item)
 
         item.locations.append(.country("FR"))
@@ -67,10 +72,12 @@ class CustomListRepositoryTests: XCTestCase {
     }
 
     func testDeletingCustomList() throws {
-        let item = CustomList(name: "Netflix", locations: [
-            .country("SE"),
-            .city("SE", "Gothenburg"),
-        ])
+        let item = CustomList(
+            name: "Netflix",
+            locations: [
+                .country("SE"),
+                .city("SE", "Gothenburg"),
+            ])
         try repository.save(list: item)
 
         let storedItem = repository.fetch(by: item.id)
@@ -80,15 +87,21 @@ class CustomListRepositoryTests: XCTestCase {
     }
 
     func testFetchingAllCustomList() throws {
-        try repository.save(list: CustomList(name: "Netflix", locations: [
-            .country("FR"),
-            .city("SE", "Gothenburg"),
-        ]))
+        try repository.save(
+            list: CustomList(
+                name: "Netflix",
+                locations: [
+                    .country("FR"),
+                    .city("SE", "Gothenburg"),
+                ]))
 
-        try repository.save(list: CustomList(name: "PS5", locations: [
-            .country("DE"),
-            .city("SE", "Gothenburg"),
-        ]))
+        try repository.save(
+            list: CustomList(
+                name: "PS5",
+                locations: [
+                    .country("DE"),
+                    .city("SE", "Gothenburg"),
+                ]))
 
         XCTAssertEqual(repository.fetchAll().count, 2)
     }

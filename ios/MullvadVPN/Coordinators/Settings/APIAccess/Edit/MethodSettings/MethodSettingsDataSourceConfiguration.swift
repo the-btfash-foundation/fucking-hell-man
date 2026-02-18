@@ -3,16 +3,18 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-01-19.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
+@MainActor
 class MethodSettingsDataSourceConfiguration {
-    private let dataSource: UITableViewDiffableDataSource<
-        MethodSettingsSectionIdentifier,
-        MethodSettingsItemIdentifier
-    >?
+    private let dataSource:
+        UITableViewDiffableDataSource<
+            MethodSettingsSectionIdentifier,
+            MethodSettingsItemIdentifier
+        >?
 
     init(
         dataSource: UITableViewDiffableDataSource<MethodSettingsSectionIdentifier, MethodSettingsItemIdentifier>
@@ -105,14 +107,15 @@ class MethodSettingsDataSourceConfiguration {
             return
         }
 
-        let itemsToReload: [MethodSettingsItemIdentifier] = switch viewModel.method {
-        case .direct, .bridges, .encryptedDNS:
-            []
-        case .shadowsocks:
-            MethodSettingsItemIdentifier.allShadowsocksItems
-        case .socks5:
-            MethodSettingsItemIdentifier.allSocksItems(authenticate: viewModel.socks.authenticate)
-        }
+        let itemsToReload: [MethodSettingsItemIdentifier] =
+            switch viewModel.method {
+            case .direct, .bridges, .encryptedDNS:
+                []
+            case .shadowsocks:
+                MethodSettingsItemIdentifier.allShadowsocksItems
+            case .socks5:
+                MethodSettingsItemIdentifier.allSocksItems(authenticate: viewModel.socks.authenticate)
+            }
 
         snapshot.reconfigureItems(itemsToReload + [.validationError])
         dataSource?.apply(snapshot, animatingDifferences: false)

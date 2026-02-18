@@ -3,14 +3,18 @@
 //  MullvadREST
 //
 //  Created by Mojgan on 2024-01-10.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import Foundation
+import MullvadLogging
 import MullvadSettings
+import MullvadTypes
 
-class AccessMethodIterator {
+final class AccessMethodIterator: @unchecked Sendable, SwiftConnectionModeProviding {
+    private let logger = Logger(label: "AccessMethodIterator")
+
     private let dataSource: AccessMethodRepositoryDataSource
 
     private var index = 0
@@ -22,6 +26,10 @@ class AccessMethodIterator {
 
     private var lastReachableApiAccessId: UUID? {
         dataSource.fetchLastReachable().id
+    }
+
+    public var domainName: String {
+        REST.encryptedDNSHostname
     }
 
     init(dataSource: AccessMethodRepositoryDataSource) {
@@ -42,13 +50,14 @@ class AccessMethodIterator {
             index = firstIndex
         }
 
-        dataSource.saveLastReachable(pick())
+        let newAccessMethod = pick()
+        dataSource.requestAccessMethod(newAccessMethod)
     }
 
     func rotate() {
         let (partial, isOverflow) = index.addingReportingOverflow(1)
         index = isOverflow ? 0 : partial
-        dataSource.saveLastReachable(pick())
+        dataSource.requestAccessMethod(pick())
     }
 
     func pick() -> PersistentAccessMethod {
@@ -62,5 +71,9 @@ class AccessMethodIterator {
             let circularIndex = index % configurations.count
             return configurations[circularIndex]
         }
+    }
+
+    func accessMethods() -> [PersistentAccessMethod] {
+        dataSource.fetchAll()
     }
 }

@@ -1,19 +1,20 @@
 //! Utilities for working with windows on Windows.
+#![allow(clippy::undocumented_unsafe_blocks)] // Remove me if you dare.
 
 use std::{os::windows::io::AsRawHandle, ptr, sync::Arc, thread};
 use tokio::sync::broadcast;
 use windows_sys::{
-    w,
     Win32::{
         Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM},
         System::{LibraryLoader::GetModuleHandleW, Threading::GetThreadId},
         UI::WindowsAndMessaging::{
-            CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-            GetWindowLongPtrW, PostQuitMessage, PostThreadMessageW, SetWindowLongPtrW,
-            TranslateMessage, GWLP_USERDATA, GWLP_WNDPROC, PBT_APMRESUMEAUTOMATIC,
-            PBT_APMRESUMESUSPEND, PBT_APMSUSPEND, WM_DESTROY, WM_POWERBROADCAST, WM_USER,
+            CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA,
+            GWLP_WNDPROC, GetMessageW, GetWindowLongPtrW, PBT_APMRESUMEAUTOMATIC,
+            PBT_APMRESUMESUSPEND, PBT_APMSUSPEND, PostQuitMessage, PostThreadMessageW,
+            SetWindowLongPtrW, TranslateMessage, WM_DESTROY, WM_POWERBROADCAST, WM_USER,
         },
     },
+    w,
 };
 
 const CLASS_NAME: *const u16 = w!("STATIC");
@@ -51,8 +52,8 @@ pub fn create_hidden_window<F: (Fn(HWND, u32, WPARAM, LPARAM) -> LRESULT) + Send
                 0,
                 0,
                 0,
-                0,
-                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
                 GetModuleHandleW(ptr::null_mut()),
                 ptr::null_mut(),
             )
@@ -76,7 +77,7 @@ pub fn create_hidden_window<F: (Fn(HWND, u32, WPARAM, LPARAM) -> LRESULT) + Send
         let mut msg = unsafe { std::mem::zeroed() };
 
         loop {
-            let status = unsafe { GetMessageW(&mut msg, 0, 0, 0) };
+            let status = unsafe { GetMessageW(&raw mut msg, ptr::null_mut(), 0, 0) };
 
             if status < 0 {
                 continue;
@@ -85,14 +86,14 @@ pub fn create_hidden_window<F: (Fn(HWND, u32, WPARAM, LPARAM) -> LRESULT) + Send
                 break;
             }
 
-            if msg.hwnd == 0 {
+            if msg.hwnd.is_null() {
                 if msg.message == REQUEST_THREAD_SHUTDOWN {
                     unsafe { DestroyWindow(dummy_window) };
                 }
             } else {
                 unsafe {
-                    TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
+                    TranslateMessage(&raw const msg);
+                    DispatchMessageW(&raw const msg);
                 }
             }
         }
@@ -116,15 +117,15 @@ where
     F: Fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
 {
     if message == WM_DESTROY {
-        PostQuitMessage(0);
+        unsafe { PostQuitMessage(0) };
         return 0;
     }
-    let raw_callback = GetWindowLongPtrW(window, GWLP_USERDATA);
+    let raw_callback = unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) };
     if raw_callback != 0 {
-        let typed_callback = &mut *(raw_callback as *mut F);
+        let typed_callback = unsafe { &mut *(raw_callback as *mut F) };
         return typed_callback(window, message, wparam, lparam);
     }
-    DefWindowProcW(window, message, wparam, lparam)
+    unsafe { DefWindowProcW(window, message, wparam, lparam) }
 }
 
 /// Power management events
@@ -165,14 +166,13 @@ impl PowerManagementListener {
         let (tx, rx) = tokio::sync::broadcast::channel(16);
 
         let power_broadcast_callback = move |window, message, wparam, lparam| {
-            if message == WM_POWERBROADCAST {
-                if let Some(event) = PowerManagementEvent::try_from_winevent(wparam) {
-                    if tx.send(event).is_err() {
-                        log::error!("Stopping power management event monitor");
-                        unsafe { PostQuitMessage(0) };
-                        return 0;
-                    }
-                }
+            if message == WM_POWERBROADCAST
+                && let Some(event) = PowerManagementEvent::try_from_winevent(wparam)
+                && tx.send(event).is_err()
+            {
+                log::error!("Stopping power management event monitor");
+                unsafe { PostQuitMessage(0) };
+                return 0;
             }
             unsafe { DefWindowProcW(window, message, wparam, lparam) }
         };

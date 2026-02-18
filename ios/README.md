@@ -14,24 +14,11 @@ instructions document.
 
 ## Code formatting
 
-The codebase is formatted using [SwiftFormat](https://github.com/nicklockwood/SwiftFormat). Please 
+The codebase is formatted using [swift-format](https://github.com/swiftlang/swift-format). Please 
 format all contributions using the latest version of formatter.
 
 ```
-swiftformat ios/
-```
-
-Install the latest version of SwiftFormat via Homebrew:
-
-```
-brew install swiftformat
-```
-
-CI uses the latest version available on Homebrew to check formatting, so please keep your local 
-installation up to date, if you see it complain:
-
-```
-brew upgrade swiftformat 
+./ios/format.sh format
 ```
 
 ## Screenshots for AppStore
@@ -56,7 +43,7 @@ configuration.
    vim ios/Configurations/Screenshots.xcconfig
    ```
 
-### Prerequisitives
+### Prerequisites
 
 1. Make sure you have [rvm](https://rvm.io) installed.
 1. Install Ruby 2.5.1 or later using `rvm install <VERSION>`.
@@ -87,13 +74,8 @@ Whenever we want to start adding translations for real, this script can be
 resurrected from the git history if we deem it to be the best path forward.
 Look for `ios/requirements.txt`.
 
-## Icons and assets
+## Cached relays
 
-For a general overview of icons and graphics read [the graphics readme](../graphics/README.md).
-
-To copy graphical assets from the desktop GUI and generate iOS assets, run:
-```bash
-ios/convert-assets.rb --app-icon
-ios/convert-assets.rb --import-desktop-assets
-ios/convert-assets.rb --additional-assets
-```
+The script `relays-prebuild.sh` runs on each Xcode build and will download and cache a list of relays if it is not already present for a given configuration.
+The cached list for a given configuration will always override the current relays file.
+To get a fresh relay file on demand, issue a `clean` command to Xcode and re-build the project.

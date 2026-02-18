@@ -1,17 +1,19 @@
-use crate::{account_history, device, version_check, DaemonCommand, DaemonCommandSender};
+use crate::{DaemonCommand, DaemonCommandSender, account_history, device};
 use futures::{
-    channel::{mpsc, oneshot},
     StreamExt,
+    channel::{mpsc, oneshot},
 };
-use mullvad_api::{rest::Error as RestError, StatusCode};
+use mullvad_api::{StatusCode, rest::Error as RestError};
+use mullvad_management_interface::types::FromProtobufTypeError;
 use mullvad_management_interface::{
-    types::{self, daemon_event, management_service_server::ManagementService},
     Code, Request, Response, ServerJoinHandle, Status,
+    types::{self, daemon_event, management_service_server::ManagementService},
 };
+use mullvad_types::relay_constraints::GeographicLocationConstraint;
 use mullvad_types::{
     account::AccountNumber,
     relay_constraints::{
-        BridgeSettings, BridgeState, ObfuscationSettings, RelayOverride, RelaySettings,
+        ObfuscationSettings, RelayOverride, RelaySettings, allowed_ip::AllowedIps,
     },
     relay_list::RelayList,
     settings::{DnsOptions, Settings},
@@ -19,8 +21,9 @@ use mullvad_types::{
     version,
     wireguard::{RotationInterval, RotationIntervalError},
 };
+use std::collections::BTreeSet;
 use std::{
-    path::Path,
+    path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -38,14 +41,21 @@ pub enum Error {
     SetupError(#[source] mullvad_management_interface::Error),
 }
 
+pub type AppUpgradeBroadcast = tokio::sync::broadcast::Sender<version::AppUpgradeEvent>;
+
 struct ManagementServiceImpl {
     daemon_tx: DaemonCommandSender,
     subscriptions: Arc<Mutex<Vec<EventsListenerSender>>>,
+    pub app_upgrade_broadcast: AppUpgradeBroadcast,
+    log_reload_handle: crate::logging::LogHandle,
 }
 
 pub type ServiceResult<T> = std::result::Result<Response<T>, Status>;
 type EventsListenerReceiver = UnboundedReceiverStream<Result<types::DaemonEvent, Status>>;
 type EventsListenerSender = tokio::sync::mpsc::UnboundedSender<Result<types::DaemonEvent, Status>>;
+
+type AppUpgradeEventListenerReceiver =
+    Box<dyn futures::Stream<Item = Result<types::AppUpgradeEvent, Status>> + Send + Unpin>;
 
 const INVALID_VOUCHER_MESSAGE: &str = "This voucher code is invalid";
 const USED_VOUCHER_MESSAGE: &str = "This voucher code has already been used";
@@ -54,6 +64,8 @@ const USED_VOUCHER_MESSAGE: &str = "This voucher code has already been used";
 impl ManagementService for ManagementServiceImpl {
     type GetSplitTunnelProcessesStream = UnboundedReceiverStream<Result<i32, Status>>;
     type EventsListenStream = EventsListenerReceiver;
+    type AppUpgradeEventsListenStream = AppUpgradeEventListenerReceiver;
+    type LogListenStream = UnboundedReceiverStream<Result<types::LogMessage, Status>>;
 
     // Control and get the tunnel state
     //
@@ -67,8 +79,9 @@ impl ManagementService for ManagementServiceImpl {
         Ok(Response::new(connect_issued))
     }
 
-    async fn disconnect_tunnel(&self, _: Request<()>) -> ServiceResult<bool> {
-        log::debug!("disconnect_tunnel");
+    async fn disconnect_tunnel(&self, request: Request<String>) -> ServiceResult<bool> {
+        let source = request.into_inner();
+        log::debug!("disconnect_tunnel (source: {source})");
 
         let (tx, rx) = oneshot::channel();
         self.send_command_to_daemon(DaemonCommand::SetTargetState(tx, TargetState::Unsecured))?;
@@ -139,7 +152,7 @@ impl ManagementService for ManagementServiceImpl {
         log::debug!("get_current_version");
         let (tx, rx) = oneshot::channel();
         self.send_command_to_daemon(DaemonCommand::GetCurrentVersion(tx))?;
-        let version = self.wait_for_result(rx).await?;
+        let version = self.wait_for_result(rx).await?.to_string();
         Ok(Response::new(version))
     }
 
@@ -196,19 +209,15 @@ impl ManagementService for ManagementServiceImpl {
             .map(|relays| Response::new(types::RelayList::from(relays)))
     }
 
-    async fn set_bridge_settings(
-        &self,
-        request: Request<types::BridgeSettings>,
-    ) -> ServiceResult<()> {
-        let settings =
-            BridgeSettings::try_from(request.into_inner()).map_err(map_protobuf_type_err)?;
-
-        log::debug!("set_bridge_settings({:?})", settings);
+    async fn get_bridges(&self, _: Request<()>) -> ServiceResult<types::BridgeList> {
+        log::debug!("get_bridges");
 
         let (tx, rx) = oneshot::channel();
-        self.send_command_to_daemon(DaemonCommand::SetBridgeSettings(tx, settings))?;
-        self.wait_for_result(rx).await?.map_err(map_daemon_error)?;
-        Ok(Response::new(()))
+        self.send_command_to_daemon(DaemonCommand::GetBridges(tx))?;
+        self.wait_for_result(rx)
+            .await
+            .map(types::BridgeList::from)
+            .map(Response::new)
     }
 
     async fn set_obfuscation_settings(
@@ -220,17 +229,6 @@ impl ManagementService for ManagementServiceImpl {
         log::debug!("set_obfuscation_settings({:?})", settings);
         let (tx, rx) = oneshot::channel();
         self.send_command_to_daemon(DaemonCommand::SetObfuscationSettings(tx, settings))?;
-        self.wait_for_result(rx).await??;
-        Ok(Response::new(()))
-    }
-
-    async fn set_bridge_state(&self, request: Request<types::BridgeState>) -> ServiceResult<()> {
-        let bridge_state =
-            BridgeState::try_from(request.into_inner()).map_err(map_protobuf_type_err)?;
-
-        log::debug!("set_bridge_state({:?})", bridge_state);
-        let (tx, rx) = oneshot::channel();
-        self.send_command_to_daemon(DaemonCommand::SetBridgeState(tx, bridge_state))?;
         self.wait_for_result(rx).await??;
         Ok(Response::new(()))
     }
@@ -274,23 +272,22 @@ impl ManagementService for ManagementServiceImpl {
     }
 
     #[cfg(not(target_os = "android"))]
-    async fn set_block_when_disconnected(&self, request: Request<bool>) -> ServiceResult<()> {
-        let block_when_disconnected = request.into_inner();
-        log::debug!("set_block_when_disconnected({})", block_when_disconnected);
+    async fn set_lockdown_mode(&self, request: Request<bool>) -> ServiceResult<()> {
+        let lockdown_mode = request.into_inner();
+        log::debug!("set_lockdown_mode({})", lockdown_mode);
         let (tx, rx) = oneshot::channel();
-        self.send_command_to_daemon(DaemonCommand::SetBlockWhenDisconnected(
-            tx,
-            block_when_disconnected,
-        ))?;
+        self.send_command_to_daemon(DaemonCommand::SetLockdownMode(tx, lockdown_mode))?;
         self.wait_for_result(rx).await??;
         Ok(Response::new(()))
     }
 
     #[cfg(target_os = "android")]
-    async fn set_block_when_disconnected(&self, request: Request<bool>) -> ServiceResult<()> {
-        let block_when_disconnected = request.into_inner();
-        log::debug!("set_block_when_disconnected({})", block_when_disconnected);
-        Err(Status::unimplemented("Setting Lockdown mode on Android is not supported - this is handled by the OS, not the daemon"))
+    async fn set_lockdown_mode(&self, request: Request<bool>) -> ServiceResult<()> {
+        let lockdown_mode = request.into_inner();
+        log::debug!("set_lockdown_mode({})", lockdown_mode);
+        Err(Status::unimplemented(
+            "Setting Lockdown mode on Android is not supported - this is handled by the OS, not the daemon",
+        ))
     }
 
     async fn set_auto_connect(&self, request: Request<bool>) -> ServiceResult<()> {
@@ -298,20 +295,6 @@ impl ManagementService for ManagementServiceImpl {
         log::debug!("set_auto_connect({})", auto_connect);
         let (tx, rx) = oneshot::channel();
         self.send_command_to_daemon(DaemonCommand::SetAutoConnect(tx, auto_connect))?;
-        self.wait_for_result(rx).await??;
-        Ok(Response::new(()))
-    }
-
-    async fn set_openvpn_mssfix(&self, request: Request<u32>) -> ServiceResult<()> {
-        let mssfix = request.into_inner();
-        let mssfix = if mssfix != 0 {
-            Some(mssfix as u16)
-        } else {
-            None
-        };
-        log::debug!("set_openvpn_mssfix({:?})", mssfix);
-        let (tx, rx) = oneshot::channel();
-        self.send_command_to_daemon(DaemonCommand::SetOpenVpnMssfix(tx, mssfix))?;
         self.wait_for_result(rx).await??;
         Ok(Response::new(()))
     }
@@ -456,8 +439,9 @@ impl ManagementService for ManagementServiceImpl {
             .map_err(map_daemon_error)
     }
 
-    async fn logout_account(&self, _: Request<()>) -> ServiceResult<()> {
-        log::debug!("logout_account");
+    async fn logout_account(&self, request: Request<String>) -> ServiceResult<()> {
+        let source = request.into_inner();
+        log::debug!("logout_account (source: {source})");
         let (tx, rx) = oneshot::channel();
         self.send_command_to_daemon(DaemonCommand::LogoutAccount(tx))?;
         self.wait_for_result(rx)
@@ -630,16 +614,45 @@ impl ManagementService for ManagementServiceImpl {
         }
     }
 
+    async fn set_wireguard_allowed_ips(
+        &self,
+        request: Request<types::AllowedIpsList>,
+    ) -> ServiceResult<()> {
+        let allowed_ips_str = request.into_inner().values;
+        log::debug!("set_wireguard_allowed_ips({:?})", allowed_ips_str);
+
+        let (tx, rx) = oneshot::channel();
+        let allowed_ips = AllowedIps::parse(&allowed_ips_str)
+            .map_err(|e| {
+                log::error!("{e}");
+                Status::invalid_argument(format!("Invalid allowed IPs: {e}"))
+            })?
+            .to_constraint();
+
+        self.send_command_to_daemon(DaemonCommand::SetWireguardAllowedIps(tx, allowed_ips))?;
+        self.wait_for_result(rx).await??;
+        Ok(Response::new(()))
+    }
+
     // Custom lists
     //
 
-    async fn create_custom_list(&self, request: Request<String>) -> ServiceResult<String> {
+    async fn create_custom_list(
+        &self,
+        request: Request<types::NewCustomList>,
+    ) -> ServiceResult<String> {
         log::debug!("create_custom_list");
+        let request = request.into_inner();
+        let locations = request
+            .locations
+            .into_iter()
+            .map(GeographicLocationConstraint::try_from)
+            .collect::<Result<BTreeSet<_>, FromProtobufTypeError>>()?;
         let (tx, rx) = oneshot::channel();
-        self.send_command_to_daemon(DaemonCommand::CreateCustomList(tx, request.into_inner()))?;
+        self.send_command_to_daemon(DaemonCommand::CreateCustomList(tx, request.name, locations))?;
         self.wait_for_result(rx)
             .await?
-            .map(|response| Response::new(response.to_string()))
+            .map(|id| Response::new(id.to_string()))
             .map_err(map_daemon_error)
     }
 
@@ -802,6 +815,21 @@ impl ManagementService for ManagementServiceImpl {
 
     // Split tunneling
     //
+
+    async fn split_tunnel_is_supported(&self, _: Request<()>) -> ServiceResult<bool> {
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        {
+            log::debug!("split_tunnel_is_supported");
+            let (tx, rx) = oneshot::channel();
+            self.send_command_to_daemon(DaemonCommand::SplitTunnelIsSupported(tx))?;
+            Ok(self.wait_for_result(rx).await.map(Response::new)?)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            log::error!("split_tunnel_is_supported is not available on this platform");
+            Ok(Response::new(false))
+        }
+    }
 
     async fn get_split_tunnel_processes(
         &self,
@@ -1093,8 +1121,176 @@ impl ManagementService for ManagementServiceImpl {
 
         Ok(Response::new(feature_indicators))
     }
+
+    async fn set_log_filter(&self, request: Request<types::LogFilter>) -> ServiceResult<()> {
+        self.log_reload_handle
+            .set_log_filter(request.into_inner().log_filter)
+            .map_err(|error| Status::invalid_argument(error.to_string()))?;
+        Ok(Response::new(()))
+    }
+
+    async fn log_listen(&self, _request: Request<()>) -> ServiceResult<Self::LogListenStream> {
+        let mut log_stream = self.log_reload_handle.get_log_stream();
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            loop {
+                match log_stream.recv().await {
+                    Ok(log) => {
+                        let _ = tx.send(Ok(types::LogMessage { message: log }));
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        let _ = tx.send(Err(Status::internal(format!("{n} lagged messages"))));
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(Response::new(UnboundedReceiverStream::new(rx)))
+    }
+    // Debug features
+
+    async fn disable_relay(&self, relay: Request<String>) -> ServiceResult<()> {
+        log::debug!("disable_relay");
+        let (tx, rx) = oneshot::channel();
+        let relay = relay.into_inner();
+        self.send_command_to_daemon(DaemonCommand::DisableRelay { relay, tx })?;
+        self.wait_for_result(rx).await?;
+        Ok(Response::new(()))
+    }
+
+    async fn enable_relay(&self, relay: Request<String>) -> ServiceResult<()> {
+        log::debug!("enable_relay");
+        let (tx, rx) = oneshot::channel();
+        let relay = relay.into_inner();
+        self.send_command_to_daemon(DaemonCommand::EnableRelay { relay, tx })?;
+        self.wait_for_result(rx).await?;
+        Ok(Response::new(()))
+    }
+
+    #[cfg(not(target_os = "android"))]
+    async fn get_rollout_threshold(&self, _: Request<()>) -> ServiceResult<types::Rollout> {
+        log::debug!("get_rollout_threshold");
+        let (tx, rx) = oneshot::channel();
+        self.send_command_to_daemon(DaemonCommand::GetRolloutThreshold(tx))?;
+        let threshold = self.wait_for_result(rx).await?;
+        let rollout = types::Rollout { threshold };
+        Ok(Response::new(rollout))
+    }
+
+    #[cfg(not(target_os = "android"))]
+    async fn set_rollout_threshold_seed(&self, seed: Request<types::Seed>) -> ServiceResult<()> {
+        log::debug!("set_rollout_threshold_seed");
+        let seed = seed.into_inner().seed;
+        let (tx, rx) = oneshot::channel();
+        self.send_command_to_daemon(DaemonCommand::SetRolloutThresholdSeed { seed, tx })?;
+        self.wait_for_result(rx).await?;
+        Ok(Response::new(()))
+    }
+
+    #[cfg(not(target_os = "android"))]
+    async fn regenerate_rollout_threshold(&self, _: Request<()>) -> ServiceResult<types::Rollout> {
+        log::debug!("regenerate_rollout_threshold");
+        let (tx, rx) = oneshot::channel();
+        self.send_command_to_daemon(DaemonCommand::GenerateNewRolloutSeed(tx))?;
+        let threshold = self.wait_for_result(rx).await?;
+        let rollout = types::Rollout { threshold };
+        Ok(Response::new(rollout))
+    }
+
+    #[cfg(target_os = "android")]
+    async fn get_rollout_threshold(&self, _: Request<()>) -> ServiceResult<types::Rollout> {
+        unreachable!("You should not call get_rollout_threshold");
+    }
+
+    #[cfg(target_os = "android")]
+    async fn set_rollout_threshold_seed(&self, _: Request<types::Seed>) -> ServiceResult<()> {
+        unreachable!("You should not call set_rollout_threshold_seed");
+    }
+
+    #[cfg(target_os = "android")]
+    async fn regenerate_rollout_threshold(&self, _: Request<()>) -> ServiceResult<types::Rollout> {
+        unreachable!("You should not call regenerate_rollout_threshold");
+    }
+
+    // App upgrade
+
+    async fn app_upgrade(&self, _: Request<()>) -> ServiceResult<()> {
+        log::debug!("app_upgrade");
+
+        let (tx, rx) = oneshot::channel();
+        self.send_command_to_daemon(DaemonCommand::AppUpgrade(tx))?;
+
+        self.wait_for_result(rx)
+            .await?
+            .map_err(map_version_check_error)?;
+
+        Ok(Response::new(()))
+    }
+
+    async fn app_upgrade_abort(&self, _: Request<()>) -> ServiceResult<()> {
+        log::debug!("app_upgrade_abort");
+
+        let (tx, rx) = oneshot::channel();
+        self.send_command_to_daemon(DaemonCommand::AppUpgradeAbort(tx))?;
+
+        self.wait_for_result(rx)
+            .await?
+            .map_err(map_version_check_error)?;
+
+        Ok(Response::new(()))
+    }
+
+    async fn app_upgrade_events_listen(
+        &self,
+        _: Request<()>,
+    ) -> ServiceResult<Self::AppUpgradeEventsListenStream> {
+        log::debug!("app_upgrade_events_listen");
+        let rx = self.app_upgrade_broadcast.subscribe();
+        let upgrade_event_stream =
+            tokio_stream::wrappers::BroadcastStream::new(rx).map(|result| match result {
+                Ok(event) => Ok(event.into()),
+                Err(error) => Err(Status::internal(format!(
+                    "Failed to receive app upgrade event: {error}"
+                ))),
+            });
+
+        Ok(Response::new(
+            Box::new(upgrade_event_stream) as Self::AppUpgradeEventsListenStream
+        ))
+    }
+
+    async fn get_app_upgrade_cache_dir(&self, _: Request<()>) -> ServiceResult<String> {
+        log::debug!("get_app_upgrade_cache_dir");
+
+        let (tx, rx) = oneshot::channel();
+        self.send_command_to_daemon(DaemonCommand::GetAppUpgradeCacheDir(tx))?;
+
+        let path = self
+            .wait_for_result(rx)
+            .await?
+            .map_err(map_version_check_error)?;
+
+        path.into_os_string()
+            .into_string()
+            .map_err(|_| Status::internal("Failed to convert OsString to String"))
+            .map(Response::new)
+    }
+
+    async fn set_enable_recents(&self, request: Request<bool>) -> ServiceResult<()> {
+        let enable_recents = request.into_inner();
+        log::debug!("set_enable_recents({})", enable_recents);
+        let (tx, rx) = oneshot::channel();
+        self.send_command_to_daemon(DaemonCommand::SetEnableRecents(tx, enable_recents))?;
+        self.wait_for_result(rx).await??;
+        Ok(Response::new(()))
+    }
 }
 
+#[expect(clippy::result_large_err)]
 impl ManagementServiceImpl {
     /// Sends a command to the daemon and maps the error to an RPC error.
     fn send_command_to_daemon(&self, command: DaemonCommand) -> Result<(), Status> {
@@ -1124,29 +1320,35 @@ pub struct ManagementInterfaceServer {
 impl ManagementInterfaceServer {
     pub fn start(
         daemon_tx: DaemonCommandSender,
-        rpc_socket_path: impl AsRef<Path>,
+        rpc_socket_path: PathBuf,
+        app_upgrade_broadcast: AppUpgradeBroadcast,
+        log_reload_handle: crate::logging::LogHandle,
     ) -> Result<ManagementInterfaceServer, Error> {
         let subscriptions = Arc::<Mutex<Vec<EventsListenerSender>>>::default();
+
         // NOTE: It is important that the channel buffer size is kept at 0. When sending a signal
         // to abort the gRPC server, the sender can be awaited to know when the gRPC server has
         // received and started processing the shutdown signal.
         let (server_abort_tx, server_abort_rx) = mpsc::channel(0);
+
         let server = ManagementServiceImpl {
             daemon_tx,
             subscriptions: subscriptions.clone(),
+            app_upgrade_broadcast,
+            log_reload_handle,
         };
         let rpc_server_join_handle = mullvad_management_interface::spawn_rpc_server(
             server,
             async move {
-                server_abort_rx.into_future().await;
+                StreamExt::into_future(server_abort_rx).await;
             },
-            &rpc_socket_path,
+            rpc_socket_path.clone(),
         )
         .map_err(Error::SetupError)?;
 
         log::info!(
             "Management interface listening on {}",
-            rpc_socket_path.as_ref().display()
+            rpc_socket_path.display()
         );
 
         let broadcast = ManagementInterfaceEventBroadcaster { subscriptions };
@@ -1235,11 +1437,53 @@ impl ManagementInterfaceEventBroadcaster {
     /// Notify that info about the latest available app version changed.
     /// Or some flag about the currently running version is changed.
     pub(crate) fn notify_app_version(&self, app_version_info: version::AppVersionInfo) {
-        log::debug!("Broadcasting new app version info");
+        log::debug!("Broadcasting app version info:\n{app_version_info}");
         self.notify(types::DaemonEvent {
             event: Some(daemon_event::Event::VersionInfo(
                 types::AppVersionInfo::from(app_version_info),
             )),
+        })
+    }
+
+    /// Notify clients about a potential leak.
+    pub(crate) fn notify_leak(&self, leak: mullvad_leak_checker::LeakInfo) {
+        use mullvad_leak_checker::LeakInfo;
+        let LeakInfo::NodeReachableOnInterface {
+            reachable_nodes,
+            interface,
+        } = &leak
+        else {
+            log::trace!("Matched on unexpected leak checker event: {leak:#?}");
+            return;
+        };
+
+        log::trace!("Broadcasting leak info: {leak:#?}");
+        let interface = match interface {
+            mullvad_leak_checker::Interface::Name(name) => name.to_owned(),
+            #[cfg(target_os = "macos")]
+            mullvad_leak_checker::Interface::Index(index) => {
+                let Ok(name) = nix::net::if_::if_indextoname(index.get()) else {
+                    log::trace!("Could not lookup interface corresponding to index {index}");
+                    return;
+                };
+                name.to_string_lossy().to_string()
+            }
+            #[cfg(target_os = "windows")]
+            mullvad_leak_checker::Interface::Luid(id) => {
+                let Ok(name) = talpid_windows::net::alias_from_luid(id) else {
+                    log::trace!("Could not lookup leaking interface corresponding to LUID");
+                    return;
+                };
+                name.to_string_lossy().to_string()
+            }
+        };
+        let ip_addrs = reachable_nodes.iter().map(|ip| ip.to_string()).collect();
+        let event = daemon_event::Event::LeakInfo(types::LeakInfo {
+            ip_addrs,
+            interface,
+        });
+        self.notify(types::DaemonEvent {
+            event: event.into(),
         })
     }
 
@@ -1314,7 +1558,7 @@ fn map_split_tunnel_error(error: talpid_core::split_tunnel::Error) -> Status {
     match &error {
         Error::RegisterIps(io_error) | Error::SetConfiguration(io_error) => {
             if io_error.kind() == std::io::ErrorKind::NotFound {
-                Status::not_found(format!("{}: {}", error, io_error))
+                Status::not_found(format!("{error}: {io_error}"))
             } else {
                 Status::unknown(error.to_string())
             }
@@ -1337,8 +1581,17 @@ fn map_rest_error(error: &RestError) -> Status {
         {
             Status::new(Code::Unauthenticated, message)
         }
+        RestError::ApiError(status, message) if *status == StatusCode::BAD_REQUEST => {
+            Status::new(Code::InvalidArgument, message)
+        }
+        // FIXME: do not use Code for this
+        RestError::ApiError(status, _) if *status == StatusCode::TOO_MANY_REQUESTS => Status::new(
+            Code::ResourceExhausted,
+            StatusCode::TOO_MANY_REQUESTS.to_string(),
+        ),
         RestError::TimeoutError => Status::deadline_exceeded("API request timed out"),
         RestError::HyperError(_) => Status::unavailable("Cannot reach the API"),
+        RestError::LegacyHyperError(_) => Status::unavailable("Cannot reach the API"),
         error => Status::unknown(format!("REST error: {error}")),
     }
 }
@@ -1353,9 +1606,7 @@ fn map_device_error(error: &device::Error) -> Status {
         }
         device::Error::InvalidVoucher => Status::new(Code::NotFound, INVALID_VOUCHER_MESSAGE),
         device::Error::UsedVoucher => Status::new(Code::ResourceExhausted, USED_VOUCHER_MESSAGE),
-        device::Error::DeviceIoError(ref _error) => {
-            Status::new(Code::Unavailable, error.to_string())
-        }
+        device::Error::DeviceIoError(_error) => Status::new(Code::Unavailable, error.to_string()),
         device::Error::OtherRestError(error) => map_rest_error(error),
         _ => Status::new(Code::Unknown, error.to_string()),
     }
@@ -1373,11 +1624,11 @@ fn map_account_history_error(error: account_history::Error) -> Status {
     }
 }
 
-fn map_version_check_error(error: version_check::Error) -> Status {
+fn map_version_check_error(error: crate::version::Error) -> Status {
     match error {
-        version_check::Error::Download(..)
-        | version_check::Error::ReadVersionCache(..)
-        | version_check::Error::ApiCheck(..) => Status::unavailable(error.to_string()),
+        crate::version::Error::Download(..)
+        | crate::version::Error::ReadVersionCache(..)
+        | crate::version::Error::ApiCheck(..) => Status::unavailable(error.to_string()),
         _ => Status::unknown(error.to_string()),
     }
 }

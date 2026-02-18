@@ -3,19 +3,20 @@
 //  MullvadSettings
 //
 //  Created by Andrew Bulhak on 2024-02-13.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
 import MullvadTypes
 
-public enum TunnelSettingsUpdate {
+public enum TunnelSettingsUpdate: Sendable {
     case dnsSettings(DNSSettings)
     case obfuscation(WireGuardObfuscationSettings)
     case relayConstraints(RelayConstraints)
     case quantumResistance(TunnelQuantumResistance)
     case multihop(MultihopState)
     case daita(DAITASettings)
+    case includeAllNetworks(IncludeAllNetworksSettings)
 }
 
 extension TunnelSettingsUpdate {
@@ -33,6 +34,8 @@ extension TunnelSettingsUpdate {
             settings.tunnelMultihopState = newState
         case let .daita(newDAITASettings):
             settings.daita = newDAITASettings
+        case let .includeAllNetworks(newIncludeAllNetworksSettings):
+            settings.includeAllNetworks = newIncludeAllNetworksSettings
         }
     }
 
@@ -44,6 +47,7 @@ extension TunnelSettingsUpdate {
         case .quantumResistance: "quantum resistance"
         case .multihop: "multihop"
         case .daita: "daita"
+        case .includeAllNetworks: "include all networks"
         }
     }
 }

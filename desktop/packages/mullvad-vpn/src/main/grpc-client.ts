@@ -1,17 +1,23 @@
 import * as grpc from '@grpc/grpc-js';
+import { app } from 'electron';
+import fs from 'fs';
 import { Empty } from 'google-protobuf/google/protobuf/empty_pb.js';
 import {
   BoolValue,
   StringValue,
   UInt32Value,
 } from 'google-protobuf/google/protobuf/wrappers_pb.js';
+import { ManagementServiceClient } from 'management-interface';
 import { promisify } from 'util';
 
 import log from '../shared/logging';
-import { ManagementServiceClient } from './management_interface/management_interface_grpc_pb';
 
 const NETWORK_CALL_TIMEOUT = 10000;
 const CHANNEL_STATE_TIMEOUT = 1000 * 60 * 60;
+
+const RPC_PATH_PREFIX = 'unix://';
+
+const IGNORE_SOCKET_UID_CHECK = app.commandLine.hasSwitch('ignore-socket-uid-check');
 
 type CallFunctionArgument<T, R> =
   | ((arg: T, callback: (error: Error | null, result: R) => void) => void)
@@ -49,7 +55,7 @@ export class GrpcClient {
     private connectionObserver?: ConnectionObserver,
   ) {
     this.client = new ManagementServiceClient(
-      rpcPath,
+      this.prefixedRpcPath(),
       grpc.credentials.createInsecure(),
       this.channelOptions(),
     );
@@ -63,7 +69,7 @@ export class GrpcClient {
     if (this.isClosed) {
       this.isClosed = false;
       this.client = new ManagementServiceClient(
-        this.rpcPath,
+        this.prefixedRpcPath(),
         grpc.credentials.createInsecure(),
         this.channelOptions(),
       );
@@ -86,11 +92,19 @@ export class GrpcClient {
           this.ensureConnectivity();
           reject(error);
         } else {
-          this.reconnectionTimeout = undefined;
-          this.isConnectedValue = true;
-          this.connectionObserver?.onOpen();
-          this.setChannelCallback();
-          resolve();
+          this.verifyOwnership()
+            .then(() => {
+              this.reconnectionTimeout = undefined;
+              this.isConnectedValue = true;
+              this.connectionObserver?.onOpen();
+              this.setChannelCallback();
+              resolve();
+            })
+            .catch((error) => {
+              this.onClose(error);
+              this.ensureConnectivity();
+              reject(error);
+            });
         }
       });
     });
@@ -150,6 +164,10 @@ export class GrpcClient {
     } else {
       throw noConnectionError;
     }
+  }
+
+  private prefixedRpcPath(): string {
+    return `${RPC_PATH_PREFIX}${this.rpcPath}`;
   }
 
   private deadlineFromNow() {
@@ -242,5 +260,35 @@ export class GrpcClient {
         });
       }
     }, 3000);
+  }
+
+  // Assert that the gRPC connection is owned by an administrator
+  private async verifyOwnership() {
+    // This can be useful when running in a container (e.g. flatpak) where
+    // it's not possible for us to assert anything about who owns the pipe.
+    if (IGNORE_SOCKET_UID_CHECK) {
+      log.info('Pipe ownership check is disabled');
+      return;
+    }
+
+    if (process.platform === 'win32') {
+      try {
+        const { pipeIsAdminOwned } = await import('windows-utils');
+        pipeIsAdminOwned(this.rpcPath);
+      } catch (e) {
+        if (e && typeof e === 'object' && 'message' in e) {
+          throw new Error(`Failed to verify admin ownership of named pipe. ${e.message}`);
+        } else {
+          throw new Error('Failed to verify admin ownership of named pipe');
+        }
+      }
+      log.info('Verified pipe ownership');
+    } else {
+      const stat = fs.statSync(this.rpcPath);
+      if (stat.uid !== 0) {
+        throw new Error('Failed to verify root ownership of socket');
+      }
+      log.info('Verified socket ownership');
+    }
   }
 }

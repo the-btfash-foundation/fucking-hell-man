@@ -1,4 +1,4 @@
-use crate::types::{proto, FromProtobufTypeError};
+use crate::types::{FromProtobufTypeError, proto};
 use mullvad_types::settings::CURRENT_SETTINGS_VERSION;
 use talpid_types::ErrorExt;
 
@@ -29,15 +29,11 @@ impl From<&mullvad_types::settings::Settings> for proto::Settings {
 
         Self {
             relay_settings: Some(proto::RelaySettings::from(settings.get_relay_settings())),
-            bridge_settings: Some(proto::BridgeSettings::from(
-                settings.bridge_settings.clone(),
-            )),
-            bridge_state: Some(proto::BridgeState::from(settings.bridge_state)),
             allow_lan: settings.allow_lan,
             #[cfg(not(target_os = "android"))]
-            block_when_disconnected: settings.block_when_disconnected,
+            lockdown_mode: settings.lockdown_mode,
             #[cfg(target_os = "android")]
-            block_when_disconnected: false,
+            lockdown_mode: false,
             auto_connect: settings.auto_connect,
             tunnel_options: Some(proto::TunnelOptions::from(&settings.tunnel_options)),
             show_beta_releases: settings.show_beta_releases,
@@ -57,6 +53,8 @@ impl From<&mullvad_types::settings::Settings> for proto::Settings {
                 .cloned()
                 .map(proto::RelayOverride::from)
                 .collect(),
+            recents: settings.recents.clone().map(proto::Recents::from),
+            update_default_location: settings.update_default_location,
         }
     }
 }
@@ -92,25 +90,18 @@ impl From<&mullvad_types::settings::DnsOptions> for proto::DnsOptions {
 
 impl From<&mullvad_types::settings::TunnelOptions> for proto::TunnelOptions {
     fn from(options: &mullvad_types::settings::TunnelOptions) -> Self {
-        Self {
-            openvpn: Some(proto::tunnel_options::OpenvpnOptions {
-                mssfix: options.openvpn.mssfix.map(u32::from),
+        proto::TunnelOptions {
+            mtu: options.wireguard.mtu.map(u32::from),
+            rotation_interval: options.wireguard.rotation_interval.map(|ivl| {
+                prost_types::Duration::try_from(std::time::Duration::from(ivl))
+                    .expect("Failed to convert std::time::Duration to prost_types::Duration for tunnel_options.rotation_interval")
             }),
-            wireguard: Some(proto::tunnel_options::WireguardOptions {
-                mtu: options.wireguard.mtu.map(u32::from),
-                rotation_interval: options.wireguard.rotation_interval.map(|ivl| {
-                    prost_types::Duration::try_from(std::time::Duration::from(ivl))
-                        .expect("Failed to convert std::time::Duration to prost_types::Duration for tunnel_options.wireguard.rotation_interval")
-                }),
-                quantum_resistant: Some(proto::QuantumResistantState::from(options.wireguard.quantum_resistant)),
-                #[cfg(daita)]
-                daita: Some(proto::DaitaSettings::from(options.wireguard.daita.clone())),
-                #[cfg(not(daita))]
-                daita: None,
-            }),
-            generic: Some(proto::tunnel_options::GenericOptions {
-                enable_ipv6: options.generic.enable_ipv6,
-            }),
+            quantum_resistant: Some(proto::QuantumResistantState::from(options.wireguard.quantum_resistant)),
+            #[cfg(daita)]
+            daita: Some(proto::DaitaSettings::from(options.wireguard.daita.clone())),
+            #[cfg(not(daita))]
+            daita: None,
+            enable_ipv6: options.generic.enable_ipv6,
             dns_options: Some(proto::DnsOptions::from(&options.dns_options)),
         }
     }
@@ -126,18 +117,6 @@ impl TryFrom<proto::Settings> for mullvad_types::settings::Settings {
                 .ok_or(FromProtobufTypeError::InvalidArgument(
                     "missing relay settings",
                 ))?;
-        let bridge_settings =
-            settings
-                .bridge_settings
-                .ok_or(FromProtobufTypeError::InvalidArgument(
-                    "missing bridge settings",
-                ))?;
-        let bridge_state = settings
-            .bridge_state
-            .ok_or(FromProtobufTypeError::InvalidArgument(
-                "missing bridge state",
-            ))
-            .and_then(|state| try_bridge_state_from_i32(state.state))?;
         let tunnel_options =
             settings
                 .tunnel_options
@@ -173,13 +152,9 @@ impl TryFrom<proto::Settings> for mullvad_types::settings::Settings {
             relay_settings: mullvad_types::relay_constraints::RelaySettings::try_from(
                 relay_settings,
             )?,
-            bridge_settings: mullvad_types::relay_constraints::BridgeSettings::try_from(
-                bridge_settings,
-            )?,
-            bridge_state,
             allow_lan: settings.allow_lan,
             #[cfg(not(target_os = "android"))]
-            block_when_disconnected: settings.block_when_disconnected,
+            lockdown_mode: settings.lockdown_mode,
             auto_connect: settings.auto_connect,
             tunnel_options: mullvad_types::settings::TunnelOptions::try_from(tunnel_options)?,
             relay_overrides: settings
@@ -202,24 +177,15 @@ impl TryFrom<proto::Settings> for mullvad_types::settings::Settings {
             api_access_methods: mullvad_types::access_method::Settings::try_from(
                 api_access_methods_settings,
             )?,
+            recents: Some(vec![]),
+            update_default_location: settings.update_default_location,
+            // HACK: The deamon should never read this random settings blob from a random client.
+            // We should look into separating the serializable settings object that pass accross
+            // gRPC from the daemon's trusted settings. There are multiple fields that would not be
+            // included in the serializable settings, such as the below value.
+            #[cfg(not(target_os = "android"))]
+            rollout_threshold_seed: None,
         })
-    }
-}
-
-pub fn try_bridge_state_from_i32(
-    bridge_state: i32,
-) -> Result<mullvad_types::relay_constraints::BridgeState, FromProtobufTypeError> {
-    match proto::bridge_state::State::try_from(bridge_state) {
-        Ok(proto::bridge_state::State::Auto) => {
-            Ok(mullvad_types::relay_constraints::BridgeState::Auto)
-        }
-        Ok(proto::bridge_state::State::On) => Ok(mullvad_types::relay_constraints::BridgeState::On),
-        Ok(proto::bridge_state::State::Off) => {
-            Ok(mullvad_types::relay_constraints::BridgeState::Off)
-        }
-        Err(_) => Err(FromProtobufTypeError::InvalidArgument(
-            "invalid bridge state",
-        )),
     }
 }
 
@@ -240,21 +206,6 @@ impl TryFrom<proto::TunnelOptions> for mullvad_types::settings::TunnelOptions {
     fn try_from(options: proto::TunnelOptions) -> Result<Self, Self::Error> {
         use talpid_types::net;
 
-        let openvpn_options = options
-            .openvpn
-            .ok_or(FromProtobufTypeError::InvalidArgument(
-                "missing openvpn tunnel options",
-            ))?;
-        let wireguard_options = options
-            .wireguard
-            .ok_or(FromProtobufTypeError::InvalidArgument(
-                "missing wireguard tunnel options",
-            ))?;
-        let generic_options = options
-            .generic
-            .ok_or(FromProtobufTypeError::InvalidArgument(
-                "missing generic tunnel options",
-            ))?;
         let dns_options = options
             .dns_options
             .ok_or(FromProtobufTypeError::InvalidArgument(
@@ -262,12 +213,9 @@ impl TryFrom<proto::TunnelOptions> for mullvad_types::settings::TunnelOptions {
             ))?;
 
         Ok(Self {
-            openvpn: net::openvpn::TunnelOptions {
-                mssfix: openvpn_options.mssfix.map(|mssfix| mssfix as u16),
-            },
             wireguard: mullvad_types::wireguard::TunnelOptions {
-                mtu: wireguard_options.mtu.map(|mtu| mtu as u16),
-                rotation_interval: wireguard_options
+                mtu: options.mtu.map(|mtu| mtu as u16),
+                rotation_interval: options
                     .rotation_interval
                     .map(std::time::Duration::try_from)
                     .transpose()
@@ -281,14 +229,14 @@ impl TryFrom<proto::TunnelOptions> for mullvad_types::settings::TunnelOptions {
                         );
                         FromProtobufTypeError::InvalidArgument("invalid rotation interval")
                     })?,
-                quantum_resistant: wireguard_options
+                quantum_resistant: options
                     .quantum_resistant
                     .map(mullvad_types::wireguard::QuantumResistantState::try_from)
                     .ok_or(FromProtobufTypeError::InvalidArgument(
                         "missing quantum resistant state",
                     ))??,
                 #[cfg(daita)]
-                daita: wireguard_options
+                daita: options
                     .daita
                     .map(mullvad_types::wireguard::DaitaSettings::from)
                     .ok_or(FromProtobufTypeError::InvalidArgument(
@@ -296,7 +244,7 @@ impl TryFrom<proto::TunnelOptions> for mullvad_types::settings::TunnelOptions {
                     ))?,
             },
             generic: net::GenericTunnelOptions {
-                enable_ipv6: generic_options.enable_ipv6,
+                enable_ipv6: options.enable_ipv6,
             },
             dns_options: mullvad_types::settings::DnsOptions::try_from(dns_options)?,
         })
@@ -319,7 +267,7 @@ impl TryFrom<proto::DnsOptions> for mullvad_types::settings::DnsOptions {
             Err(_) => {
                 return Err(FromProtobufTypeError::InvalidArgument(
                     "invalid DNS options state",
-                ))
+                ));
             }
         };
 
@@ -358,5 +306,29 @@ impl TryFrom<proto::DnsOptions> for mullvad_types::settings::DnsOptions {
                     .collect::<Result<Vec<_>, _>>()?,
             },
         })
+    }
+}
+
+impl From<Vec<mullvad_types::settings::Recent>> for proto::Recents {
+    fn from(recents: Vec<mullvad_types::settings::Recent>) -> Self {
+        proto::Recents {
+            recents: recents.into_iter().map(proto::Recent::from).collect(),
+        }
+    }
+}
+
+impl From<mullvad_types::settings::Recent> for proto::Recent {
+    fn from(recent: mullvad_types::settings::Recent) -> Self {
+        match recent {
+            mullvad_types::settings::Recent::Singlehop(location) => Self {
+                r#type: Some(proto::recent::Type::Singlehop(location.into())),
+            },
+            mullvad_types::settings::Recent::Multihop { entry, exit } => Self {
+                r#type: Some(proto::recent::Type::Multihop(proto::MultihopRecent {
+                    entry: Some(entry.into()),
+                    exit: Some(exit.into()),
+                })),
+            },
+        }
     }
 }

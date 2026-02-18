@@ -4,16 +4,18 @@ import fs from 'fs';
 import * as path from 'path';
 import util from 'util';
 
-import config from '../config.json';
 import { hasExpired } from '../shared/account-expiry';
 import {
   ISplitTunnelingApplication,
   ISplitTunnelingAppListRetriever,
 } from '../shared/application-types';
+import { urls } from '../shared/constants';
 import {
   AccessMethodSetting,
+  DaemonAppUpgradeEvent,
   DaemonEvent,
   DeviceEvent,
+  DisconnectSource,
   ErrorStateCause,
   IRelayListWithEndpointData,
   ISettings,
@@ -29,7 +31,9 @@ import {
   SystemNotification,
   SystemNotificationCategory,
 } from '../shared/notifications/notification';
+import { RoutePath } from '../shared/routes';
 import Account, { AccountDelegate, LocaleProvider } from './account';
+import AppUpgrade from './app-upgrade';
 import { getOpenAtLogin } from './autostart';
 import { readChangelog } from './changelog';
 import {
@@ -71,18 +75,12 @@ import Version, { GUI_VERSION } from './version';
 
 const execAsync = util.promisify(exec);
 
-// Only import split tunneling library on correct OS.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const linuxSplitTunneling = process.platform === 'linux' && require('./linux-split-tunneling');
-// This is used on Windows and macOS and will be undefined on Linux.
-const splitTunneling: ISplitTunnelingAppListRetriever | undefined = importSplitTunneling();
-
 const ALLOWED_PERMISSIONS = ['clipboard-sanitized-write'];
 
 const SANDBOX_DISABLED = app.commandLine.hasSwitch('no-sandbox');
 const UPDATE_NOTIFICATION_DISABLED = process.env.MULLVAD_DISABLE_UPDATE_NOTIFICATION === '1';
 
-const GEO_DIR = path.resolve(__dirname, '../../assets/geo');
+const GEO_DIR = path.resolve(import.meta.dirname, 'assets/geo');
 
 class ApplicationMain
   implements
@@ -101,15 +99,21 @@ class ApplicationMain
   private version: Version;
   private settings: Settings;
   private account: Account;
+  private appUpgrade: AppUpgrade;
   private userInterface?: UserInterface;
   private tunnelState = new TunnelStateHandler(this);
 
   private daemonEventListener?: SubscriptionListener<DaemonEvent>;
+  private daemonAppUpgradeEventListener?: SubscriptionListener<DaemonAppUpgradeEvent>;
   private reconnectBackoff = new ReconnectionBackoff();
   private beforeFirstDaemonConnection = true;
   private isPerformingPostUpgrade = false;
   private daemonAllowed?: boolean;
   private quitInitiated = false;
+
+  private linuxSplitTunneling?: typeof import('./linux-split-tunneling');
+  private splitTunneling?: ISplitTunnelingAppListRetriever;
+  private splitTunnelingSupported = false;
 
   private tunnelStateExpectation?: Expectation;
 
@@ -143,6 +147,7 @@ class ApplicationMain
     this.version = new Version(this, this.daemonRpc, UPDATE_NOTIFICATION_DISABLED);
     this.settings = new Settings(this, this.daemonRpc, this.version.currentVersion);
     this.account = new Account(this, this.daemonRpc);
+    this.appUpgrade = new AppUpgrade(this.daemonRpc);
   }
 
   public run() {
@@ -150,6 +155,15 @@ class ApplicationMain
     // this issue has been resolved: https://github.com/electron/electron/issues/12130
     if (process.platform === 'win32') {
       app.commandLine.appendSwitch('wm-window-animations-disabled');
+    }
+
+    if (process.platform === 'darwin') {
+      app.commandLine.appendSwitch('disable-geolocation');
+    }
+
+    if (process.platform === 'linux') {
+      // NOTE: Keep in sync with mocked-utils.ts
+      app.commandLine.appendSwitch('gtk-version', '3');
     }
 
     // Display correct colors regardless of monitor color profile.
@@ -236,19 +250,19 @@ class ApplicationMain
     }
   };
 
-  public disconnectTunnel = async (): Promise<void> => {
+  public disconnectTunnel = async (source: DisconnectSource): Promise<void> => {
     if (this.tunnelState.allowDisconnect(this.daemonRpc.isConnected)) {
       this.tunnelState.expectNextTunnelState('disconnecting');
-      await this.daemonRpc.disconnectTunnel();
+      await this.daemonRpc.disconnectTunnel(source);
     }
   };
 
   public isLoggedIn = () => this.account.isLoggedIn();
 
-  public disconnectAndQuit = async () => {
+  public disconnectAndQuit = async (source: DisconnectSource) => {
     if (this.daemonRpc.isConnected) {
       try {
-        await this.daemonRpc.disconnectTunnel();
+        await this.daemonRpc.disconnectTunnel(source);
         log.info('Disconnected the tunnel');
       } catch (e) {
         const error = e as Error;
@@ -433,16 +447,11 @@ class ApplicationMain
     this.tunnelStateExpectation = new Expectation(async () => {
       this.userInterface?.createTrayIconController(
         this.tunnelState.tunnelState,
-        this.settings.blockWhenDisconnected,
         this.settings.gui.monochromaticIcon,
       );
       await this.userInterface?.updateTrayTheme();
 
-      this.userInterface?.updateTray(
-        this.account.isLoggedIn(),
-        this.tunnelState.tunnelState,
-        this.settings.blockWhenDisconnected,
-      );
+      this.userInterface?.updateTray(this.account.isLoggedIn(), this.tunnelState.tunnelState);
 
       if (process.platform === 'win32') {
         nativeTheme.on('updated', async () => {
@@ -452,6 +461,8 @@ class ApplicationMain
         });
       }
     });
+
+    await this.loadSplitTunneling();
 
     this.registerIpcListeners();
 
@@ -477,6 +488,19 @@ class ApplicationMain
       this.account.isLoggedIn(),
       this.tunnelState.tunnelState,
     );
+  };
+
+  private loadSplitTunneling = async () => {
+    // Only import split tunneling library on correct OS.
+    if (process.platform === 'linux') {
+      this.linuxSplitTunneling = await import('./linux-split-tunneling');
+    } else if (process.platform === 'win32') {
+      const { WindowsSplitTunnelingAppListRetriever } = await import('./windows-split-tunneling');
+      this.splitTunneling = new WindowsSplitTunnelingAppListRetriever();
+    } else if (process.platform === 'darwin') {
+      const { MacOsSplitTunnelingAppListRetriever } = await import('./macos-split-tunneling');
+      this.splitTunneling = new MacOsSplitTunnelingAppListRetriever();
+    }
   };
 
   private onSuspend = () => {
@@ -519,6 +543,16 @@ class ApplicationMain
       return this.handleBootstrapError(error);
     }
 
+    // subscribe to app upgrade events
+    try {
+      this.daemonAppUpgradeEventListener = this.appUpgrade.subscribeEvents();
+    } catch (e) {
+      const error = e as Error;
+      log.error(`Failed to subscribe to app upgrade events: ${error.message}`);
+
+      return this.handleBootstrapError(error);
+    }
+
     if (firstDaemonConnection) {
       // check if daemon is performing post upgrade tasks the first time it's connected to
       try {
@@ -537,6 +571,22 @@ class ApplicationMain
     } catch (e) {
       const error = e as Error;
       log.error(`Failed to fetch the account history: ${error.message}`);
+
+      return this.handleBootstrapError(error);
+    }
+
+    // fetch split tunneling support status
+    try {
+      if (process.platform === 'linux' || process.platform === 'win32') {
+        this.splitTunnelingSupported = await this.daemonRpc.splitTunnelIsSupported();
+      } else {
+        // split tunneling is supported on other platforms (macOS)
+        this.splitTunnelingSupported = true;
+      }
+      IpcMainEventChannel.splitTunneling.notifyIsSupported?.(this.splitTunnelingSupported);
+    } catch (e) {
+      const error = e as Error;
+      log.error(`Failed to fetch if split tunneling is supported: ${error.message}`);
 
       return this.handleBootstrapError(error);
     }
@@ -642,8 +692,12 @@ class ApplicationMain
     if (this.daemonEventListener) {
       this.daemonRpc.unsubscribeDaemonEventListener(this.daemonEventListener);
     }
-    // Reset the daemon event listener since it's going to be invalidated on disconnect
+    if (this.daemonAppUpgradeEventListener) {
+      this.daemonRpc.unsubscribeAppUpgradeEventListener(this.daemonAppUpgradeEventListener);
+    }
+    // Reset the daemon and app upgrade event listeners since they're going to be invalidated on disconnect
     this.daemonEventListener = undefined;
+    this.daemonAppUpgradeEventListener = undefined;
 
     this.notificationController.closeNotificationsInCategory(
       SystemNotificationCategory.tunnelState,
@@ -660,7 +714,10 @@ class ApplicationMain
 
     if (wasConnected) {
       // update the tray icon to indicate that the computer is not secure anymore
-      this.userInterface?.updateTray(false, { state: 'disconnected' }, false);
+      this.userInterface?.updateTray(false, {
+        state: 'disconnected',
+        lockedDown: this.settings.lockdownMode,
+      });
 
       // notify renderer process
       IpcMainEventChannel.daemon.notifyDisconnected?.();
@@ -688,9 +745,13 @@ class ApplicationMain
   }
 
   private handleBootstrapError(_error?: Error) {
-    // Unsubscribe from daemon events when encountering errors during initial data retrieval.
+    // Unsubscribe from daemon and app upgrade events when encountering errors during initial data retrieval.
     if (this.daemonEventListener) {
       this.daemonRpc.unsubscribeDaemonEventListener(this.daemonEventListener);
+    }
+
+    if (this.daemonAppUpgradeEventListener) {
+      this.daemonRpc.unsubscribeAppUpgradeEventListener(this.daemonAppUpgradeEventListener);
     }
   }
 
@@ -729,11 +790,7 @@ class ApplicationMain
     const oldSettings = this.settings;
     this.settings.handleNewSettings(newSettings);
 
-    this.userInterface?.updateTray(
-      this.account.isLoggedIn(),
-      this.tunnelState.tunnelState,
-      newSettings.blockWhenDisconnected,
-    );
+    this.userInterface?.updateTray(this.account.isLoggedIn(), this.tunnelState.tunnelState);
 
     if (oldSettings.showBetaReleases !== newSettings.showBetaReleases) {
       this.version.setLatestVersion(this.version.upgradeVersion);
@@ -760,8 +817,8 @@ class ApplicationMain
   }
 
   private async updateSplitTunnelingApplications(appList: string[]): Promise<void> {
-    if (splitTunneling) {
-      const { applications } = await splitTunneling.getMetadataForApplications(appList);
+    if (this.splitTunneling) {
+      const { applications } = await this.splitTunneling.getMetadataForApplications(appList);
       this.splitTunnelingApplications = applications;
 
       IpcMainEventChannel.splitTunneling.notify?.(applications);
@@ -792,19 +849,25 @@ class ApplicationMain
       isMacOs13OrNewer: isMacOs13OrNewer(),
     }));
 
-    IpcMainEventChannel.map.handleGetData(async () => ({
-      landContourIndices: await fs.promises.readFile(path.join(GEO_DIR, 'land_contour_indices.gl')),
-      landPositions: await fs.promises.readFile(path.join(GEO_DIR, 'land_positions.gl')),
-      landTriangleIndices: await fs.promises.readFile(
-        path.join(GEO_DIR, 'land_triangle_indices.gl'),
-      ),
-      oceanIndices: await fs.promises.readFile(path.join(GEO_DIR, 'ocean_indices.gl')),
-      oceanPositions: await fs.promises.readFile(path.join(GEO_DIR, 'ocean_positions.gl')),
-    }));
+    IpcMainEventChannel.map.handleGetData(async () => {
+      const readGeoFile = async (fileName: string) => {
+        const data = await fs.promises.readFile(path.join(GEO_DIR, fileName));
+
+        return new Uint8Array(data).buffer;
+      };
+
+      return {
+        landContourIndices: await readGeoFile('land_contour_indices.gl'),
+        landPositions: await readGeoFile('land_positions.gl'),
+        landTriangleIndices: await readGeoFile('land_triangle_indices.gl'),
+        oceanIndices: await readGeoFile('ocean_indices.gl'),
+        oceanPositions: await readGeoFile('ocean_positions.gl'),
+      };
+    });
 
     IpcMainEventChannel.tunnel.handleConnect(this.connectTunnel);
     IpcMainEventChannel.tunnel.handleReconnect(this.reconnectTunnel);
-    IpcMainEventChannel.tunnel.handleDisconnect(this.disconnectTunnel);
+    IpcMainEventChannel.tunnel.handleDisconnect((source) => this.disconnectTunnel(source));
 
     IpcMainEventChannel.guiSettings.handleSetPreferredLocale((locale: string) => {
       this.settings.gui.preferredLocale = locale;
@@ -813,13 +876,13 @@ class ApplicationMain
     });
 
     IpcMainEventChannel.linuxSplitTunneling.handleGetApplications(() => {
-      return linuxSplitTunneling.getApplications(this.locale);
+      return this.linuxSplitTunneling!.getApplications(this.locale);
     });
     IpcMainEventChannel.splitTunneling.handleGetApplications((updateCaches: boolean) => {
-      return splitTunneling!.getApplications(updateCaches);
+      return this.splitTunneling!.getApplications(updateCaches);
     });
     IpcMainEventChannel.linuxSplitTunneling.handleLaunchApplication((application) => {
-      return linuxSplitTunneling.launchApplication(application);
+      return this.linuxSplitTunneling!.launchApplication(application);
     });
 
     IpcMainEventChannel.splitTunneling.handleSetState((enabled) => {
@@ -829,9 +892,14 @@ class ApplicationMain
       // If the applications is a string (path) it's an application picked with the file picker
       // that we want to add to the list of additional applications.
       if (typeof application === 'string') {
-        const executablePath = await splitTunneling!.resolveExecutablePath(application);
+        let executablePath;
+        try {
+          executablePath = await this.splitTunneling!.resolveExecutablePath(application);
+        } catch {
+          return;
+        }
         this.settings.gui.addBrowsedForSplitTunnelingApplications(executablePath);
-        await splitTunneling!.addApplicationPathToCache(application);
+        await this.splitTunneling!.addApplicationPathToCache(application);
         await this.daemonRpc.addSplitTunnelingApplication(executablePath);
       } else {
         await this.daemonRpc.addSplitTunnelingApplication(application.absolutepath);
@@ -844,8 +912,11 @@ class ApplicationMain
     });
     IpcMainEventChannel.splitTunneling.handleForgetManuallyAddedApplication((application) => {
       this.settings.gui.deleteBrowsedForSplitTunnelingApplications(application.absolutepath);
-      splitTunneling!.removeApplicationFromCache(application);
+      this.splitTunneling!.removeApplicationFromCache(application);
       return Promise.resolve();
+    });
+    IpcMainEventChannel.splitTunneling.handleGetSupported(() => {
+      return this.daemonRpc.splitTunnelIsSupported();
     });
     IpcMainEventChannel.macOsSplitTunneling.handleNeedFullDiskPermissions(async () => {
       const fullDiskState = await this.daemonRpc.needFullDiskPermissions();
@@ -853,9 +924,11 @@ class ApplicationMain
       return fullDiskState;
     });
 
-    IpcMainEventChannel.app.handleQuit(() => this.disconnectAndQuit());
+    IpcMainEventChannel.app.handleQuit((source: DisconnectSource) =>
+      this.disconnectAndQuit(source),
+    );
     IpcMainEventChannel.app.handleOpenUrl(async (url) => {
-      if (Object.values(config.links).find((link) => url.startsWith(link))) {
+      if (Object.values(urls).find((allowedUrl) => url.startsWith(allowedUrl))) {
         await shell.openExternal(url);
       }
     });
@@ -885,10 +958,11 @@ class ApplicationMain
     this.userInterface!.registerIpcListeners();
     this.settings.registerIpcListeners();
     this.account.registerIpcListeners();
+    this.appUpgrade.registerIpcListeners();
 
-    if (splitTunneling) {
+    if (this.splitTunneling) {
       this.settings.gui.browsedForSplitTunnelingApplications.forEach((application) => {
-        void splitTunneling.addApplicationPathToCache(application);
+        void this.splitTunneling!.addApplicationPathToCache(application);
       });
     }
   }
@@ -931,11 +1005,7 @@ class ApplicationMain
       relayLocations: relayLocationsTranslations,
     };
 
-    this.userInterface?.updateTray(
-      this.account.isLoggedIn(),
-      this.tunnelState.tunnelState,
-      this.settings.blockWhenDisconnected,
-    );
+    this.userInterface?.updateTray(this.account.isLoggedIn(), this.tunnelState.tunnelState);
   }
 
   private blockPermissionRequests() {
@@ -967,7 +1037,7 @@ class ApplicationMain
   }
 
   private allowFileAccess(url: string): boolean {
-    const buildDir = path.normalize(path.join(path.resolve(__dirname), '..', '..'));
+    const buildDir = path.normalize(path.join(path.resolve(import.meta.dirname), '..', '..'));
 
     if (url.startsWith('file:')) {
       // Extract the path from the URL
@@ -985,14 +1055,35 @@ class ApplicationMain
   }
 
   private allowDevelopmentRequest(url: string): boolean {
-    return (
-      process.env.NODE_ENV === 'development' &&
-      // Downloading of React and Redux developer tools.
-      (url.startsWith('devtools://') ||
-        url.startsWith('chrome-extension://') ||
-        url.startsWith('https://clients2.google.com') ||
-        url.startsWith('https://clients2.googleusercontent.com'))
-    );
+    if (process.env.NODE_ENV === 'development') {
+      const isViteDevServerRequest = (url: string): boolean => {
+        if (process.env.VITE_DEV_SERVER_URL) {
+          const viteDevServerUrl = new URL(process.env.VITE_DEV_SERVER_URL);
+          const viteDevServerUrlWs = new URL(viteDevServerUrl);
+          viteDevServerUrlWs.protocol = 'ws';
+
+          return url.startsWith(viteDevServerUrl.href) || url.startsWith(viteDevServerUrlWs.href);
+        }
+
+        return false;
+      };
+
+      const isDevtoolsRequest = (url: string): boolean => {
+        // Downloading of React and Redux developer tools.
+        const devtoolsUrls = [
+          'devtools://',
+          'chrome-extension://',
+          'https://clients2.google.com',
+          'https://clients2.googleusercontent.com',
+        ];
+
+        return devtoolsUrls.some((devtoolsUrl) => url.startsWith(devtoolsUrl));
+      };
+
+      return isViteDevServerRequest(url) || isDevtoolsRequest(url);
+    }
+
+    return false;
   }
 
   // Blocks navigation and window.open since it's not needed.
@@ -1069,6 +1160,9 @@ class ApplicationMain
       return shell.openExternal(url);
     }
   };
+  public openRoute = (route: RoutePath) => {
+    void IpcMainEventChannel.app.notifyOpenRoute?.(route);
+  };
   public showNotificationIcon = (value: boolean, reason?: string) =>
     this.userInterface?.showNotificationIcon(value, reason);
 
@@ -1089,21 +1183,18 @@ class ApplicationMain
   public isUnpinnedWindow = () => this.settings.gui.unpinnedWindow;
   public updateAccountData = () => this.account.updateAccountData();
   public getAccountData = () => this.account.accountData;
+  public getVersionInfo = () => this.version.fetchLatestVersion();
 
   // TunnelStateHandlerDelegate
   public handleTunnelStateUpdate = (tunnelState: TunnelState) => {
-    this.userInterface?.updateTray(
-      this.account.isLoggedIn(),
-      tunnelState,
-      this.settings.blockWhenDisconnected,
-    );
+    this.userInterface?.updateTray(this.account.isLoggedIn(), tunnelState);
 
     this.notificationController.notifyTunnelState(
       tunnelState,
-      this.settings.blockWhenDisconnected,
       this.settings.splitTunnel.enableExclusions && this.settings.splitTunnel.appsList.length > 0,
       this.userInterface?.isWindowVisible() ?? false,
       this.settings.gui.enableSystemNotifications,
+      this.splitTunnelingSupported,
     );
 
     IpcMainEventChannel.tunnel.notify?.(tunnelState);
@@ -1126,29 +1217,13 @@ class ApplicationMain
   public getLocale = () => this.locale;
   public getTunnelState = () => this.tunnelState.tunnelState;
   public onDeviceEvent = () => {
-    this.userInterface?.updateTray(
-      this.account.isLoggedIn(),
-      this.tunnelState.tunnelState,
-      this.settings.blockWhenDisconnected,
-    );
+    this.userInterface?.updateTray(this.account.isLoggedIn(), this.tunnelState.tunnelState);
 
     if (this.isPerformingPostUpgrade) {
       void this.performPostUpgradeCheck();
     }
   };
   /* eslint-enable @typescript-eslint/member-ordering */
-}
-
-function importSplitTunneling() {
-  if (process.platform === 'win32') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { WindowsSplitTunnelingAppListRetriever } = require('./windows-split-tunneling');
-    return new WindowsSplitTunnelingAppListRetriever();
-  } else if (process.platform === 'darwin') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { MacOsSplitTunnelingAppListRetriever } = require('./macos-split-tunneling');
-    return new MacOsSplitTunnelingAppListRetriever();
-  }
 }
 
 if (CommandLineOptions.help.match) {

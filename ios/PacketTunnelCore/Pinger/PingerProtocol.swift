@@ -3,7 +3,7 @@
 //  PacketTunnelCore
 //
 //  Created by pronebird on 10/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -29,7 +29,7 @@ public struct PingerSendResult {
 }
 
 /// A type capable of sending and receving ICMP traffic.
-public protocol PingerProtocol {
+public protocol PingerProtocol: Sendable {
     var onReply: ((PingerReply) -> Void)? { get set }
 
     func startPinging(destAddress: IPv4Address) throws

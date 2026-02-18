@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Mojgan on 2024-03-04.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
@@ -40,18 +40,13 @@ class AddLocationsCoordinator: Coordinator, Presentable, Presenting {
         )
         controller.delegate = self
 
-        controller.navigationItem.title = NSLocalizedString(
-            "ADD_LOCATIONS_NAVIGATION_TITLE",
-            tableName: "AddLocations",
-            value: "Add locations",
-            comment: ""
-        )
+        controller.navigationItem.title = NSLocalizedString("Locations", comment: "")
 
         navigationController.pushViewController(controller, animated: true)
     }
 }
 
-extension AddLocationsCoordinator: AddLocationsViewControllerDelegate {
+extension AddLocationsCoordinator: @preconcurrency AddLocationsViewControllerDelegate {
     func didBack() {
         didFinish?(self)
     }

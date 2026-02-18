@@ -8,8 +8,8 @@
 //! true. Read more here: https://man.freebsd.org/cgi/man.cgi?bpf
 use futures::ready;
 use libc::{
-    bpf_hdr, ifreq, BIOCGBLEN, BIOCGDLT, BIOCIMMEDIATE, BIOCSBLEN, BIOCSETIF, BIOCSHDRCMPLT,
-    BIOCSSEESENT, BPF_ALIGNMENT, EBUSY, F_GETFL, F_SETFL, O_NONBLOCK,
+    BIOCGBLEN, BIOCGDLT, BIOCIMMEDIATE, BIOCSBLEN, BIOCSETIF, BIOCSHDRCMPLT, BIOCSSEESENT,
+    BPF_ALIGNMENT, EBUSY, F_GETFL, F_SETFL, O_NONBLOCK, bpf_hdr, ifreq,
 };
 use std::{
     ffi::{c_int, c_uint},
@@ -20,7 +20,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{unix::AsyncFd, AsyncRead, Interest, ReadBuf};
+use tokio::io::{AsyncRead, Interest, ReadBuf, unix::AsyncFd};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -132,16 +132,17 @@ impl Bpf {
             return Err(Error::InterfaceNameTooLong);
         }
 
+        // SAFETY: `name_bytes` cannot exceed the size of `ifr_name`
         unsafe {
-            // SAFETY: `name_bytes` cannot exceed the size of `ifr_name`
             std::ptr::copy_nonoverlapping(
                 name_bytes.as_ptr(),
-                &mut ifr.ifr_name as *mut _ as *mut _,
+                ifr.ifr_name.as_mut_ptr().cast::<u8>(),
                 name_bytes.len(),
-            );
-            // SAFETY: The fd is valid for the lifetime of `self`, and `ifr` has a valid interface
-            ioctl!(self.file.as_raw_fd(), BIOCSETIF, &ifr)
-        }
+            )
+        };
+
+        // SAFETY: The fd is valid for the lifetime of `self`, and `ifr` has a valid interface
+        unsafe { ioctl!(self.file.as_raw_fd(), BIOCSETIF, &ifr) }
     }
 
     /// Enable or disable immediate mode (BIOCIMMEDIATE)

@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by Andrew Bulhak on 2024-12-12.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -32,8 +32,13 @@ class UDPOverTCPObfuscationSettingsPage: Page {
         return self
     }
 
-    @discardableResult func tapPort5001Cell() -> Self {
+    @discardableResult func tapPort443Cell() -> Self {
         portCell(2).tap()
+        return self
+    }
+
+    @discardableResult func tapPort5001Cell() -> Self {
+        portCell(3).tap()
         return self
     }
 

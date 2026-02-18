@@ -1,7 +1,12 @@
 use async_trait::async_trait;
 use std::net::SocketAddr;
+use tokio::io;
 
+pub mod lwo;
+pub mod multiplexer;
+pub mod quic;
 pub mod shadowsocks;
+pub mod socket;
 pub mod udp2tcp;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -19,10 +24,36 @@ pub enum Error {
 
     #[error("Failed to run Shadowsocks")]
     RunShadowsocksObfuscator(#[source] shadowsocks::Error),
+
+    #[error("Failed to initialize Quic")]
+    CreateQuicObfuscator(#[source] quic::Error),
+
+    #[error("Failed to run Quic")]
+    RunQuicObfuscator(#[source] quic::Error),
+
+    #[error("Failed to initialize LWO")]
+    CreateLwoObfuscator(#[source] lwo::Error),
+
+    #[error("Failed to run LWO")]
+    RunLwoObfuscator(#[source] lwo::Error),
+
+    #[error("Failed to bind socket")]
+    BindRemoteUdp(#[source] io::Error),
+
+    #[cfg(target_os = "linux")]
+    #[error("Failed to set fwmark on remote socket")]
+    SetFwmark(#[source] nix::Error),
+
+    #[error("Failed to initialize multiplexer")]
+    CreateMultiplexerObfuscator(#[source] io::Error),
+
+    #[error("Failed to run multiplexer")]
+    RunMultiplexerObfuscator(#[source] io::Error),
 }
 
 #[async_trait]
 pub trait Obfuscator: Send {
+    /// NOTE(Android): Make sure to call bypass on the obfuscator socket _before_ invoking run.
     async fn run(self: Box<Self>) -> Result<()>;
 
     /// Returns the address of the local socket.
@@ -38,10 +69,13 @@ pub trait Obfuscator: Send {
     fn packet_overhead(&self) -> u16;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Settings {
     Udp2Tcp(udp2tcp::Settings),
     Shadowsocks(shadowsocks::Settings),
+    Quic(quic::Settings),
+    Lwo(lwo::Settings),
+    Multiplexer(multiplexer::Settings),
 }
 
 pub async fn create_obfuscator(settings: &Settings) -> Result<Box<dyn Obfuscator>> {
@@ -50,10 +84,10 @@ pub async fn create_obfuscator(settings: &Settings) -> Result<Box<dyn Obfuscator
             .await
             .map(box_obfuscator)
             .map_err(Error::CreateUdp2TcpObfuscator),
-        Settings::Shadowsocks(s) => shadowsocks::Shadowsocks::new(s)
-            .await
-            .map(box_obfuscator)
-            .map_err(Error::CreateShadowsocksObfuscator),
+        Settings::Shadowsocks(s) => shadowsocks::Shadowsocks::new(s).await.map(box_obfuscator),
+        Settings::Quic(s) => quic::Quic::new(s).await.map(box_obfuscator),
+        Settings::Lwo(s) => lwo::Lwo::new(s).await.map(box_obfuscator),
+        Settings::Multiplexer(s) => multiplexer::Multiplexer::new(s).await.map(box_obfuscator),
     }
 }
 

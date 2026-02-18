@@ -3,11 +3,12 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2024-09-24.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
-@testable import MullvadTypes
 import XCTest
+
+@testable import MullvadTypes
 
 final class AnyIPAddressTests: XCTestCase {
     func testAnyIPAddressFromString() {

@@ -5,109 +5,68 @@ on:
     paths:
       - .github/workflows/ios.yml
       - ios/build-rust-library.sh
-      - ios/.swiftformat
+      - ios/.swift-format
+      - ios/wireguard-apple
       - ios/**/*.swift
       - ios/**/*.xctestplan
+      # Rust code is generally checked in the ios-rust-ffi.yml workflow,
+      # But changing the Rust compiler can affect Swift->Rust linking not detected
+      # by that workflow, so we trigger the full iOS build on it.
+      - rust-toolchain.toml
+      # Changes to the FFI can affect the linking but not be detected `ios-rust-ffi.yml`.
+      - 'mullvad-ios/**'
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
-  check-formatting:
-    name: Check formatting
-    runs-on: macos-13
-    steps:
-      - name: Install SwiftFormat
-        run: |
-          brew update
-          brew upgrade swiftformat
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Check formatting
-        run: |
-          swiftformat --version
-          swiftformat --lint .
-        working-directory: ios
-
-  swiftlint:
-    name: Run swiftlint
-    runs-on: macos-13
+  swift-format:
+    name: Run swift format lint
+    runs-on: macos-15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run swiftlint
-        run: |
-          brew install swiftlint
-          swiftlint --version
-          swiftlint --reporter github-actions-logging
+      - name: Run swift format lint
+        run: ./format.sh lint -s
         working-directory: ios
 
-  test:
-    name: Unit tests
-    runs-on: macos-13-xlarge
+  ui-test-build:
+    name: Build for ui tests (staging)
+    runs-on: macos-15
     env:
       SOURCE_PACKAGES_PATH: .spm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure cache
-        uses: actions/cache@v3
-        with:
-          path: ios/${{ env.SOURCE_PACKAGES_PATH }}
-          key: ${{ runner.os }}-spm-${{ hashFiles('ios/**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-
+      - name: Setup project
+        uses: ./.github/actions/ios/setup-project-toolchain
 
-      - name: Setup go-lang
-        uses: actions/setup-go@v3
-        with:
-          go-version: 1.21.13
+      - name: Build for ui tests
+        run: |
+          set -o pipefail && env NSUnbufferedIO=YES xcodebuild \
+          -project MullvadVPN.xcodeproj \
+          -scheme MullvadVPNUITests \
+          -testPlan MullvadVPNUITestsAll \
+          -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
+          -disableAutomaticPackageResolution \
+          -allowProvisioningUpdates \
+          -destination "platform=iOS Simulator,name=iPhone 16" \
+          clean build-for-testing 2>&1 | xcbeautify
+        working-directory: ios/
 
-      - name: Install xcbeautify
-        run: |
-          brew update
-          brew install xcbeautify
+  test:
+    name: Unit tests
+    runs-on: macos-15-xlarge
+    env:
+      SOURCE_PACKAGES_PATH: .spm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install protobuf
-        run: |
-          brew update
-          brew install protobuf
-
-      - name: Set up yeetd to workaround XCode being slow in CI
-        run: |
-          wget https://github.com/biscuitehh/yeetd/releases/download/1.0/yeetd-normal.pkg
-          sudo installer -pkg yeetd-normal.pkg -target /
-          yeetd &
-      - name: Configure Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '15.0.1'
-      - name: Configure Rust
-        # Since the https://github.com/actions/runner-images/releases/tag/macos-13-arm64%2F20240721.1 release
-        # Brew does not install tools at the correct location anymore
-        # This update broke the rust build script which was assuming the cargo binary was located in ~/.cargo/bin/cargo
-        # The workaround is to fix brew paths by running brew bundle dump, and then brew bundle
-        # WARNING: This has to be the last brew "upgrade" commands that is ran,
-        # otherwise the brew path will be broken again.
-        run: |
-          brew bundle dump
-          brew bundle
-          rustup default stable
-          rustup update stable
-          rustup target add aarch64-apple-ios-sim
-
-      - name: Configure Xcode project
-        run: |
-          cp Base.xcconfig.template Base.xcconfig
-          cp App.xcconfig.template App.xcconfig
-          cp PacketTunnel.xcconfig.template PacketTunnel.xcconfig
-          cp Screenshots.xcconfig.template Screenshots.xcconfig
-          cp Api.xcconfig.template Api.xcconfig
-        working-directory: ios/Configurations
+      - name: Setup project
+        uses: ./.github/actions/ios/setup-project-toolchain
 
       - name: Run unit tests
         run: |
@@ -115,9 +74,10 @@ jobs:
             -project MullvadVPN.xcodeproj \
             -scheme MullvadVPN \
             -testPlan MullvadVPNCI \
-            -destination "platform=iOS Simulator,name=iPhone 15" \
+            -destination "platform=iOS Simulator,name=iPhone 16" \
             -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
             -disableAutomaticPackageResolution \
+            -allowProvisioningUpdates \
             -resultBundlePath xcode-test-report \
             test 2>&1 | xcbeautify
         working-directory: ios/

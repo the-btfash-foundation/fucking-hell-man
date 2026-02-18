@@ -74,23 +74,26 @@ EOF
 }
 
 function upload {
-    version=$1
+    local version=$1
+    local files
+    local checksums_filename
 
+    checksums_filename="desktop+$(hostname)+$version.sha256"
+    rm -f "$checksums_filename"
     files=( * )
-    checksums_path="desktop+$(hostname)+$version.sha256"
-    sha256sum "${files[@]}" > "$checksums_path"
+    sha256sum "${files[@]}" > "$checksums_filename"
 
     case "$(uname -s)" in
         # Linux is both the build and upload server. Just copy directly to target dir
         Linux*)
-            cp "${files[@]}" "$checksums_path" "$UPLOAD_DIR/"
+            cp "${files[@]}" "$checksums_filename" "$UPLOAD_DIR/"
             ;;
         # Other platforms need to transfer their artifacts to the Linux build machine.
         Darwin*|MINGW*|MSYS_NT*)
             for file in "${files[@]}"; do
                 upload_sftp "$file" || return 1
             done
-            upload_sftp "$checksums_path" || return 1
+            upload_sftp "$checksums_filename" || return 1
             ;;
     esac
 }
@@ -100,7 +103,7 @@ function upload {
 # means in a container on Linux, and straight up in the local shell elsewhere.
 function run_in_build_env {
     if [[ "$(uname -s)" == "Linux" ]]; then
-        USE_MOLD=false ./building/container-run.sh linux "$@"
+        ./building/container-run.sh linux "$@"
     else
         bash -c "$*"
     fi
@@ -156,10 +159,17 @@ function checkout_ref {
 
     # Clean our working dir and check out the code we want to build
     rm -r dist/ 2&>/dev/null || true
-    git reset --hard
+
+    # Reset to main in case there is some issue on the current branch that prevents resetting to it.
+    git reset --hard origin/main
+
     git checkout "$ref"
+
+    # Return an error if it's not possible to reset to the current branch. Some errors will result in exit code 0 from `checkout` but >0 from `reset`.
+    git reset --hard || return 1
+
     git submodule update
-    git submodule update --init --recursive --depth=1 wireguard-go-rs || true
+    git submodule update --init wireguard-go-rs/libwg/wireguard-go || true
     git clean -df
 }
 
@@ -179,12 +189,6 @@ function build_ref {
 
     checkout_ref "$ref" || return 1
 
-    # When we build in containers, the updating of toolchains is done by updating containers.
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        echo "Updating Rust toolchain..."
-        rustup update
-    fi
-
     # podman appends a trailing carriage return to the output. So we use `tr` to strip it
     local version=""
     version="$(run_in_build_env cargo run -q --bin mullvad-version | tr -d "\r" || return 1)"
@@ -195,15 +199,8 @@ function build_ref {
     local build_args=(--optimize --sign)
     if [[ "$(uname -s)" == "Darwin" ]]; then
         build_args+=(--universal --notarize)
-    fi
-    if [[ "$(uname -s)" == "MINGW"* ]]; then
-        # Check if the windows-installer crate is present, and if so, build a universal installer.
-        # The check is needed for compatibility with older commits that don't have the crate/flag.
-        # It was added in December 2024. The condition can be removed when supporting commits
-        # older than that is no longer necessary.
-        if [[ -d "$BUILD_DIR/windows-installer" ]]; then
-            build_args+=(--universal)
-        fi
+    elif [[ "$(uname -s)" == "MINGW"* ]]; then
+        build_args+=(--universal)
     fi
 
     artifact_dir=$artifact_dir build "${build_args[@]}" || return 1

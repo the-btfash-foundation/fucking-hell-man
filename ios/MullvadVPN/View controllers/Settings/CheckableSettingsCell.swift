@@ -3,13 +3,19 @@
 //  MullvadVPN
 //
 //  Created by Jon Petersson on 2023-06-05.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
 
 class CheckableSettingsCell: SettingsCell {
     let checkboxView = CheckboxView()
+
+    var isEnabled = true {
+        didSet {
+            titleLabel.isEnabled = isEnabled
+        }
+    }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -42,12 +48,12 @@ class CheckableSettingsCell: SettingsCell {
     private func setCheckboxView() {
         setLeadingView { superview in
             superview.addConstrainedSubviews([checkboxView]) {
-                checkboxView.pinEdgesToSuperview(PinnableEdges([
-                    .leading(0),
-                    .trailing(UIMetrics.SettingsCell.checkableSettingsCellLeftViewSpacing),
-                    .top(0),
-                    .bottom(0),
-                ]))
+                checkboxView.centerYAnchor.constraint(equalTo: superview.centerYAnchor)
+                checkboxView.pinEdgesToSuperview(
+                    PinnableEdges([
+                        .leading(0),
+                        .trailing(UIMetrics.SettingsCell.checkableSettingsCellLeftViewSpacing),
+                    ]))
             }
         }
     }

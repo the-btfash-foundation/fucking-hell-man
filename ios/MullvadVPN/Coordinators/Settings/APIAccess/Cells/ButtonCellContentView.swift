@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 17/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -21,7 +21,8 @@ class ButtonCellContentView: UIView, UIContentView {
         }
         set {
             guard let newConfiguration = newValue as? ButtonCellContentConfiguration,
-                  actualConfiguration != newConfiguration else { return }
+                actualConfiguration != newConfiguration
+            else { return }
 
             let previousConfiguration = actualConfiguration
             actualConfiguration = newConfiguration
@@ -51,7 +52,6 @@ class ButtonCellContentView: UIView, UIContentView {
 
     func configureSubviews(previousConfiguration: ButtonCellContentConfiguration? = nil) {
         guard actualConfiguration != previousConfiguration else { return }
-
         configureButton()
         configureActions(previousConfiguration: previousConfiguration)
     }
@@ -62,11 +62,22 @@ class ButtonCellContentView: UIView, UIContentView {
     }
 
     private func configureButton() {
-        button.setTitle(actualConfiguration.text, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 17)
-        button.isEnabled = actualConfiguration.isEnabled
         button.style = actualConfiguration.style
-        button.configuration?.contentInsets = actualConfiguration.directionalContentEdgeInsets
+        var config = button.configuration ?? .plain()
+        config.contentInsets = actualConfiguration.directionalLayoutMargins
+        config.title = actualConfiguration.text
+        config.attributedTitle = AttributedString(
+            actualConfiguration.text ?? "",
+            attributes: AttributeContainer([
+                .font: actualConfiguration.textProperties.font,
+                .foregroundColor: actualConfiguration.textProperties.color,
+            ])
+        )
+
+        button.configuration = config
+        button.isEnabled = actualConfiguration.isEnabled
+
+        button.setAccessibilityIdentifier(actualConfiguration.accessibilityIdentifier)
     }
 
     private func addSubviews() {

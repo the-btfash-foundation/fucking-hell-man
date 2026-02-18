@@ -3,12 +3,13 @@
 //  MullvadVPNTests
 //
 //  Created by Mojgan on 2023-11-02.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
-@testable import MullvadMockData
 import XCTest
+
+@testable import MullvadMockData
 
 final class OutgoingConnectionServiceTests: XCTestCase {
     func testSuccessGetOutgoingConnectionInfo() async throws {
@@ -21,7 +22,8 @@ final class OutgoingConnectionServiceTests: XCTestCase {
         let successExpectation = expectation(description: "Did receive exit IPs")
         let result = try await outgoingConnectionService.getOutgoingConnectionInfo()
         if result.ipv4 == .mock,
-           result.ipv6 == .mock {
+            result.ipv6 == .mock
+        {
             successExpectation.fulfill()
         }
         await fulfillment(of: [successExpectation], timeout: .UnitTest.timeout)

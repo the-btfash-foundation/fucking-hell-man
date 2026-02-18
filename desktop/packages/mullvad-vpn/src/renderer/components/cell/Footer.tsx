@@ -1,12 +1,12 @@
 import styled from 'styled-components';
 
-import { LabelTiny } from '../../lib/components';
-import { Colors, Spacings } from '../../lib/foundations';
+import { LabelTinySemiBold } from '../../lib/components';
+import { spacings } from '../../lib/foundations';
 
 export const CellFooter = styled.div({
-  margin: `${Spacings.spacing1} ${Spacings.spacing6} 0px`,
+  margin: `${spacings.tiny} ${spacings.large} 0px`,
 });
 
-export const CellFooterText = styled(LabelTiny).attrs({
-  color: Colors.white60,
+export const CellFooterText = styled(LabelTinySemiBold).attrs({
+  color: 'whiteAlpha60',
 })({});

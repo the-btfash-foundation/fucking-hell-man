@@ -1,4 +1,4 @@
-use super::{config::TEST_CONFIG, helpers, Error, TestContext};
+use super::{Error, TestContext, config::TEST_CONFIG, helpers};
 use mullvad_management_interface::MullvadProxyClient;
 use mullvad_relay_selector::query::builder::RelayQueryBuilder;
 use std::{
@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use test_macro::test_function;
-use test_rpc::{meta::Os, ExecResult, ServiceClient};
+use test_rpc::{ExecResult, ServiceClient, meta::Os};
 
 pub async fn run_test<T: AsRef<str> + Debug>(
     rpc: &ServiceClient,
@@ -91,25 +91,14 @@ pub async fn test_ui_tunnel_settings(
     rpc: ServiceClient,
     mut mullvad_client: MullvadProxyClient,
 ) -> anyhow::Result<()> {
-    // NOTE: This test connects multiple times using various settings, some of which may cause a
-    // significant increase in connection time, e.g. multihop and OpenVPN. For this reason, it is
-    // preferable to only target low latency servers.
-    use helpers::custom_lists::LowLatency;
-
     // tunnel-state.spec precondition: a single WireGuard relay should be selected
     log::info!("Select WireGuard relay");
-    let entry = helpers::constrain_to_relay(
-        &mut mullvad_client,
-        RelayQueryBuilder::new()
-            .wireguard()
-            .location(LowLatency)
-            .build(),
-    )
-    .await?;
+    let entry =
+        helpers::constrain_to_relay(&mut mullvad_client, RelayQueryBuilder::new().build()).await?;
 
     let ui_result = run_test_env(
         &rpc,
-        &["tunnel-state.spec"],
+        &["state-dependent/tunnel-state.spec"],
         [
             ("HOSTNAME", entry.hostname.as_str()),
             ("IN_IP", &entry.ipv4_addr_in.to_string()),
@@ -133,7 +122,8 @@ pub async fn test_ui_login(
     rpc: ServiceClient,
     mut mullvad_client: MullvadProxyClient,
 ) -> Result<(), Error> {
-    mullvad_client.logout_account().await?;
+    mullvad_client.logout_account("test-manager").await?;
+    mullvad_client.clear_account_history().await?;
     let ui_result = run_test_env(
         &rpc,
         &["login.spec"],
@@ -152,7 +142,7 @@ async fn test_custom_access_methods_gui(
     rpc: ServiceClient,
     mut mullvad_client: MullvadProxyClient,
 ) -> anyhow::Result<()> {
-    use mullvad_api::env;
+    use mullvad_api_constants::env;
     use mullvad_relay_selector::{RelaySelector, SelectorConfig};
 
     // For this test to work, we need to supply the following env-variables:
@@ -185,7 +175,8 @@ async fn test_custom_access_methods_gui(
 
     let gui_test = "api-access-methods.spec";
     let relay_list = mullvad_client.get_relay_locations().await.unwrap();
-    let relay_selector = RelaySelector::from_list(SelectorConfig::default(), relay_list);
+    let bridge_list = mullvad_client.get_bridges().await.unwrap();
+    let relay_selector = RelaySelector::new(SelectorConfig::default(), relay_list, bridge_list);
     let access_method = relay_selector
         .get_bridge_forced()
         .expect("`test_shadowsocks` needs at least one shadowsocks relay to execute. Found none in relay list.");
@@ -217,63 +208,13 @@ async fn test_custom_access_methods_gui(
     Ok(())
 }
 
-#[test_function(priority = 1000)]
-async fn test_custom_bridge_gui(
-    _: TestContext,
-    rpc: ServiceClient,
-    mut mullvad_client: MullvadProxyClient,
-) -> Result<(), Error> {
-    // For this test to work, we need to supply the following env-variables:
-    //
-    // * SHADOWSOCKS_SERVER_IP
-    // * SHADOWSOCKS_SERVER_PORT
-    // * SHADOWSOCKS_SERVER_CIPHER
-    // * SHADOWSOCKS_SERVER_PASSWORD
-    //
-    // See
-    // `desktop/packages/mullvad-vpn/test/e2e/installed/state-dependent/custom-bridge.spec.ts`
-    // for details. The setup should be the same as in
-    // `test_manager::tests::access_methods::test_shadowsocks`.
-
-    let gui_test = "custom-bridge.spec";
-
-    let settings = mullvad_client.get_settings().await.unwrap();
-    let relay_list = mullvad_client.get_relay_locations().await.unwrap();
-    let relay_selector = helpers::get_daemon_relay_selector(&settings, relay_list);
-    let custom_proxy = relay_selector
-        .get_bridge_forced()
-        .expect("`test_shadowsocks` needs at least one shadowsocks relay to execute. Found none in relay list.");
-
-    let ui_result = run_test_env(
-        &rpc,
-        &[gui_test],
-        [
-            (
-                "SHADOWSOCKS_SERVER_IP",
-                custom_proxy.endpoint.ip().to_string().as_ref(),
-            ),
-            (
-                "SHADOWSOCKS_SERVER_PORT",
-                custom_proxy.endpoint.port().to_string().as_ref(),
-            ),
-            ("SHADOWSOCKS_SERVER_CIPHER", custom_proxy.cipher.as_ref()),
-            (
-                "SHADOWSOCKS_SERVER_PASSWORD",
-                custom_proxy.password.as_ref(),
-            ),
-        ],
-    )
-    .await
-    .unwrap();
-
-    assert!(ui_result.success());
-
-    Ok(())
-}
-
 /// Test settings import / IP overrides in the GUI
 #[test_function]
-pub async fn test_import_settings_ui(_: TestContext, rpc: ServiceClient) -> Result<(), Error> {
+pub async fn test_import_settings_ui(
+    _: TestContext,
+    rpc: ServiceClient,
+    _: MullvadProxyClient,
+) -> Result<(), Error> {
     let ui_result = run_test(&rpc, &["settings-import.spec"]).await?;
     assert!(ui_result.success());
     Ok(())
@@ -281,7 +222,11 @@ pub async fn test_import_settings_ui(_: TestContext, rpc: ServiceClient) -> Resu
 
 /// Test obfuscation settings in the GUI
 #[test_function]
-pub async fn test_obfuscation_settings_ui(_: TestContext, rpc: ServiceClient) -> Result<(), Error> {
+pub async fn test_obfuscation_settings_ui(
+    _: TestContext,
+    rpc: ServiceClient,
+    _: MullvadProxyClient,
+) -> Result<(), Error> {
     let ui_result = run_test(&rpc, &["obfuscation.spec"]).await?;
     assert!(ui_result.success());
     Ok(())
@@ -289,8 +234,36 @@ pub async fn test_obfuscation_settings_ui(_: TestContext, rpc: ServiceClient) ->
 
 /// Test settings in the GUI
 #[test_function]
-pub async fn test_settings_ui(_: TestContext, rpc: ServiceClient) -> Result<(), Error> {
-    let ui_result = run_test(&rpc, &["settings.spec"]).await?;
+pub async fn test_settings_ui(
+    _: TestContext,
+    rpc: ServiceClient,
+    _: MullvadProxyClient,
+) -> Result<(), Error> {
+    let ui_result = run_test(&rpc, &["vpn-settings.spec"]).await?;
+    assert!(ui_result.success());
+    Ok(())
+}
+
+/// Test DAITA UI
+#[test_function]
+pub async fn test_daita_ui(
+    _: TestContext,
+    rpc: ServiceClient,
+    _: MullvadProxyClient,
+) -> Result<(), Error> {
+    let ui_result = run_test(&rpc, &["daita-settings.spec"]).await?;
+    assert!(ui_result.success());
+    Ok(())
+}
+
+/// Test multihop UI
+#[test_function]
+pub async fn test_multihop_ui(
+    _: TestContext,
+    rpc: ServiceClient,
+    _: MullvadProxyClient,
+) -> Result<(), Error> {
+    let ui_result = run_test(&rpc, &["multihop-settings.spec"]).await?;
     assert!(ui_result.success());
     Ok(())
 }

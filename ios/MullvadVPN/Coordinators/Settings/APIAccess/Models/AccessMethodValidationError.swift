@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 17/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -15,16 +15,7 @@ struct AccessMethodValidationError: LocalizedError, Equatable {
     let fieldErrors: [AccessMethodFieldValidationError]
 
     var errorDescription: String? {
-        if fieldErrors.count > 1 {
-            NSLocalizedString(
-                "VALIDATION_ERRORS_MULTIPLE",
-                tableName: "APIAccess",
-                value: "Multiple validation errors occurred.",
-                comment: ""
-            )
-        } else {
-            fieldErrors.first?.localizedDescription
-        }
+        fieldErrors.map({ $0.errorDescription }).joinedParagraphs(lineBreaks: 1)
     }
 }
 
@@ -72,37 +63,17 @@ struct AccessMethodFieldValidationError: LocalizedError, Equatable {
     /// Validation field context.
     let context: Context
 
-    var errorDescription: String? {
+    var errorDescription: String {
         switch kind {
         case .emptyValue:
-            NSLocalizedString(
-                "VALIDATION_ERRORS_EMPTY_FIELD",
-                tableName: "APIAccess",
-                value: "\(field) cannot be empty.",
-                comment: ""
-            )
+            String(format: NSLocalizedString("%@ cannot be empty.", comment: ""), field.rawValue)
         case .invalidIPAddress:
-            NSLocalizedString(
-                "VALIDATION_ERRORS_INVALD ADDRESS",
-                tableName: "APIAccess",
-                value: "Please enter a valid IPv4 or IPv6 address.",
-                comment: ""
-            )
+            NSLocalizedString("Please enter a valid IPv4 or IPv6 address.", comment: "")
         case .invalidPort:
-            NSLocalizedString(
-                "VALIDATION_ERRORS_INVALID_PORT",
-                tableName: "APIAccess",
-                value: "Please enter a valid port.",
-                comment: ""
-            )
+            NSLocalizedString("Please enter a valid remote server port.", comment: "")
         case .nameTooLong:
             String(
-                format: NSLocalizedString(
-                    "VALIDATION_ERRORS_NAME_TOO_LONG",
-                    tableName: "APIAccess",
-                    value: "Name should be no longer than %i characters.",
-                    comment: ""
-                ),
+                format: NSLocalizedString("Name should be no longer than %i characters.", comment: ""),
                 NameInputFormatter.maxLength
             )
         }

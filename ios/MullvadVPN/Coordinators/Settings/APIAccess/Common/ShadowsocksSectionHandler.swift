@@ -3,13 +3,14 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 14/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import UIKit
 
 /// Type responsible for handling cells in shadowsocks table view section.
+@MainActor
 struct ShadowsocksSectionHandler {
     private let authenticationInputMaxLength = 2048
 
@@ -65,7 +66,7 @@ struct ShadowsocksSectionHandler {
     }
 
     func configureCipher(_ cell: UITableViewCell, itemIdentifier: ShadowsocksItemIdentifier) {
-        var contentConfiguration = UIListContentConfiguration.mullvadValueCell(tableStyle: tableStyle)
+        var contentConfiguration = ListCellContentConfiguration()
         contentConfiguration.text = itemIdentifier.text
         contentConfiguration.secondaryText = subject.value.shadowsocks.cipher.rawValue.description
         cell.contentConfiguration = contentConfiguration

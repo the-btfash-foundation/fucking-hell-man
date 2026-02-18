@@ -1,14 +1,17 @@
 use std::env::args;
 
-use mullvad_encrypted_dns_proxy::{config_resolver, Forwarder};
+use mullvad_encrypted_dns_proxy::{Forwarder, config_resolver};
 use tokio::net::TcpListener;
+use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 /// This can be tested out by using curl:
 /// `curl https://api.mullvad.net:$port/app/v1/relays --resolve api.mullvad.net:$port:$addr`
 ///  where $addr and $port are the listening address of the proxy (bind_addr).
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env().add_directive(LevelFilter::INFO.into()))
+        .init();
 
     let bind_addr = args().nth(1).unwrap_or("127.0.0.1:0".to_owned());
 
@@ -21,7 +24,7 @@ async fn main() {
         .into_iter()
         .find(|c| c.obfuscation.is_some())
         .expect("No XOR config");
-    println!("Proxy config in use: {:?}", proxy_config);
+    println!("Proxy config in use: {proxy_config:?}");
 
     let listener = TcpListener::bind(bind_addr)
         .await

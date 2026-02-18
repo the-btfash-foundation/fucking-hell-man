@@ -3,14 +3,15 @@
 //  MullvadVPNTests
 //
 //  Created by Marco Nikic on 2024-10-03.
-//  Copyright © 2024 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
+
+import XCTest
 
 @testable import MullvadMockData
 @testable import MullvadREST
 @testable import MullvadSettings
 @testable import MullvadTypes
-import XCTest
 
 extension MigrationManagerTests {
     func testMigrationDoesNothingIfAnotherProcessIsRunningUpdates() throws {
@@ -26,8 +27,8 @@ extension MigrationManagerTests {
 
         let backgroundMigrationExpectation = expectation(description: "Migration from packet tunnel")
         let foregroundMigrationExpectation = expectation(description: "Migration from host")
-        var migrationHappenedInPacketTunnel = false
-        var migrationHappenedInHost = false
+        nonisolated(unsafe) var migrationHappenedInPacketTunnel = false
+        nonisolated(unsafe) var migrationHappenedInHost = false
 
         packetTunnelProcess.async { [unowned self] in
             manager.migrateSettings(store: MigrationManagerTests.store) { backgroundMigrationResult in
@@ -47,7 +48,7 @@ extension MigrationManagerTests {
             }
         }
 
-        wait(for: [backgroundMigrationExpectation, foregroundMigrationExpectation], timeout: .UnitTest.invertedTimeout)
+        wait(for: [backgroundMigrationExpectation, foregroundMigrationExpectation], timeout: .UnitTest.timeout)
 
         // Migration happens either in one process, or the other.
         // This check guarantees it didn't happen in both simultaneously.

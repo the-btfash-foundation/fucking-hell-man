@@ -3,7 +3,7 @@
 //  RelaySelector
 //
 //  Created by Marco Nikic on 2023-06-29.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -32,8 +32,8 @@ public enum Haversine {
     ) -> Double {
         let dLat = latitude1.toRadians - latitude2.toRadians
         let dLon = longitude1.toRadians - longitude2.toRadians
-
-        let haversine = sin(dLat / 2).squared + sin(dLon / 2)
+        let haversine =
+            sin(dLat / 2).squared + sin(dLon / 2)
             .squared * cos(latitude1.toRadians) * cos(latitude2.toRadians)
         let c = 2 * asin(sqrt(haversine))
 

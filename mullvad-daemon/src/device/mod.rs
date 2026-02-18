@@ -19,17 +19,13 @@ use std::{
     future::Future,
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, SystemTime},
 };
 use talpid_core::mpsc::Sender;
-use talpid_types::{
-    net::{TunnelEndpoint, TunnelType},
-    tunnel::TunnelStateTransition,
-    ErrorExt,
-};
+use talpid_types::{ErrorExt, tunnel::TunnelStateTransition};
 use tokio::{
     fs,
     io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
@@ -461,10 +457,10 @@ impl AccountManager {
         let mut current_api_call = api::CurrentApiCall::new();
 
         loop {
-            if current_api_call.is_idle() {
-                if let Some(timed_rotation) = self.spawn_timed_key_rotation() {
-                    current_api_call.set_timed_rotation(Box::pin(timed_rotation))
-                }
+            if current_api_call.is_idle()
+                && let Some(timed_rotation) = self.spawn_timed_key_rotation()
+            {
+                current_api_call.set_timed_rotation(Box::pin(timed_rotation))
             }
 
             futures::select! {
@@ -849,15 +845,15 @@ impl AccountManager {
             }
         }
 
-        if !self.rotation_requests.is_empty() || !self.validation_requests.is_empty() {
-            if let Some(updated_config) = self.data.device() {
-                let device_service = self.device_service.clone();
-                let number = updated_config.account_number.clone();
-                let device_id = updated_config.device.id.clone();
-                api_call.set_oneshot_rotation(Box::pin(async move {
-                    device_service.rotate_key(number, device_id).await
-                }));
-            }
+        if (!self.rotation_requests.is_empty() || !self.validation_requests.is_empty())
+            && let Some(updated_config) = self.data.device()
+        {
+            let device_service = self.device_service.clone();
+            let number = updated_config.account_number.clone();
+            let device_id = updated_config.device.id.clone();
+            api_call.set_oneshot_rotation(Box::pin(async move {
+                device_service.rotate_key(number, device_id).await
+            }));
         }
     }
 
@@ -945,7 +941,7 @@ impl AccountManager {
 
     fn spawn_timed_key_rotation(
         &self,
-    ) -> Option<impl Future<Output = Result<WireguardData, Error>> + Send + 'static> {
+    ) -> Option<impl Future<Output = Result<WireguardData, Error>> + Send + 'static + use<>> {
         let config = self.data.device()?;
         let key_rotation_timer = self.key_rotation_timer(config.device.wg_data.created);
 
@@ -1002,20 +998,26 @@ impl AccountManager {
                 .is_ok()
         });
 
-        if let Some(old_config) = old_config {
-            let logout_call = tokio::spawn(Box::pin(self.logout_api_call(old_config)));
+        match old_config {
+            Some(old_config) => {
+                let logout_call = tokio::spawn(Box::pin(self.logout_api_call(old_config)));
 
-            tokio::spawn(async move {
-                let _response = tokio::time::timeout(LOGOUT_TIMEOUT, logout_call).await;
+                tokio::spawn(async move {
+                    let _response = tokio::time::timeout(LOGOUT_TIMEOUT, logout_call).await;
+                    let _ = tx.send(Ok(()));
+                });
+            }
+            _ => {
+                // The state was `revoked`.
                 let _ = tx.send(Ok(()));
-            });
-        } else {
-            // The state was `revoked`.
-            let _ = tx.send(Ok(()));
+            }
         }
     }
 
-    fn logout_api_call(&self, data: PrivateAccountAndDevice) -> impl Future<Output = ()> + 'static {
+    fn logout_api_call(
+        &self,
+        data: PrivateAccountAndDevice,
+    ) -> impl Future<Output = ()> + 'static + use<> {
         let service = self.device_service.clone();
 
         async move {
@@ -1040,10 +1042,10 @@ impl AccountManager {
         self.cacher.write(&device_state).await?;
         self.last_validation = None;
 
-        if let Some(old_config) = self.data.logout() {
-            if device_state.device().map(|d| &d.device.id) != Some(&old_config.device.id) {
-                tokio::spawn(self.logout_api_call(old_config));
-            }
+        if let Some(old_config) = self.data.logout()
+            && device_state.device().map(|d| &d.device.id) != Some(&old_config.device.id)
+        {
+            tokio::spawn(self.logout_api_call(old_config));
         }
 
         self.data = device_state;
@@ -1057,7 +1059,7 @@ impl AccountManager {
 
     fn initiate_key_rotation(
         &self,
-    ) -> Result<impl Future<Output = Result<WireguardData, Error>>, Error> {
+    ) -> Result<impl Future<Output = Result<WireguardData, Error>> + use<>, Error> {
         let data = self.data.device().cloned().ok_or(Error::NoDevice)?;
         let device_service = self.device_service.clone();
         Ok(async move {
@@ -1067,7 +1069,10 @@ impl AccountManager {
         })
     }
 
-    fn key_rotation_timer(&self, key_created: DateTime<Utc>) -> impl Future<Output = ()> + 'static {
+    fn key_rotation_timer(
+        &self,
+        key_created: DateTime<Utc>,
+    ) -> impl Future<Output = ()> + 'static + use<> {
         let rotation_interval = self.rotation_interval;
 
         async move {
@@ -1097,21 +1102,23 @@ impl AccountManager {
     fn fetch_device_config(
         &self,
         old_config: &PrivateAccountAndDevice,
-    ) -> impl Future<Output = Result<Device, Error>> {
+    ) -> impl Future<Output = Result<Device, Error>> + use<> {
         let device_service = self.device_service.clone();
         let account_number = old_config.account_number.clone();
         let device_id = old_config.device.id.clone();
         async move { device_service.get(account_number, device_id).await }
     }
 
-    fn validation_call(&self) -> Result<impl Future<Output = Result<Device, Error>>, Error> {
+    fn validation_call(
+        &self,
+    ) -> Result<impl Future<Output = Result<Device, Error>> + use<>, Error> {
         let old_config = self.data.device().ok_or(Error::NoDevice)?;
         Ok(self.fetch_device_config(old_config))
     }
 
     fn expiry_call(
         &self,
-    ) -> Result<impl Future<Output = Result<chrono::DateTime<Utc>, Error>>, Error> {
+    ) -> Result<impl Future<Output = Result<chrono::DateTime<Utc>, Error>> + use<>, Error> {
         let old_config = self.data.device().ok_or(Error::NoDevice)?;
         let account_number = old_config.account_number.clone();
         let account_service = self.account_service.clone();
@@ -1313,16 +1320,11 @@ impl TunnelStateChangeHandler {
     ///
     /// Reset to the counter to `0` when we manage to successfully connect to a Wireguard relay.
     fn update_retry_counter(new_state: &TunnelStateTransition, retry_attempt: usize) -> usize {
-        let wireguard =
-            |endpoint: &TunnelEndpoint| matches!(endpoint.tunnel_type, TunnelType::Wireguard);
-
         match new_state {
-            // Increment the counter if this is another Wireguard attempt
-            TunnelStateTransition::Connecting(endpoint) if wireguard(endpoint) => {
-                retry_attempt.wrapping_add(1)
-            }
-            // Only reset the counter if we managed to connect to a Wireguard relay
-            TunnelStateTransition::Connected(endpoint) if wireguard(endpoint) => 0,
+            // Increment the counter if this is another connection attempt
+            TunnelStateTransition::Connecting(_) => retry_attempt.wrapping_add(1),
+            // Reset the counter when successfully connected
+            TunnelStateTransition::Connected(_) => 0,
             // Any other state transition doesn't affect the counter
             _ => retry_attempt,
         }
@@ -1363,7 +1365,8 @@ impl TunnelStateChangeHandler {
     const fn should_check_device_validity_on_attempt(wireguard_retry_attempt: usize) -> bool {
         // Incorporate a debounce effect where every `WG_DEVICE_CHECK_THRESHOLD` attempt should be
         // able to trigger a device check.
-        wireguard_retry_attempt > 0 && (wireguard_retry_attempt % WG_DEVICE_CHECK_THRESHOLD == 0)
+        wireguard_retry_attempt > 0
+            && wireguard_retry_attempt.is_multiple_of(WG_DEVICE_CHECK_THRESHOLD)
     }
 
     fn should_continue_retries(err: &Error) -> bool {
@@ -1374,8 +1377,8 @@ impl TunnelStateChangeHandler {
 #[cfg(test)]
 mod test {
     use std::sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     };
     use talpid_types::tunnel::TunnelStateTransition;
 

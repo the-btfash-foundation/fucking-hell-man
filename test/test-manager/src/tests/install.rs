@@ -1,19 +1,21 @@
-use anyhow::{bail, ensure, Context};
+use anyhow::{Context, bail, ensure};
 use std::time::Duration;
+use std::{path::PathBuf, str::FromStr};
 
 use mullvad_management_interface::MullvadProxyClient;
 use mullvad_types::{constraints::Constraint, relay_constraints};
 use test_macro::test_function;
-use test_rpc::{mullvad_daemon::ServiceStatus, ServiceClient};
+use test_rpc::{ServiceClient, meta::Os, mullvad_daemon::ServiceStatus};
 
-use crate::{mullvad_daemon::MullvadClientArgument, tests::helpers};
+use crate::tests::helpers;
 
 use super::{
+    Error, TestContext,
     config::TEST_CONFIG,
     helpers::{
-        connect_and_wait, get_app_env, get_package_desc, install_app, wait_for_tunnel_state, Pinger,
+        Pinger, connect_and_wait, get_app_env, get_package_desc, install_app, wait_for_tunnel_state,
     },
-    Error, TestContext,
+    ui::run_test,
 };
 
 /// Upgrade to the "version under test". This test fails if:
@@ -25,7 +27,7 @@ use super::{
 pub async fn test_upgrade_app(
     ctx: TestContext,
     rpc: ServiceClient,
-    _mullvad_client: MullvadClientArgument,
+    _mullvad_client: Option<MullvadProxyClient>,
 ) -> anyhow::Result<()> {
     // Install the older version of the app and verify that it is running.
     let old_version = TEST_CONFIG
@@ -109,8 +111,9 @@ pub async fn test_upgrade_app(
 
     // Verify that the correct version was installed
     let running_daemon_version = rpc.mullvad_daemon_version().await?;
-    let running_daemon_version =
-        mullvad_version::Version::parse(&running_daemon_version).to_string();
+    let running_daemon_version = mullvad_version::Version::from_str(&running_daemon_version)
+        .unwrap()
+        .to_string();
     ensure!(
         &TEST_CONFIG
             .app_package_filename
@@ -228,11 +231,68 @@ pub async fn test_uninstall_app(
 
     assert!(
         !devices.iter().any(|device| device.id == uninstalled_device),
-        "device id {} still exists after uninstall",
-        uninstalled_device,
+        "device id {uninstalled_device} still exists after uninstall",
     );
 
     Ok(())
+}
+
+/// Test that the Mullvad daemon cleans itself up when deleted by being dragged and dropped into the
+/// bin.
+#[test_function(priority = -160, target_os = "macos")]
+pub async fn test_detect_app_removal(
+    _ctx: TestContext,
+    rpc: ServiceClient,
+    mut mullvad_client: MullvadProxyClient,
+) -> anyhow::Result<()> {
+    let uninstalled_device = mullvad_client
+        .get_device()
+        .await
+        .context("failed to get device data")?
+        .logged_in()
+        .context("Client is not logged in to a valid account")?
+        .device
+        .id;
+
+    rpc.exec("/bin/rm", ["-rf", "/Applications/Mullvad VPN.app"])
+        .await
+        .context("Failed to delete Mullvad app")?;
+
+    let mut attempt = 0;
+    const MAX_ATTEMPTS: usize = 30;
+
+    loop {
+        let app_traces = rpc.find_mullvad_app_traces().await?;
+
+        if app_traces.is_empty() {
+            assert_eq!(
+                rpc.mullvad_daemon_get_status().await?,
+                ServiceStatus::NotRunning,
+                "daemon should be stopped after cleanup"
+            );
+
+            // verify that device was removed
+            let device_client = super::account::new_device_client()
+                .await
+                .context("Failed to create device client")?;
+            let devices = super::account::list_devices_with_retries(&device_client)
+                .await
+                .expect("failed to list devices");
+            assert!(
+                !devices.iter().any(|device| device.id == uninstalled_device),
+                "device id {uninstalled_device} still exists after uninstall",
+            );
+
+            return Ok(());
+        }
+
+        attempt += 1;
+        if attempt == MAX_ATTEMPTS {
+            bail!("Uninstall script didn't run when app was removed");
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 /// Install the multiple times starting from a connected state with auto-connect
@@ -293,7 +353,7 @@ pub async fn test_installation_idempotency(
             tokio::time::sleep(delay).await;
         }
     }
-    // Make sure that no network leak occured during any installation process.
+    // Make sure that no network leak occurred during any installation process.
     let guest_ip = pinger.guest_ip;
     let monitor_result = pinger.stop().await.unwrap();
     assert_eq!(
@@ -301,6 +361,88 @@ pub async fn test_installation_idempotency(
         0,
         "observed unexpected packets from {guest_ip}"
     );
+
+    Ok(())
+}
+
+/// Test that mullvad-problem-report includes the expected logs
+#[test_function]
+pub async fn test_problem_report_collect(
+    _ctx: TestContext,
+    rpc: ServiceClient,
+    _mullvad_client: MullvadProxyClient,
+) -> anyhow::Result<()> {
+    // Run some UI test to generate GUI logs.
+    // We do not care about the result here.
+    let _result = run_test(&rpc, &["disconnected.spec"]).await;
+
+    //
+    // Collect log paths from 'mullvad-problem-report collect --output -'
+    //
+    let problem_report_bin = if TEST_CONFIG.os == Os::Windows {
+        "mullvad-problem-report.exe"
+    } else {
+        "mullvad-problem-report"
+    };
+
+    let result = rpc
+        .exec(problem_report_bin, ["collect", "--output", "-"])
+        .await
+        .context("Failed to execute mullvad-problem-report")?;
+
+    ensure!(
+        result.success(),
+        "mullvad-problem-report failed with exit code: {:?}. stdout: {}. stderr: {}",
+        result.code,
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    let content = String::from_utf8_lossy(&result.stdout);
+
+    let mut log_paths = vec![];
+    for line in content.lines() {
+        if let Some(log_path_str) = line.strip_prefix("Log: ") {
+            let log_path = PathBuf::from(log_path_str.trim());
+            log_paths.push(log_path);
+        }
+    }
+
+    log::info!("Found {} log paths in problem report:", log_paths.len());
+    for path in &log_paths {
+        log::info!("- {}", path.display());
+    }
+
+    //
+    // Ensure we find expected log files
+    //
+
+    let found_filenames = log_paths
+        .iter()
+        // Take the part of `path` that follows its last `/` or `\` (i.e., its filename).
+        // Since this path is for the guest runner, we cannot use `file_name` here.
+        // It likely won't even exist on the host, and the host OS may differ.
+        .filter_map(|path| path.to_str().and_then(|s| s.rsplit(['\\', '/']).next()))
+        .collect::<Vec<_>>();
+
+    // Files that should be present if we have installed the daemon and started the UI
+    // at least once.
+    // NOTE: Not looking for *.old.log files because they may not be present
+    // NOTE: Not looking for early-boot-fw.log because we may not have rebooted
+    let mut required_filenames = vec!["daemon.log", "frontend-renderer.log", "frontend-main.log"];
+
+    if TEST_CONFIG.os == Os::Windows {
+        required_filenames.push("install.log");
+    }
+
+    for expected_filename in required_filenames {
+        let found = found_filenames.contains(&expected_filename);
+        ensure!(
+            found,
+            "Expected log file '{}' not found in problem report",
+            expected_filename
+        );
+    }
 
     Ok(())
 }

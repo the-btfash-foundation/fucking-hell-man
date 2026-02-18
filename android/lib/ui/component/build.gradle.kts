@@ -1,0 +1,36 @@
+plugins {
+    alias(libs.plugins.mullvad.android.library)
+    alias(libs.plugins.compose)
+    alias(libs.plugins.kotlin.parcelize)
+}
+
+android {
+    namespace = "net.mullvad.mullvadvpn.lib.ui.component"
+
+    buildFeatures { compose = true }
+
+    kotlin { compilerOptions { freeCompilerArgs.add("-XXLanguage:+WhenGuards") } }
+}
+
+dependencies {
+    implementation(projects.lib.common)
+    implementation(projects.lib.model)
+    implementation(projects.lib.ui.designsystem)
+    implementation(projects.lib.ui.resource)
+    implementation(projects.lib.ui.tag)
+    implementation(projects.lib.ui.theme)
+    implementation(projects.lib.ui.util)
+
+    implementation(libs.compose.material3)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.ui.tooling)
+    implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.compose.constrainlayout)
+    implementation(libs.kermit)
+    implementation(libs.kotlin.stdlib)
+    implementation(libs.compose.icons.extended)
+    implementation(libs.androidx.ktx)
+    implementation(libs.androidx.animation)
+
+    implementation(libs.accompanist.drawablepainter)
+}

@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 09/01/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadLogging
@@ -30,22 +30,44 @@ enum SettingsNavigationRoute: Equatable {
     /// API access route.
     case apiAccess
 
+    /// changelog route.
+    case changelog
+
     /// Multihop route.
     case multihop
 
     /// DAITA route.
     case daita
+
+    /// Language route.
+    case language
+
+    /// Notification settings route.
+    case notificationSettings
+
+    /// IAN route.
+    case includeAllNetworks
 }
 
 /// Top-level settings coordinator.
 final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsViewControllerDelegate,
-    UINavigationControllerDelegate {
+    UINavigationControllerDelegate, Sendable
+{
     private let logger = Logger(label: "SettingsNavigationCoordinator")
 
     private var currentRoute: SettingsNavigationRoute?
-    private var modalRoute: SettingsNavigationRoute?
+    nonisolated(unsafe) private var modalRoute: SettingsNavigationRoute?
     private let interactorFactory: SettingsInteractorFactory
     private var viewControllerFactory: SettingsViewControllerFactory?
+    private var alertPresenter: AlertPresenter?
+    var didUpdateNotificationSettings: ((NotificationSettings) -> Void)? {
+        didSet {
+            viewControllerFactory?.didUpdateNotificationSettings = { [weak self] newValue in
+                guard let self else { return }
+                didUpdateNotificationSettings?(newValue)
+            }
+        }
+    }
 
     let navigationController: UINavigationController
 
@@ -54,14 +76,17 @@ final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsV
     }
 
     /// Event handler invoked when navigating bebtween child routes within the horizontal stack.
-    var willNavigate: ((
-        _ coordinator: SettingsCoordinator,
-        _ from: SettingsNavigationRoute?,
-        _ to: SettingsNavigationRoute
-    ) -> Void)?
+    var willNavigate:
+        (
+            (
+                _ coordinator: SettingsCoordinator,
+                _ from: SettingsNavigationRoute?,
+                _ to: SettingsNavigationRoute
+            ) -> Void
+        )?
 
     /// Event handler invoked when coordinator and its view hierarchy should be dismissed.
-    var didFinish: ((SettingsCoordinator) -> Void)?
+    nonisolated(unsafe) var didFinish: (@Sendable (SettingsCoordinator) -> Void)?
 
     /// Designated initializer.
     /// - Parameters:
@@ -72,12 +97,15 @@ final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsV
         interactorFactory: SettingsInteractorFactory,
         accessMethodRepository: AccessMethodRepositoryProtocol,
         proxyConfigurationTester: ProxyConfigurationTesterProtocol,
-        ipOverrideRepository: IPOverrideRepository
+        ipOverrideRepository: IPOverrideRepository,
+        appPreferences: AppPreferencesDataSource
     ) {
         self.navigationController = navigationController
         self.interactorFactory = interactorFactory
 
         super.init()
+
+        alertPresenter = AlertPresenter(context: self)
 
         viewControllerFactory = SettingsViewControllerFactory(
             interactorFactory: interactorFactory,
@@ -85,7 +113,8 @@ final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsV
             proxyConfigurationTester: proxyConfigurationTester,
             ipOverrideRepository: ipOverrideRepository,
             navigationController: navigationController,
-            alertPresenter: AlertPresenter(context: self)
+            alertPresenter: AlertPresenter(context: self),
+            appPreferences: appPreferences
         )
     }
 
@@ -103,13 +132,17 @@ final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsV
 
     // MARK: - Navigation
 
-    /// Request navigation to the speciifc route.
+    /// Request navigation to the specific route.
     ///
     /// - Parameters:
     ///   - route: the route to present.
     ///   - animated: whether transition should be animated.
     ///   - completion: a completion handler, typically called immediately for horizontal navigation and
-    func navigate(to route: SettingsNavigationRoute, animated: Bool, completion: (() -> Void)? = nil) {
+    func navigate(
+        to route: SettingsNavigationRoute,
+        animated: Bool,
+        completion: (@Sendable @MainActor () -> Void)? = nil
+    ) {
         switch route {
         case .root:
             popToRoot(animated: animated)
@@ -125,13 +158,25 @@ final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsV
 
             logger.debug("Show modal \(route)")
 
-            let safariCoordinator = SafariCoordinator(url: ApplicationConfiguration.faqAndGuidesURL)
+            let safariCoordinator = SafariCoordinator(
+                url: ApplicationConfiguration.faqAndGuidesURL(for: ApplicationLanguage.currentLanguage.id))
 
             safariCoordinator.didFinish = { [weak self] in
                 self?.modalRoute = nil
             }
 
             presentChild(safariCoordinator, animated: animated, completion: completion)
+
+        case .language:
+            logger.debug("Show App's settings for \(route)")
+
+            showDisconnectWarningAlert {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    if UIApplication.shared.canOpenURL(url) {
+                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                    }
+                }
+            }
 
         default:
             // Ignore navigation if the route is already presented.
@@ -180,17 +225,49 @@ final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsV
         }
     }
 
+    private func showDisconnectWarningAlert(completion: @escaping () -> Void) {
+        // Show alert if network is down or tunnel is not secured.
+        guard
+            interactorFactory.tunnelManager.tunnelStatus.state != .error(.offline)
+                && interactorFactory.tunnelManager.tunnelStatus.state.isSecured
+        else {
+            completion()
+            return
+        }
+
+        let presentation = AlertPresentation(
+            id: "settings-disconnect-warning-alert",
+            icon: .alert,
+            message: .Alerts.disconnectWarning(action: "changing", feature: "language"),
+            buttons: [
+                AlertAction(
+                    title: NSLocalizedString("Cancel", comment: ""),
+                    style: .default
+                ),
+                AlertAction(
+                    title: NSLocalizedString("Yes, continue", comment: ""),
+                    style: .destructive,
+                    handler: completion
+                ),
+            ]
+        )
+
+        alertPresenter?.showAlert(presentation: presentation, animated: true)
+    }
+
     // MARK: - SettingsViewControllerDelegate
 
-    func settingsViewControllerDidFinish(_ controller: SettingsViewController) {
+    nonisolated func settingsViewControllerDidFinish(_ controller: SettingsViewController) {
         didFinish?(self)
     }
 
-    func settingsViewController(
+    nonisolated func settingsViewController(
         _ controller: SettingsViewController,
         didRequestRoutePresentation route: SettingsNavigationRoute
     ) {
-        navigate(to: route, animated: true)
+        Task {
+            await navigate(to: route, animated: true)
+        }
     }
 
     // MARK: - Route handling
@@ -237,8 +314,7 @@ final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsV
     private func makeChild(for route: SettingsNavigationRoute) -> SettingsViewControllerFactory.MakeChildResult {
         if route == .root {
             let controller = SettingsViewController(
-                interactor: interactorFactory.makeSettingsInteractor(),
-                alertPresenter: AlertPresenter(context: self)
+                interactor: interactorFactory.makeSettingsInteractor()
             )
             controller.delegate = self
             return .viewController(controller)
@@ -258,7 +334,7 @@ final class SettingsCoordinator: Coordinator, Presentable, Presenting, SettingsV
             return .vpnSettings
         case is ProblemReportViewController:
             return .problemReport
-        case is ListAccessMethodViewController:
+        case is UIHostingController<ListAccessMethodView<ListAccessViewModelBridge>>:
             return .apiAccess
         default:
             return nil

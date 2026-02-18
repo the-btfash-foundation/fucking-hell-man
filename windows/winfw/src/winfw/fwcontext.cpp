@@ -14,12 +14,11 @@
 #include "rules/baseline/permitvpntunnel.h"
 #include "rules/baseline/permitvpntunnelservice.h"
 #include "rules/baseline/permitdns.h"
-#include "rules/baseline/permitendpoint.h"
 #include "rules/dns/blockall.h"
 #include "rules/dns/permitloopback.h"
 #include "rules/dns/permittunnel.h"
 #include "rules/dns/permitnontunnel.h"
-#include "rules/multi/permitvpnrelay.h"
+#include "rules/multi/permitendpoint.h"
 #include <libwfp/transaction.h>
 #include <libwfp/filterengine.h>
 #include <libcommon/error.h>
@@ -40,11 +39,11 @@ namespace
 // it in the DNS sublayer instead. The PermitDNS rule in the baseline sublayer accomplishes this.
 //
 // This has implications for the way the relay access is configured. In the regular case there
-// is no issue: The PermitVpnRelay rule can be installed in the baseline sublayer.
+// is no issue: The PermitEndpoint rule can be installed in the baseline sublayer.
 //
 // However, if the relay is running on the DNS port (53), it would be blocked unless the DNS
 // sublayer permits this traffic. For this reason, whenever the relay is on port 53, the
-// PermitVpnRelay rule has to be installed to the DNS sublayer instead of the baseline sublayer.
+// PermitEndpoint rule has to be installed to the DNS sublayer instead of the baseline sublayer.
 //
 void AppendSettingsRules
 (
@@ -87,11 +86,11 @@ void AppendRelayRules
 	auto sublayer =
 	(
 		DNS_SERVER_PORT == relay.port
-		? rules::multi::PermitVpnRelay::Sublayer::Dns
-		: rules::multi::PermitVpnRelay::Sublayer::Baseline
+		? rules::multi::PermitEndpoint::Sublayer::Dns
+		: rules::multi::PermitEndpoint::Sublayer::Baseline
 	);
 
-	ruleset.emplace_back(std::make_unique<multi::PermitVpnRelay>(
+	ruleset.emplace_back(std::make_unique<multi::PermitEndpoint>(
 		wfp::IpAddress(relay.ip),
 		relay.port,
 		relay.protocol,
@@ -115,11 +114,19 @@ void AppendAllowedEndpointRules
 		clients.push_back(endpoint.clients[i]);
 	}
 
-	ruleset.emplace_back(std::make_unique<baseline::PermitEndpoint>(
+	auto sublayer =
+	(
+		DNS_SERVER_PORT == endpoint.endpoint.port
+		? rules::multi::PermitEndpoint::Sublayer::Dns
+		: rules::multi::PermitEndpoint::Sublayer::Baseline
+	);
+
+	ruleset.emplace_back(std::make_unique<multi::PermitEndpoint>(
 		wfp::IpAddress(endpoint.endpoint.ip),
-		clients,
 		endpoint.endpoint.port,
-		endpoint.endpoint.protocol
+		endpoint.endpoint.protocol,
+		clients,
+		sublayer
 	));
 }
 
@@ -184,7 +191,8 @@ FwContext::FwContext
 bool FwContext::applyPolicyConnecting
 (
 	const WinFwSettings &settings,
-	const WinFwEndpoint &relay,
+	const std::vector<WinFwEndpoint> &relays,
+	const std::optional<wfp::IpAddress> &exitEndpointIp,
 	const std::vector<std::wstring> &relayClients,
 	const std::optional<std::wstring> &tunnelInterfaceAlias,
 	const std::optional<WinFwAllowedEndpoint> &allowedEndpoint,
@@ -195,7 +203,11 @@ bool FwContext::applyPolicyConnecting
 
 	AppendNetBlockedRules(ruleset);
 	AppendSettingsRules(ruleset, settings);
-	AppendRelayRules(ruleset, relay, relayClients);
+
+	for (const auto &relay : relays)
+	{
+		AppendRelayRules(ruleset, relay, relayClients);
+	}
 
 	if (allowedEndpoint.has_value())
 	{
@@ -209,12 +221,16 @@ bool FwContext::applyPolicyConnecting
 			case WinFwAllowedTunnelTrafficType::All:
 			{
 				ruleset.emplace_back(std::make_unique<baseline::PermitVpnTunnel>(
+					relayClients,
 					*tunnelInterfaceAlias,
-					std::nullopt
+					std::nullopt,
+					exitEndpointIp
 				));
 				ruleset.emplace_back(std::make_unique<baseline::PermitVpnTunnelService>(
+					relayClients,
 					*tunnelInterfaceAlias,
-					std::nullopt
+					std::nullopt,
+					exitEndpointIp
 				));
 				break;
 			}
@@ -229,12 +245,16 @@ bool FwContext::applyPolicyConnecting
 						std::nullopt,
 				});
 				ruleset.emplace_back(std::make_unique<baseline::PermitVpnTunnel>(
+					relayClients,
 					*tunnelInterfaceAlias,
-					onlyEndpoint
+					onlyEndpoint,
+					exitEndpointIp
 				));
 				ruleset.emplace_back(std::make_unique<baseline::PermitVpnTunnelService>(
+					relayClients,
 					*tunnelInterfaceAlias,
-					onlyEndpoint
+					onlyEndpoint,
+					exitEndpointIp
 				));
 				break;
 			}
@@ -253,12 +273,16 @@ bool FwContext::applyPolicyConnecting
 								})
 				});
 				ruleset.emplace_back(std::make_unique<baseline::PermitVpnTunnel>(
+							relayClients,
 							*tunnelInterfaceAlias,
-							endpoints
+							endpoints,
+							exitEndpointIp
 							));
 				ruleset.emplace_back(std::make_unique<baseline::PermitVpnTunnelService>(
+							relayClients,
 							*tunnelInterfaceAlias,
-							endpoints
+							endpoints,
+							exitEndpointIp
 							));
 				break;
 			}
@@ -279,8 +303,9 @@ bool FwContext::applyPolicyConnecting
 bool FwContext::applyPolicyConnected
 (
 	const WinFwSettings &settings,
-	const WinFwEndpoint &relay,
-	const std::vector<std::wstring> &relayClient,
+	const std::vector<WinFwEndpoint> &relays,
+	const std::optional<wfp::IpAddress> &exitEndpointIp,
+	const std::vector<std::wstring> &relayClients,
 	const std::wstring &tunnelInterfaceAlias,
 	const std::vector<wfp::IpAddress> &tunnelDnsServers,
 	const std::vector<wfp::IpAddress> &nonTunnelDnsServers
@@ -290,7 +315,11 @@ bool FwContext::applyPolicyConnected
 
 	AppendNetBlockedRules(ruleset);
 	AppendSettingsRules(ruleset, settings);
-	AppendRelayRules(ruleset, relay, relayClient);
+
+	for (const auto &relay : relays)
+	{
+		AppendRelayRules(ruleset, relay, relayClients);
+	}
 
 	if (!tunnelDnsServers.empty())
 	{
@@ -306,13 +335,17 @@ bool FwContext::applyPolicyConnected
 	}
 
 	ruleset.emplace_back(std::make_unique<baseline::PermitVpnTunnel>(
+		relayClients,
 		tunnelInterfaceAlias,
-		std::nullopt
+		std::nullopt,
+		exitEndpointIp
 	));
 
 	ruleset.emplace_back(std::make_unique<baseline::PermitVpnTunnelService>(
+		relayClients,
 		tunnelInterfaceAlias,
-		std::nullopt
+		std::nullopt,
+		exitEndpointIp
 	));
 
 	const auto status = applyRuleset(ruleset);

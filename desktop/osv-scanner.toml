@@ -1,25 +1,25 @@
 # See repository root `osv-scanner.toml` for instructions and rules for this file.
 
-# PostCSS line return parsing error
-[[IgnoredVulns]]
-id = "CVE-2023-44270" # GHSA-7fh5-64p2-3v2j
-ignoreUntil = 2025-03-05
-reason = "This project does not use PostCSS to parse untrusted CSS"
-
-# braces: Uncontrolled resource consumption
-[[IgnoredVulns]]
-id = "CVE-2024-4068" # GHSA-grv7-fg5c-xmjg
-ignoreUntil = 2025-03-05
-reason = "This package is only used to match paths from either us or trusted libraries"
-
-# micromatch (dev): Regular Expression Denial of Service (ReDoS) in micromatch
-[[IgnoredVulns]]
-id = "CVE-2024-4067" # GHSA-952p-6rrq-rcjv
-ignoreUntil = 2025-02-23
-reason = "This is just a dev dependency, and we don't have untrusted input to micromatch there"
-
 # node-gettext: Prototype Pullution via the addTranslations function
 [[IgnoredVulns]]
-id = "CVE-2024-21528" # GHSA-g974-hxvm-x689
-ignoreUntil = 2025-01-17
+id = "CVE-2024-21528"  # GHSA-g974-hxvm-x689
+ignoreUntil = 2026-04-16  # The vulnerability is ignored for 6 months as the affected library is not receiving updates and we can not patch the vulnerability without migrating to another library, which is no minor feat.
 reason = "There is no fix yet and we don't send untrusted input to the first argument of addTranslations"
+
+# tar: node-tar is Vulnerable to Arbitrary File Overwrite and Symlink Poisoning via Insufficient Path Sanitization
+[[IgnoredVulns]]
+id = "CVE-2026-23745"  # GHSA-8qq5-rm4j-mr97
+ignoreUntil = 2026-02-24
+reason = "The vulnerable tar dependency does not handle arbitrary tar files as it is only used by grpc-tools. Unless the files uploaded by the grpc-tools team to node-precompiled-binaries.grpc.io are compromised an attack is not possible."
+
+# tar: Race Condition in node-tar Path Reservations via Unicode Ligature Collisions on macOS APFS
+[[IgnoredVulns]]
+id = "CVE-2026-23950"  # GHSA-r6q2-hw4h-h46w
+ignoreUntil = 2026-02-24
+reason = "The vulnerable tar dependency does not handle arbitrary tar files as it is only used by grpc-tools. Unless the files uploaded by the grpc-tools team to node-precompiled-binaries.grpc.io are compromised an attack is not possible."
+
+# tar: node-tar Vulnerable to Arbitrary File Creation/Overwrite via Hardlink Path Traversal
+[[IgnoredVulns]]
+id = "CVE-2026-24842"  # GHSA-34x7-hfp2-rc4v
+ignoreUntil = 2026-02-24
+reason = "The vulnerable tar dependency does not handle arbitrary tar files as it is only used by grpc-tools. Unless the files uploaded by the grpc-tools team to node-precompiled-binaries.grpc.io are compromised an attack is not possible."

@@ -3,7 +3,7 @@
 //  PacketTunnel
 //
 //  Created by pronebird on 30/08/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
@@ -27,7 +27,7 @@ struct SettingsReader: SettingsReaderProtocol {
 private extension DeviceState {
     /**
      Returns `StoredDeviceState` if device is logged in, otherwise throws an error.
-
+    
      - Throws: an error of type `ReadDeviceDataError` when device is either revoked or logged out.
      - Returns: a copy of `StoredDeviceData` stored as associated value in `DeviceState.loggedIn` variant.
      */

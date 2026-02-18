@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 17/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import UIKit
@@ -22,8 +22,14 @@ struct ButtonCellContentConfiguration: UIContentConfiguration, Equatable {
     /// Primary action for button.
     var primaryAction: UIAction?
 
+    /// Style for displayed text.
+    var textProperties = TextProperties()
+
     /// The button content edge insets.
-    var directionalContentEdgeInsets: NSDirectionalEdgeInsets = UIMetrics.SettingsCell.insetLayoutMargins
+    var directionalLayoutMargins: NSDirectionalEdgeInsets = UIMetrics.SettingsCell.defaultLayoutMargins
+
+    // Accessibility identifier.
+    var accessibilityIdentifier: AccessibilityIdentifier?
 
     func makeContentView() -> UIView & UIContentView {
         return ButtonCellContentView(configuration: self)
@@ -36,7 +42,7 @@ struct ButtonCellContentConfiguration: UIContentConfiguration, Equatable {
 
 extension ButtonCellContentConfiguration {
     struct TextProperties: Equatable {
-        var font = UIFont.systemFont(ofSize: 17)
+        var font = UIFont.mullvadSmallSemiBold
         var color = UIColor.Cell.titleTextColor
     }
 }

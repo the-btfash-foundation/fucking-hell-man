@@ -3,13 +3,15 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 14/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
+import MullvadTypes
 import UIKit
 
 /// Type implementing the shadowsocks cipher picker.
+@MainActor
 struct ShadowsocksCipherPicker {
     /// The navigation controller used for presenting the picker.
     let navigationController: UINavigationController
@@ -24,12 +26,7 @@ struct ShadowsocksCipherPicker {
         let dataSource = ShadowsocksCipherPickerDataSource()
         let controller = ListItemPickerViewController(dataSource: dataSource, selectedItemID: currentValue)
 
-        controller.navigationItem.title = NSLocalizedString(
-            "SELECT_SHADOWSOCKS_CIPHER_NAV_TITLE",
-            tableName: "APIAccess",
-            value: "Cipher",
-            comment: ""
-        )
+        controller.navigationItem.title = NSLocalizedString("Cipher", comment: "")
 
         controller.onSelect = { selectedItem in
             navigationController.popViewController(animated: true)

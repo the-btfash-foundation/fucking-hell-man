@@ -1,9 +1,9 @@
-use crate::tests::helpers::{login_with_retries, THROTTLE_RETRY_DELAY};
+use crate::tests::helpers::{THROTTLE_RETRY_DELAY, login_with_retries};
 
-use super::{config::TEST_CONFIG, helpers, ui, Error, TestContext};
+use super::{Error, TestContext, config::TEST_CONFIG, helpers, ui};
 use anyhow::Context;
 use mullvad_api::DevicesProxy;
-use mullvad_management_interface::{client::DaemonEvent, MullvadProxyClient};
+use mullvad_management_interface::{MullvadProxyClient, client::DaemonEvent};
 use mullvad_types::{
     device::{Device, DeviceState},
     states::TunnelState,
@@ -24,7 +24,7 @@ pub async fn test_logout(
     log::info!("Removing device");
 
     mullvad_client
-        .logout_account()
+        .logout_account("test-manager")
         .await
         .expect("logout failed");
 
@@ -83,7 +83,7 @@ pub async fn test_too_many_devices(
         "Expected too many devices error, got {login_result:?}"
     );
 
-    mullvad_client.logout_account().await?;
+    mullvad_client.logout_account("test-manager").await?;
     fill_devices().await;
 
     // Run UI test
@@ -278,7 +278,7 @@ pub async fn clear_devices(device_client: &DevicesProxy) -> anyhow::Result<()> {
 }
 
 pub async fn new_device_client() -> anyhow::Result<DevicesProxy> {
-    use mullvad_api::{proxy::ApiConnectionMode, ApiEndpoint};
+    use mullvad_api::{ApiEndpoint, proxy::ApiConnectionMode};
 
     let api_host = format!("api.{}", TEST_CONFIG.mullvad_host);
 

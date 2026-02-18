@@ -3,11 +3,12 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 21/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Combine
 import MullvadSettings
+import MullvadTypes
 import Routing
 import UIKit
 
@@ -57,7 +58,7 @@ class EditAccessMethodCoordinator: Coordinator, Presenting {
     }
 }
 
-extension EditAccessMethodCoordinator: EditAccessMethodViewControllerDelegate {
+extension EditAccessMethodCoordinator: @preconcurrency EditAccessMethodViewControllerDelegate {
     func controllerShouldShowMethodSettings(_ controller: EditAccessMethodViewController) {
         methodSettingsSubject = getViewModelSubjectFromStore()
 
@@ -73,26 +74,11 @@ extension EditAccessMethodCoordinator: EditAccessMethodViewControllerDelegate {
             alertPresenter: AlertPresenter(context: self)
         )
 
-        controller.navigationItem.prompt = NSLocalizedString(
-            "METHOD_SETTINGS_NAVIGATION_ADD_PROMPT",
-            tableName: "APIAccess",
-            value: "The app will test the method before saving.",
-            comment: ""
-        )
+        controller.navigationItem.prompt = NSLocalizedString("The app will test the method before saving.", comment: "")
 
-        controller.navigationItem.title = NSLocalizedString(
-            "METHOD_SETTINGS_NAVIGATION_ADD_TITLE",
-            tableName: "APIAccess",
-            value: "Method settings",
-            comment: ""
-        )
+        controller.navigationItem.title = NSLocalizedString("Edit method", comment: "")
 
-        controller.saveBarButton.title = NSLocalizedString(
-            "METHOD_SETTINGS_NAVIGATION_ADD_BUTTON",
-            tableName: "APIAccess",
-            value: "Save",
-            comment: ""
-        )
+        controller.saveBarButton.title = NSLocalizedString("Save", comment: "")
 
         controller.delegate = self
 
@@ -127,7 +113,7 @@ extension EditAccessMethodCoordinator: EditAccessMethodViewControllerDelegate {
     }
 }
 
-extension EditAccessMethodCoordinator: MethodSettingsViewControllerDelegate {
+extension EditAccessMethodCoordinator: @preconcurrency MethodSettingsViewControllerDelegate {
     func accessMethodDidSave(_ accessMethod: PersistentAccessMethod) {
         editAccessMethodSubject.value = accessMethod.toViewModel()
         navigationController.popViewController(animated: true)

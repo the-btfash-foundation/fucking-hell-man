@@ -3,7 +3,7 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 11/10/2021.
-//  Copyright © 2021 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import MullvadSettings
@@ -41,21 +41,16 @@ enum CustomDNSPrecondition {
             if isEditing {
                 return NSAttributedString(
                     string: NSLocalizedString(
-                        "CUSTOM_DNS_NO_DNS_ENTRIES_EDITING_ON_FOOTNOTE",
-                        tableName: "VPNSettings",
-                        value: "To enable this setting, add at least one server.",
-                        comment: "Foot note displayed if there are no DNS entries and table view is in editing mode."
+                        "To enable this setting, add at least one server.",
+                        comment: ""
                     ),
                     attributes: [.font: preferredFont]
                 )
             } else {
                 return NSAttributedString(
                     markdownString: NSLocalizedString(
-                        "CUSTOM_DNS_NO_DNS_ENTRIES_EDITING_OFF_FOOTNOTE",
-                        tableName: "VPNSettings",
-                        value: "Tap **Edit** to add at least one DNS server.",
-                        comment:
-                        "Foot note displayed if there are no DNS entries, but table view is not in editing mode."
+                        "Tap **Edit** to add at least one DNS server.",
+                        comment: ""
                     ),
                     options: MarkdownStylingOptions(font: preferredFont)
                 )
@@ -63,15 +58,11 @@ enum CustomDNSPrecondition {
 
         case .conflictsWithOtherSettings:
             return NSAttributedString(
-                string: NSLocalizedString(
-                    "CUSTOM_DNS_DISABLE_CONTENT_BLOCKERS_FOOTNOTE",
-                    tableName: "VPNSettings",
-                    value: "Disable all content blockers to activate this setting.",
-                    comment: """
-                    Foot note displayed when custom DNS cannot be enabled, because content blockers should be \
-                    disabled first.
-                    """
-                ),
+                string: String(
+                    format: NSLocalizedString(
+                        "Disable all \"%@\" above to activate this setting.",
+                        comment: ""
+                    ), "DNS content blockers"),
                 attributes: [.font: preferredFont]
             )
         }
@@ -102,6 +93,7 @@ struct VPNSettingsViewModel: Equatable {
 
     private(set) var quantumResistance: TunnelQuantumResistance
     private(set) var multihopState: MultihopState
+    private(set) var includeAllNetworks: IncludeAllNetworksSettings
 
     static let defaultWireGuardPorts: [UInt16] = [51820, 53]
 
@@ -195,10 +187,17 @@ struct VPNSettingsViewModel: Equatable {
         multihopState = newState
     }
 
+    mutating func setIncludeAllNetworks(_ newState: Bool) {
+        includeAllNetworks.includeAllNetworksState = newState ? .on : .off
+    }
+
+    mutating func setLocalNetworkSharing(_ newState: Bool) {
+        includeAllNetworks.localNetworkSharingState = newState ? .on : .off
+    }
+
     /// Precondition for enabling Custom DNS.
     var customDNSPrecondition: CustomDNSPrecondition {
-        if blockAdvertising || blockTracking || blockMalware ||
-            blockAdultContent || blockGambling || blockSocialMedia {
+        if blockAdvertising || blockTracking || blockMalware || blockAdultContent || blockGambling || blockSocialMedia {
             return .conflictsWithOtherSettings
         } else {
             let hasValidDNSDomains = customDNSDomains.contains { entry in
@@ -233,7 +232,8 @@ struct VPNSettingsViewModel: Equatable {
         blockAdultContent = dnsSettings.blockingOptions.contains(.blockAdultContent)
         blockGambling = dnsSettings.blockingOptions.contains(.blockGambling)
         blockSocialMedia = dnsSettings.blockingOptions.contains(.blockSocialMedia)
-        blockAll = blockAdvertising
+        blockAll =
+            blockAdvertising
             && blockTracking
             && blockMalware
             && blockAdultContent
@@ -252,6 +252,8 @@ struct VPNSettingsViewModel: Equatable {
 
         quantumResistance = tunnelSettings.tunnelQuantumResistance
         multihopState = tunnelSettings.tunnelMultihopState
+
+        includeAllNetworks = tunnelSettings.includeAllNetworks
     }
 
     /// Produce merged view model, keeping entry `identifier` for matching DNS entries and
@@ -350,7 +352,7 @@ struct VPNSettingsViewModel: Equatable {
     func isPortWithinValidWireGuardRanges(_ port: UInt16) -> Bool {
         availableWireGuardPortRanges.contains { range in
             if let minPort = range.first, let maxPort = range.last {
-                return (minPort ... maxPort).contains(port)
+                return (minPort...maxPort).contains(port)
             }
 
             return false

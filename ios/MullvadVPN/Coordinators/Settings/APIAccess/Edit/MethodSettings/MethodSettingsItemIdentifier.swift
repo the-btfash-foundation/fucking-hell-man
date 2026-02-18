@@ -3,10 +3,11 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 22/11/2023.
-//  Copyright © 2023 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
+import MullvadTypes
 
 enum MethodSettingsItemIdentifier: Hashable {
     case name
@@ -70,13 +71,13 @@ enum MethodSettingsItemIdentifier: Hashable {
     var text: String? {
         switch self {
         case .name:
-            NSLocalizedString("NAME", tableName: "APIAccess", value: "Name", comment: "")
+            NSLocalizedString("Name", comment: "")
         case .protocol:
-            NSLocalizedString("TYPE", tableName: "APIAccess", value: "Type", comment: "")
+            NSLocalizedString("Type", comment: "")
         case .proxyConfiguration, .validationError:
             nil
         case .cancelTest:
-            NSLocalizedString("CANCEL_TEST", tableName: "APIAccess", value: "Cancel", comment: "")
+            NSLocalizedString("Cancel", comment: "")
         case .testingStatus:
             nil
         }

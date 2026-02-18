@@ -1,18 +1,20 @@
 import * as grpc from '@grpc/grpc-js';
 import { Empty } from 'google-protobuf/google/protobuf/empty_pb.js';
 import { BoolValue, StringValue } from 'google-protobuf/google/protobuf/wrappers_pb.js';
+import { types as grpcTypes } from 'management-interface';
 
 import {
+  AccessMethodExistsError,
   AccessMethodSetting,
   AccountDataError,
   AccountDataResponse,
   AccountNumber,
-  BridgeSettings,
-  BridgeState,
   CustomListError,
   CustomProxy,
+  DaemonAppUpgradeEvent,
   DaemonEvent,
   DeviceState,
+  DisconnectSource,
   IAppVersionInfo,
   ICustomList,
   IDevice,
@@ -20,7 +22,9 @@ import {
   IDnsOptions,
   IRelayListWithEndpointData,
   ISettings,
+  LogoutSource,
   NewAccessMethodSetting,
+  NewCustomList,
   ObfuscationSettings,
   ObfuscationType,
   RelaySettings,
@@ -30,6 +34,8 @@ import {
 import { ConnectionObserver, GrpcClient, noConnectionError } from './grpc-client';
 import {
   convertFromApiAccessMethodSetting,
+  convertFromAppUpgradeEvent,
+  convertFromAppVersionInfo,
   convertFromDaemonEvent,
   convertFromDevice,
   convertFromDeviceState,
@@ -40,14 +46,13 @@ import {
   convertToCustomList,
   convertToCustomProxy,
   convertToNewApiAccessMethodSetting,
-  convertToNormalBridgeSettings,
+  convertToNewCustomList,
   convertToRelayConstraints,
   ensureExists,
 } from './grpc-type-convertions';
-import * as grpcTypes from './management_interface/management_interface_pb';
 
 const DAEMON_RPC_PATH =
-  process.platform === 'win32' ? 'unix:////./pipe/Mullvad VPN' : 'unix:///var/run/mullvad-vpn';
+  process.platform === 'win32' ? '//./pipe/Mullvad VPN' : '/var/run/mullvad-vpn';
 
 export class SubscriptionListener<T> {
   // Only meant to be used by DaemonRpc
@@ -74,7 +79,10 @@ export class SubscriptionListener<T> {
 
 export class DaemonRpc extends GrpcClient {
   private nextSubscriptionId = 0;
-  private subscriptions: Map<number, grpc.ClientReadableStream<grpcTypes.DaemonEvent>> = new Map();
+  private subscriptions: Map<
+    number,
+    grpc.ClientReadableStream<grpcTypes.DaemonEvent | grpcTypes.AppUpgradeEvent>
+  > = new Map();
 
   public constructor(connectionObserver?: ConnectionObserver) {
     super(DAEMON_RPC_PATH, connectionObserver);
@@ -86,6 +94,51 @@ export class DaemonRpc extends GrpcClient {
     }
 
     super.disconnect();
+  }
+
+  public subscribeAppUpgradeEventListener(listener: SubscriptionListener<DaemonAppUpgradeEvent>) {
+    const call = this.isConnected && this.client.appUpgradeEventsListen(new Empty());
+    if (!call) {
+      throw noConnectionError;
+    }
+    const subscriptionId = this.subscriptionId();
+    listener.subscriptionId = subscriptionId;
+    this.subscriptions.set(subscriptionId, call);
+
+    call.on('data', (data: grpcTypes.AppUpgradeEvent) => {
+      try {
+        const appUpgradeEvent = convertFromAppUpgradeEvent(data);
+        listener.onEvent(appUpgradeEvent);
+      } catch (e) {
+        const error = e as Error;
+        listener.onError(error);
+      }
+    });
+
+    call.on('error', (error) => {
+      listener.onError(error);
+      this.removeSubscription(subscriptionId);
+    });
+  }
+
+  public appUpgrade() {
+    void this.callEmpty(this.client.appUpgrade);
+  }
+
+  public appUpgradeAbort() {
+    void this.callEmpty(this.client.appUpgradeAbort);
+  }
+
+  public async getAppUpgradeCacheDir(): Promise<string> {
+    const response = await this.callEmpty<StringValue>(this.client.getAppUpgradeCacheDir);
+    return response.getValue();
+  }
+
+  public unsubscribeAppUpgradeEventListener(listener: SubscriptionListener<DaemonAppUpgradeEvent>) {
+    const id = listener.subscriptionId;
+    if (id !== undefined) {
+      this.removeSubscription(id);
+    }
   }
 
   public subscribeDaemonEventListener(listener: SubscriptionListener<DaemonEvent>) {
@@ -213,8 +266,9 @@ export class DaemonRpc extends GrpcClient {
     }
   }
 
-  public async logoutAccount(): Promise<void> {
-    await this.callEmpty(this.client.logoutAccount);
+  public async logoutAccount(source: LogoutSource): Promise<void> {
+    const prefixedSource = `desktop ${source}`;
+    await this.callString(this.client.logoutAccount, prefixedSource);
   }
 
   // TODO: Custom tunnel configurations are not supported by the GUI.
@@ -243,43 +297,8 @@ export class DaemonRpc extends GrpcClient {
     await this.callBool(this.client.setEnableIpv6, enableIpv6);
   }
 
-  public async setBlockWhenDisconnected(blockWhenDisconnected: boolean): Promise<void> {
-    await this.callBool(this.client.setBlockWhenDisconnected, blockWhenDisconnected);
-  }
-
-  public async setBridgeState(bridgeState: BridgeState): Promise<void> {
-    const bridgeStateMap = {
-      auto: grpcTypes.BridgeState.State.AUTO,
-      on: grpcTypes.BridgeState.State.ON,
-      off: grpcTypes.BridgeState.State.OFF,
-    };
-
-    const grpcBridgeState = new grpcTypes.BridgeState();
-    grpcBridgeState.setState(bridgeStateMap[bridgeState]);
-    await this.call<grpcTypes.BridgeState, Empty>(this.client.setBridgeState, grpcBridgeState);
-  }
-
-  public async setBridgeSettings(bridgeSettings: BridgeSettings): Promise<void> {
-    const grpcBridgeSettings = new grpcTypes.BridgeSettings();
-
-    grpcBridgeSettings.setBridgeType(
-      bridgeSettings.type === 'normal'
-        ? grpcTypes.BridgeSettings.BridgeType.NORMAL
-        : grpcTypes.BridgeSettings.BridgeType.CUSTOM,
-    );
-
-    const normalSettings = convertToNormalBridgeSettings(bridgeSettings.normal);
-    grpcBridgeSettings.setNormal(normalSettings);
-
-    if (bridgeSettings.custom) {
-      const customProxy = convertToCustomProxy(bridgeSettings.custom);
-      grpcBridgeSettings.setCustom(customProxy);
-    }
-
-    await this.call<grpcTypes.BridgeSettings, Empty>(
-      this.client.setBridgeSettings,
-      grpcBridgeSettings,
-    );
+  public async setLockdownMode(lockdownMode: boolean): Promise<void> {
+    await this.callBool(this.client.setLockdownMode, lockdownMode);
   }
 
   public async setObfuscationSettings(obfuscationSettings: ObfuscationSettings): Promise<void> {
@@ -305,10 +324,25 @@ export class DaemonRpc extends GrpcClient {
           grpcTypes.ObfuscationSettings.SelectedObfuscation.UDP2TCP,
         );
         break;
+      case ObfuscationType.quic:
+        grpcObfuscationSettings.setSelectedObfuscation(
+          grpcTypes.ObfuscationSettings.SelectedObfuscation.QUIC,
+        );
+        break;
+      case ObfuscationType.lwo:
+        grpcObfuscationSettings.setSelectedObfuscation(
+          grpcTypes.ObfuscationSettings.SelectedObfuscation.LWO,
+        );
+        break;
+      case ObfuscationType.wireGuardPort:
+        grpcObfuscationSettings.setSelectedObfuscation(
+          grpcTypes.ObfuscationSettings.SelectedObfuscation.WIREGUARD_PORT,
+        );
+        break;
     }
 
     if (obfuscationSettings.udp2tcpSettings) {
-      const grpcUdp2tcpSettings = new grpcTypes.Udp2TcpObfuscationSettings();
+      const grpcUdp2tcpSettings = new grpcTypes.ObfuscationSettings.Udp2TcpObfuscation();
       if (obfuscationSettings.udp2tcpSettings.port !== 'any') {
         grpcUdp2tcpSettings.setPort(obfuscationSettings.udp2tcpSettings.port.only);
       }
@@ -316,11 +350,19 @@ export class DaemonRpc extends GrpcClient {
     }
 
     if (obfuscationSettings.shadowsocksSettings) {
-      const shadowsocksSettings = new grpcTypes.ShadowsocksSettings();
+      const shadowsocksSettings = new grpcTypes.ObfuscationSettings.Shadowsocks();
       if (obfuscationSettings.shadowsocksSettings.port !== 'any') {
         shadowsocksSettings.setPort(obfuscationSettings.shadowsocksSettings.port.only);
       }
       grpcObfuscationSettings.setShadowsocks(shadowsocksSettings);
+    }
+
+    if (obfuscationSettings.wireGuardPortSettings) {
+      const wireGuardPortSettings = new grpcTypes.ObfuscationSettings.WireguardPort();
+      if (obfuscationSettings.wireGuardPortSettings.port !== 'any') {
+        wireGuardPortSettings.setPort(obfuscationSettings.wireGuardPortSettings.port.only);
+      }
+      grpcObfuscationSettings.setWireguardPort(wireGuardPortSettings);
     }
 
     await this.call<grpcTypes.ObfuscationSettings, Empty>(
@@ -329,15 +371,11 @@ export class DaemonRpc extends GrpcClient {
     );
   }
 
-  public async setOpenVpnMssfix(mssfix?: number): Promise<void> {
-    await this.callNumber(this.client.setOpenvpnMssfix, mssfix);
-  }
-
   public async setWireguardMtu(mtu?: number): Promise<void> {
     await this.callNumber(this.client.setWireguardMtu, mtu);
   }
 
-  public async setWireguardQuantumResistant(quantumResistant?: boolean): Promise<void> {
+  public async setWireguardQuantumResistant(quantumResistant: boolean): Promise<void> {
     const quantumResistantState = new grpcTypes.QuantumResistantState();
     switch (quantumResistant) {
       case true:
@@ -345,9 +383,6 @@ export class DaemonRpc extends GrpcClient {
         break;
       case false:
         quantumResistantState.setState(grpcTypes.QuantumResistantState.State.OFF);
-        break;
-      case undefined:
-        quantumResistantState.setState(grpcTypes.QuantumResistantState.State.AUTO);
         break;
     }
     await this.call<grpcTypes.QuantumResistantState, Empty>(
@@ -364,8 +399,9 @@ export class DaemonRpc extends GrpcClient {
     await this.callEmpty(this.client.connectTunnel);
   }
 
-  public async disconnectTunnel(): Promise<void> {
-    await this.callEmpty(this.client.disconnectTunnel);
+  public async disconnectTunnel(source: DisconnectSource): Promise<void> {
+    const prefixedSource = `desktop ${source}`;
+    await this.callString(this.client.disconnectTunnel, prefixedSource);
   }
 
   public async reconnectTunnel(): Promise<void> {
@@ -423,7 +459,9 @@ export class DaemonRpc extends GrpcClient {
 
   public async getVersionInfo(): Promise<IAppVersionInfo> {
     const response = await this.callEmpty<grpcTypes.AppVersionInfo>(this.client.getVersionInfo);
-    return response.toObject();
+    const versionInfo = convertFromAppVersionInfo(response);
+
+    return versionInfo;
   }
 
   public async addSplitTunnelingApplication(path: string): Promise<void> {
@@ -436,6 +474,15 @@ export class DaemonRpc extends GrpcClient {
 
   public async setSplitTunnelingState(enabled: boolean): Promise<void> {
     await this.callBool(this.client.setSplitTunnelState, enabled);
+  }
+
+  public async splitTunnelIsSupported(): Promise<boolean> {
+    try {
+      const isSupported = await this.callEmpty<BoolValue>(this.client.splitTunnelIsSupported);
+      return isSupported.getValue();
+    } catch {
+      return false;
+    }
   }
 
   public async needFullDiskPermissions(): Promise<boolean> {
@@ -496,9 +543,12 @@ export class DaemonRpc extends GrpcClient {
     await this.call<grpcTypes.DeviceRemoval, Empty>(this.client.removeDevice, grpcDeviceRemoval);
   }
 
-  public async createCustomList(name: string): Promise<void | CustomListError> {
+  public async createCustomList(newCustomList: NewCustomList): Promise<void | CustomListError> {
     try {
-      await this.callString<Empty>(this.client.createCustomList, name);
+      await this.call<grpcTypes.NewCustomList, StringValue>(
+        this.client.createCustomList,
+        convertToNewCustomList(newCustomList),
+      );
     } catch (e) {
       const error = e as grpc.ServiceError;
       if (error.code === 6) {
@@ -529,16 +579,38 @@ export class DaemonRpc extends GrpcClient {
     }
   }
 
-  public async addApiAccessMethod(method: NewAccessMethodSetting): Promise<string> {
-    const result = await this.call<grpcTypes.NewAccessMethodSetting, grpcTypes.UUID>(
-      this.client.addApiAccessMethod,
-      convertToNewApiAccessMethodSetting(method),
-    );
-    return result.getValue();
+  public async addApiAccessMethod(
+    method: NewAccessMethodSetting,
+  ): Promise<string | AccessMethodExistsError> {
+    try {
+      const result = await this.call<grpcTypes.NewAccessMethodSetting, grpcTypes.UUID>(
+        this.client.addApiAccessMethod,
+        convertToNewApiAccessMethodSetting(method),
+      );
+      return result.getValue();
+    } catch (e) {
+      const error = e as grpc.ServiceError;
+      if (error.code === 6) {
+        return { type: 'name already exists' };
+      } else {
+        throw error;
+      }
+    }
   }
 
-  public async updateApiAccessMethod(method: AccessMethodSetting) {
-    await this.call(this.client.updateApiAccessMethod, convertToApiAccessMethodSetting(method));
+  public async updateApiAccessMethod(
+    method: AccessMethodSetting,
+  ): Promise<void | AccessMethodExistsError> {
+    try {
+      await this.call(this.client.updateApiAccessMethod, convertToApiAccessMethodSetting(method));
+    } catch (e) {
+      const error = e as grpc.ServiceError;
+      if (error.code === 6) {
+        return { type: 'name already exists' };
+      } else {
+        throw error;
+      }
+    }
   }
 
   public async getCurrentApiAccessMethod() {

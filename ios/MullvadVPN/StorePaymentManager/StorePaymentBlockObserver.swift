@@ -3,13 +3,14 @@
 //  MullvadVPN
 //
 //  Created by pronebird on 26/10/2022.
-//  Copyright © 2022 Mullvad VPN AB. All rights reserved.
+//  Copyright © 2026 Mullvad VPN AB. All rights reserved.
 //
 
 import Foundation
+import StoreKit
 
 final class StorePaymentBlockObserver: StorePaymentObserver {
-    typealias BlockHandler = (StorePaymentManager, StorePaymentEvent) -> Void
+    typealias BlockHandler = @Sendable (LegacyStorePaymentEvent) -> Void
 
     private let blockHandler: BlockHandler
 
@@ -17,10 +18,11 @@ final class StorePaymentBlockObserver: StorePaymentObserver {
         self.blockHandler = blockHandler
     }
 
-    func storePaymentManager(
-        _ manager: StorePaymentManager,
-        didReceiveEvent event: StorePaymentEvent
-    ) {
-        blockHandler(manager, event)
+    func storePaymentManager(didReceiveEvent event: LegacyStorePaymentEvent) {
+        blockHandler(event)
+    }
+
+    func storePaymentManager(didReceiveEvent event: StorePaymentEvent) {
+        // Not used.
     }
 }

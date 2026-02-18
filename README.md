@@ -41,7 +41,7 @@ security.
 | Linux (Fedora) | The versions that are not yet [EOL](https://fedoraproject.org/wiki/End_of_life) |
 | Linux (Debian) | 12 and newer    |
 | Android     | 8 and newer        |
-| iOS         | 15.0 and newer     |
+| iOS         | 17.0 and newer     |
 
 On Linux we test using the Gnome desktop environment. The app should, and probably does work
 in other DEs, but we don't regularly test those.
@@ -51,27 +51,27 @@ in other DEs, but we don't regularly test those.
 Here is a table containing the features of the app across platforms. This is intended to reflect
 the current state of the latest code in git, not necessarily any existing release.
 
-|                               | Windows | Linux | macOS | Android | iOS |
-|-------------------------------|:-------:|:-----:|:-----:|:-------:|:---:|
-| OpenVPN                       |    ✓    |   ✓   |   ✓   |         |     |
-| WireGuard                     |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
-| Quantum-resistant tunnels     |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
-| [DAITA]                       |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
-| WireGuard multihop            |    ✓    |   ✓   |   ✓   |         |  ✓  |
-| WireGuard over TCP            |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
-| WireGuard over Shadowsocks    |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
-| OpenVPN over Shadowsocks      |    ✓    |   ✓   |   ✓   |         |     |
-| Split tunneling               |    ✓    |   ✓   |   ✓   |    ✓    |     |
-| Custom DNS server             |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
-| Content blockers (Ads etc)    |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
-| Optional local network access |    ✓    |   ✓   |   ✓   |    ✓    |  ✓\* |
-| [Externally audited](./audits)|    ✓    |   ✓   |   ✓   |    ✓    |  ✓ |
+|                                         | Windows | Linux | macOS | Android | iOS |
+|-----------------------------------------|:-------:|:-----:|:-----:|:-------:|:---:|
+| WireGuard                               |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| Quantum-resistant tunnels               |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| [DAITA]                                 |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| WireGuard multihop                      |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| WireGuard over TCP                      |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| WireGuard over Shadowsocks              |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| WireGuard over QUIC                     |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| Lightweight WireGuard Obfuscation (LWO) |    ✓    |   ✓   |   ✓   |    ✓    |     |
+| Split tunneling                         |    ✓    |   ✓   |   ✓   |    ✓    |     |
+| Custom DNS server                       |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| Content blockers (Ads etc)              |    ✓    |   ✓   |   ✓   |    ✓    |  ✓  |
+| Optional local network access           |    ✓    |   ✓   |   ✓   |    ✓    |  ✓\* |
+| [Externally audited](./audits)          |    ✓    |   ✓   |   ✓   |    ✓    |  ✓ |
 
 \* The local network is always accessible on iOS with the current implementation
 
 [DAITA]: https://mullvad.net/en/blog/introducing-defense-against-ai-guided-traffic-analysis-daita
 
-## Security and anonymity
+## User security, privacy and anonymity
 
 This app is a privacy preserving VPN client. As such it goes to great lengths to stop traffic
 leaks. And basically all settings default to the more secure/private option. The user has to
@@ -80,32 +80,61 @@ on what the app blocks and allows, as well as how it does it.
 
 [dedicated security document]: docs/security.md
 
+## Secure development
+
+Since the security of the users of the app is a top priority, by extension the security
+of the development and release process also becomes a top priority. This is something we work
+actively on.
+
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9411/badge)](https://www.bestpractices.dev/projects/9411)
+
+### Git signatures
+
+All merge commits to the main branch must be PGP (gpg) signed in git. This signs off the entire
+feature branch. The individual commits in the feature branch do not need to be signed,
+unless they change one or more of the files deemed extra important.
+
+The list of files requiring signatures to every commit that change them is defined in the
+[`verify-locked-down-signatures`](.github/workflows/verify-locked-down-signatures.yml)
+workflow.
+
+### Audits, pentests and external security reviews
+
+This app is audited by external security experts and penetration testers every second year.
+We also carry out feature specific audits for certain security critical features and changes.
+
+The results of these audits are always made public in their unredacted original form, for
+full transparency towards the users. See the [audits readme](./audits/README.md) for this.
+
+Moreover, we welcome any individual to review the security of this app and submit any found
+issue to us. See [SECURITY.md](SECURITY.md) for more.
+
 ## Checking out the code
 
 This repository contains submodules needed for building the app. However, some of those submodules
 also have further submodules that are quite large and not needed to build the app. So unless
-you want the source code for OpenSSL, OpenVPN and a few other projects you should avoid a recursive
-clone of the repository. Instead clone the repository normally and then get one level of submodules:
+you want the source code for all submodules you should avoid a recursive clone of the repository.
+Instead clone the repository normally and then get one level of submodules:
 ```bash
 git clone https://github.com/mullvad/mullvadvpn-app.git
 cd mullvadvpn-app
 git submodule update --init
 ```
 
-On Android, Linux and macOS you also want to checkout the wireguard-go submodule recursively:
+On Android, Windows, Linux and macOS you also want to checkout the wireguard-go submodule:
 ```bash
-git submodule update --init --recursive --depth=1 wireguard-go-rs
+git submodule update --init wireguard-go-rs/libwg/wireguard-go
 ```
 Further details on why this is necessary can be found in the [wireguard-go-rs crate](./wireguard-go-rs/README.md).
 
-We sign every commit on the `main` branch as well as our release tags. If you would like to verify
-your checkout, you can find our developer keys on [Mullvad's Open Source page].
+We sign every merge commit to the `main` branch as well as our release tags.
+If you would like to verify your checkout, you can find our developer keys on
+[Mullvad's Open Source page].
 
 ### Binaries submodule
 
 This repository has a git submodule at `dist-assets/binaries`. This submodule contains binaries and
-build scripts for third party code we need to bundle with the app. Such as OpenVPN, Wintun
-etc.
+build scripts for third party code we need to bundle with the app, such as Wintun.
 
 This submodule conforms to the same integrity/security standards as this repository. Every merge
 commit should be signed. And this main repository should only ever point to a signed merge commit
@@ -118,7 +147,7 @@ details about that repository.
 
 See the [build instructions](BuildInstructions.md) for help building the app on desktop platforms.
 
-For building the Android app, see the [instructions](./android/BuildInstructions.md) for Android.
+For building the Android app, see the [instructions](./android/docs/BuildInstructions.md) for Android.
 
 For building the iOS app, see the [instructions](./ios/BuildInstructions.md) for iOS.
 
@@ -165,13 +194,24 @@ See [this](Release.md) for instructions on how to make a new release.
     * `netsh`: use the `netsh` program
     * `tcpip`: set TCP/IP parameters in the registry
 
+* `TALPID_DISABLE_LOCAL_DNS_RESOLVER` - Set this variable to `1` to disable the local DNS resolver
+  (macOS only).
+
+* `TALPID_NEVER_FILTER_AAAA_QUERIES` - Set this variable to `1` to never ignore DNS AAAA queries
+  (macOS only).
+
 * `TALPID_FORCE_USERSPACE_WIREGUARD` - Forces the daemon to use the userspace implementation of
-   WireGuard on Linux.
+   WireGuard.
 
 * `TALPID_DISABLE_OFFLINE_MONITOR` - Forces the daemon to always assume the host is online.
 
+* `TALPID_CGROUP2_FS` - On Linux, forces the daemon to look for the cgroup2 filesystem at the
+  specified path, instead of `/sys/fs/cgroup`. The cgroup2 used for split tunneling will be created
+  in this directory.
+
 * `TALPID_NET_CLS_MOUNT_DIR` - On Linux, forces the daemon to mount the `net_cls` controller in the
-  specified directory if it isn't mounted already.
+  specified directory if it isn't mounted already. This will only have an effect on older systems
+  where cgroup v1 is used for split tunneling.
 
 * `MULLVAD_MANAGEMENT_SOCKET_GROUP` - On Linux and macOS, this restricts access to the management
   interface UDS socket to users in the specified group. This means that only users in that group can
@@ -180,8 +220,8 @@ See [this](Release.md) for instructions on how to make a new release.
 * `MULLVAD_BACKTRACE_ON_FAULT` - When enabled, if the daemon encounters a fault (e.g. `SIGSEGV`),
   it will log a backtrace to stdout, and to `daemon.log`. By default, this is disabled in
   release-builds and enabled in debug-builds. Set variable to `1` or `0` to explicitly enable or
-  disable this feature. Logging the backtrace cause heap allocation. Allocation is not signal safe,
-  but here it runs in the signal handler. This in technically undefined behavior and therefore
+  disable this feature. Logging the backtrace causes heap allocation. Allocation is not signal safe,
+  but here it runs in the signal handler. This is technically undefined behavior and therefore
   disabled by default. This usually works, but enable at your own risk.
 
 ### Development builds only
@@ -193,6 +233,8 @@ See [this](Release.md) for instructions on how to make a new release.
 * `MULLVAD_API_DISABLE_TLS` - Use plain HTTP for API requests.
 
 * `MULLVAD_CONNCHECK_HOST` - Set the hostname to use in connection check requests. E.g. `am.i.mullvad.net`.
+
+* `MULLVAD_ENABLE_DEV_UPDATES` - Enable version checks in development builds.
 
 ### Setting environment variables
 
@@ -260,16 +302,22 @@ launchctl load -w /Library/LaunchDaemons/net.mullvad.daemon.plist
 
 ## Tray icon on Linux
 
-The requirements for displaying a tray icon varies between different desktop environments. If the
-tray icon doesn't appear, try installing one of these packages:
+The requirements for displaying a tray icon vary between different desktop environments. If the
+tray icon does not appear, try one of the following methods:
+
+### GNOME
+
+If you're using GNOME, you might have to install additional GNOME shell extensions to display the tray icon properly.
+
+We recommend `AppIndicator and KStatusNotifierItem Support`. It can be installed via GNOME's extension website:
+https://extensions.gnome.org/extension/615/appindicator-support/
+
+### Other desktop environments
+
+Try installing one of these packages using the system's package manager:
 - `libappindicator3-1`
 - `libappindicator1`
 - `libappindicator`
-
-If you're using GNOME, try installing one of these GNOME Shell extensions:
-- `TopIconsFix`
-- `TopIcons Plus`
-
 
 ## Repository structure
 
@@ -283,18 +331,15 @@ If you're using GNOME, try installing one of these GNOME Shell extensions:
       - **app.tsx** - Entry file for the renderer process
       - **routes.tsx** - Routes configurator
       - **transitions.ts** - Transition rules between views
-    - **config.json** - App color definitions and URLs to external resources
   - **tasks/** - Gulp tasks used to build app and watch for changes during development
     - **distribution.js** - Configuration for `electron-builder`
   - **test/** - Electron GUI tests
 - **dist-assets/** - Icons, binaries and other files used when creating the distributables
-  - **binaries/** - Git submodule containing binaries bundled with the app. For example the
-    statically linked OpenVPN binary. See the README in the submodule for details
+  - **binaries/** - Git submodule containing binaries bundled with the app. See the README
+    in the submodule for details
   - **linux/** - Scripts and configuration files for the deb and rpm artifacts
   - **pkg-scripts/** - Scripts bundled with and executed by the macOS pkg installer
   - **windows/** - Windows NSIS installer configuration and assets
-  - **ca.crt** - The Mullvad relay server root CA. Bundled with the app and only OpenVPN relays
-    signed by this CA are trusted
 
 
 ### Building, testing and misc
@@ -416,14 +461,11 @@ Instructions for how to handle locales and translations are found
 
 For instructions specific to the Android app, see [here](./android/README.md).
 
-## Audits, pentests and external security reviews
-
-Mullvad has used external pentesting companies to carry out security audits of this VPN app. Read
-more about them in the [audits readme](./audits/README.md).
+For instructions specific to the iOS app, see [here](./ios/translation/README.md).
 
 # License
 
-Copyright (C) 2024  Mullvad VPN AB
+Copyright (C) 2026  Mullvad VPN AB
 
 This program is free software: you can redistribute it and/or modify it under the terms of the
 GNU General Public License as published by the Free Software Foundation, either version 3 of
