@@ -2,12 +2,14 @@ use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// When "allow local network" is enabled the app will allow traffic to and from these networks.
-pub const ALLOWED_LAN_NETS: [IpNetwork; 7] = [
+pub const ALLOWED_LAN_NETS: [IpNetwork; 9] = [
     v4(Ipv4Addr::new(10, 0, 0, 0), 8),
     v4(Ipv4Addr::new(172, 16, 0, 0), 12),
     v4(Ipv4Addr::new(192, 168, 0, 0), 16),
     v4(Ipv4Addr::new(169, 254, 0, 0), 16),
     v4(Ipv4Addr::new(100, 64, 0, 0), 10),
+    v4(Ipv4Addr::new(100, 100, 100, 100), 32),
+    v6(Ipv6Addr::new(0xfd7a, 0x115c, 0xa1e0, 0, 0, 0, 0, 0), 48),
     v6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10),
     v6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0), 7),
 ];
