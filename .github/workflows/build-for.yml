@@ -222,7 +222,7 @@ jobs:
     if: |
       needs.prepare-matrices.outputs.macos_matrix != '[]' &&
       needs.prepare-matrices.outputs.macos_matrix != ''
-    runs-on: [self-hosted, desktop-test, macOS] # app-test-macos-arm
+    runs-on: [macOS] # app-test-macos-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
