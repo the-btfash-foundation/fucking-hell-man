@@ -38,6 +38,10 @@ runs:
       if: runner.os == 'Windows'
       shell: bash
       run: rustup target add i686-pc-windows-msvc
+    - name: Install rust aarch64 target
+      if: runner.os == 'Windows'
+      shell: bash
+      run: rustup target add aarch64-pc-windows-msvc
 
     - name: Set CARGO_TARGET_DIR env
       shell: bash
